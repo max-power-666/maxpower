@@ -284,15 +284,24 @@ export default function Home() {
   // Czyta z bazy (fakturownia_stock_cache), a nie z Fakturowni bezpośrednio — dlatego
   // podsumowanie jest dostępne od razu po odświeżeniu strony, bez czekania na API.
   async function loadFakturowniaSummaryFromDb() {
-    const [rows, { data: metaRow }] = await Promise.all([
-      fetchAllStockCacheRows(),
-      supabase.from("fakturownia_sync_meta").select("last_synced_at").eq("id", 1).maybeSingle(),
-    ]);
+    let rows: { category_name: string; purchase_price_gross: number }[];
+    let metaRow: { last_synced_at: string } | null;
+    try {
+      const [r, meta] = await Promise.all([
+        fetchAllStockCacheRows(),
+        supabase.from("fakturownia_sync_meta").select("last_synced_at").eq("id", 1).maybeSingle().throwOnError(),
+      ]);
+      rows = r;
+      metaRow = meta.data;
+    } catch (e: any) {
+      setFakturowniaError(`Nie udało się wczytać podsumowania z bazy: ${e.message || e}`);
+      return;
+    }
 
     const totals = new Map<string, FakturowniaCategorySummary>();
     let totalCount = 0;
     let totalValue = 0;
-    for (const r of (rows as { category_name: string; purchase_price_gross: number }[]) || []) {
+    for (const r of rows) {
       const entry = totals.get(r.category_name) || { name: r.category_name, count: 0, value: 0 };
       entry.count += 1;
       entry.value += Number(r.purchase_price_gross) || 0;
@@ -301,6 +310,7 @@ export default function Home() {
       totalValue += Number(r.purchase_price_gross) || 0;
     }
 
+    setFakturowniaError("");
     setFakturowniaSummary({
       totalCount,
       totalValue,
