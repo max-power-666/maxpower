@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/fakturownia/sync",
+      "schedule": "0 23 * * *"
+    }
+  ]
+}
