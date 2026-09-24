@@ -5,8 +5,9 @@ import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import TradeInOrdersView from "./TradeInOrdersView";
 import InlineEditCell from "./InlineEditCell";
+import ProductCardDrawer from "./ProductCardDrawer";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
-import { INTERVALS, fmtDuration, rangeStart, type Interval } from "@/lib/workLog";
+import { INTAKE_STATUSES, INTERVALS, fmtDuration, rangeStart, type Interval } from "@/lib/workLog";
 
 // Zakładka Trade-in: domyślnie obsługa paczek przez pracowników (IntakeView — rejestr pracy
 // wg Regulaminu premiowania, jak Serwis), plus podstrona "Raw data" z pełną, zsynchronizowaną
@@ -22,11 +23,6 @@ const btnPrimary = "bg-ink text-paper px-4 py-2 rounded text-sm font-semibold di
 type FieldChange = { field: string; from: string | null; to: string | null };
 type HistoryEntry = { action: "created" | "edited"; by_email: string | null; at: string; changes?: FieldChange[] };
 
-const INTAKE_STATUSES = [
-  { key: "w_trakcie", label: "W trakcie" },
-  { key: "obsluzona", label: "Obsłużona" },
-  { key: "problem", label: "Problem" },
-] as const;
 type IntakeStatus = (typeof INTAKE_STATUSES)[number]["key"];
 const INTAKE_STATUS_LABEL = Object.fromEntries(INTAKE_STATUSES.map((s) => [s.key, s.label])) as Record<IntakeStatus, string>;
 const INTAKE_STATUS_STYLE: Record<IntakeStatus, string> = {
@@ -98,6 +94,7 @@ function fmtMoney(n: number | null, currency: string | null) {
 export default function TradeInHub({ session, members }: { session: Session; members: MemberLite[] }) {
   const [sub, setSub] = useState<"intake" | "raw">("intake");
   const [openOrderId, setOpenOrderId] = useState<string | null>(null);
+  const [openSerial, setOpenSerial] = useState<string | null>(null);
 
   return (
     <div>
@@ -106,12 +103,14 @@ export default function TradeInHub({ session, members }: { session: Session; mem
         <button onClick={() => setSub("raw")} className={pill(sub === "raw")}>Raw data</button>
       </div>
 
-      {sub === "intake" && <IntakeView session={session} members={members} onOpenOrder={setOpenOrderId} />}
+      {sub === "intake" && <IntakeView session={session} members={members} onOpenOrder={setOpenOrderId} onOpenProduct={setOpenSerial} />}
       {sub === "raw" && <TradeInOrdersView session={session} onOpenOrder={setOpenOrderId} />}
 
       {openOrderId && (
         <OrderCardDrawer orderPublicId={openOrderId} session={session} members={members} onClose={() => setOpenOrderId(null)} />
       )}
+
+      {openSerial && <ProductCardDrawer serial={openSerial} members={members} onClose={() => setOpenSerial(null)} />}
     </div>
   );
 }
@@ -122,10 +121,12 @@ function IntakeView({
   session,
   members,
   onOpenOrder,
+  onOpenProduct,
 }: {
   session: Session;
   members: MemberLite[];
   onOpenOrder: (id: string) => void;
+  onOpenProduct: (serial: string) => void;
 }) {
   const [interval, setInterval] = useState<Interval>("today");
   const [rangeRows, setRangeRows] = useState<{ entered_by_email: string | null; points: number }[]>([]);
@@ -366,12 +367,23 @@ function IntakeView({
                 </td>
                 <td className="p-3 font-mono">{e.buyback_orders?.tracking_number || "—"}</td>
                 <td className="p-3">
-                  <InlineEditCell
-                    value={e.serial_number}
-                    placeholder="Dodaj numer"
-                    className="w-44 font-mono"
-                    onSave={(v) => saveField(e, "serial_number", "Numer seryjny", v)}
-                  />
+                  <div className="flex items-center gap-1">
+                    <InlineEditCell
+                      value={e.serial_number}
+                      placeholder="Dodaj numer"
+                      className="w-44 font-mono"
+                      onSave={(v) => saveField(e, "serial_number", "Numer seryjny", v)}
+                    />
+                    {e.serial_number && (
+                      <button
+                        onClick={() => onOpenProduct(e.serial_number!)}
+                        title="Karta produktu"
+                        className="text-teal text-sm px-1 hover:underline"
+                      >
+                        ↗
+                      </button>
+                    )}
+                  </div>
                 </td>
                 <td className="p-3">
                   <select

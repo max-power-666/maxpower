@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import { escapeLike } from "@/lib/search";
+import type { MemberLite } from "@/lib/displayName";
+import ProductCardDrawer from "./ProductCardDrawer";
 
 // Lista sztuk ze stanem = 1 z cache Fakturowni (fakturownia_stock_cache), strona po stronie,
 // z wyszukiwaniem po numerze seryjnym. W Fakturowni numer seryjny to nazwa produktu, a opis
@@ -25,13 +28,8 @@ function fmtDate(iso: string | null) {
 function fmtPLN(n: number) {
   return Number(n).toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " zł";
 }
-// % i \ wycinamy, _ zamieniamy na literalne — w LIKE to znaki specjalne.
-function escapeLike(v: string) {
-  return v.replace(/[\\%]/g, "").replace(/_/g, "\\_");
-}
-
 // reloadKey rośnie po ręcznym "Odśwież" w nagłówku Magazynu — wymusza ponowne wczytanie listy.
-export default function InventoryRawView({ reloadKey = 0 }: { reloadKey?: number }) {
+export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey?: number; members: MemberLite[] }) {
   const [pageSize, setPageSize] = useState(50);
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState("");
@@ -41,6 +39,7 @@ export default function InventoryRawView({ reloadKey = 0 }: { reloadKey?: number
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [reloadTick, setReloadTick] = useState(0);
+  const [openSerial, setOpenSerial] = useState<string | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -166,7 +165,13 @@ export default function InventoryRawView({ reloadKey = 0 }: { reloadKey?: number
             )}
             {rows.map((r) => (
               <tr key={r.id} className="border-b border-line last:border-b-0 hover:bg-paper">
-                <td className="p-3 font-mono font-semibold">{r.name || "—"}</td>
+                <td className="p-3">
+                  {r.name ? (
+                    <button onClick={() => setOpenSerial(r.name)} className="font-mono font-semibold text-teal hover:underline">{r.name}</button>
+                  ) : (
+                    "—"
+                  )}
+                </td>
                 <td className="p-3">{r.category_name}</td>
                 <td className="p-3 font-mono text-xs">{r.description || "—"}</td>
                 <td className="p-3 text-right font-mono">{fmtPLN(r.purchase_price_gross)}</td>
@@ -176,6 +181,8 @@ export default function InventoryRawView({ reloadKey = 0 }: { reloadKey?: number
           </tbody>
         </table>
       </div>
+
+      {openSerial && <ProductCardDrawer serial={openSerial} members={members} onClose={() => setOpenSerial(null)} />}
     </div>
   );
 }

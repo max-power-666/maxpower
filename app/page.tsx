@@ -373,7 +373,7 @@ export default function Home() {
                 </div>
               )}
 
-              {invSub === "raw" && <InventoryRawView reloadKey={rawReloadKey} />}
+              {invSub === "raw" && <InventoryRawView reloadKey={rawReloadKey} members={members} />}
             </div>
           )}
 

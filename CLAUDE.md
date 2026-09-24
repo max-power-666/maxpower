@@ -24,13 +24,14 @@ numerach seryjnych, wielokanałowa synchronizacja stanów, naprawy, auto-wycena)
 
 - `app/page.tsx` — jeden duży client component: logowanie, nawigacja, role, zakładki
   Przegląd / Magazyn / Zespół. Większe moduły są osobno w `app/_components/`:
-  `ServiceView.tsx` (Serwis), `TestsView.tsx` (Testy), `TradeInHub.tsx` + `TradeInOrdersView.tsx` (Trade-in),
+  `ServiceView.tsx` (Serwis), `TestsView.tsx` (Testy), `ProductCardDrawer.tsx` (karta produktu), `TradeInHub.tsx` + `TradeInOrdersView.tsx` (Trade-in),
   `TradeInView.tsx` (Bidder).
 - `app/api/*/route.ts` — endpointy serwerowe (sekrety tylko tu, nigdy w przeglądarce):
   `fakturownia/sync`, `tradein/bidder`, `tradein/competitors`, `tradein/orders-sync`.
 - `lib/` — `supabaseClient.ts`, `buyback.ts` (logika biddera + `isAuthorized`),
-  `displayName.ts` (skrócone imię: "Maksymilian J."), `workLog.ts` (interwały Dziś/7/30 dni
-  i liczenie czasu — wspólne dla Serwisu i Trade-in).
+  `displayName.ts` (skrócone imię: "Maksymilian J."), `workLog.ts` (interwały Dziś/7/30 dni,
+  liczenie czasu i **etykiety typów czynności/statusów** — jedno źródło dla list i karty produktu),
+  `search.ts` (`escapeLike` do wyszukiwania po numerze seryjnym).
 - `supabase/*.sql` — schemat, każdy plik idempotentny: `schema.sql` (units, members,
   cache Fakturowni), `tradein.sql` (bidder), `buyback-orders.sql` (zamówienia + obsługa
   paczek), `service.sql` (rejestr napraw), `tests.sql` (rejestr testów).
@@ -112,6 +113,14 @@ może mieć dwóch aktywnych wpisów naraz (indeks częściowy na `serial_number
 "przerwany" nie blokuje ponownego podejścia. Punkty są niezależne od wyniku testu (sprawny /
 wadliwy) — do potwierdzenia z właścicielem.
 
+**Karta produktu** (`ProductCardDrawer.tsx`). Klik w numer seryjny w Testach, Serwisie, Trade-in (strzałka ↗
+przy polu) albo w Magazynie → Raw data otwiera panel. Nie ma własnej tabeli: składa się na żywo z
+`fakturownia_stock_cache` (magazyn), `buyback_orders` (zamówienie z opisu sztuki lub z obsługi paczki),
+`test_log`, `service_log` (po `device_ref`) i `history` z `buyback_order_intake`. **Log** to te zdarzenia
+w kolejności czasu ("Test rozpoczęty przez…", "Serwis (…) zakończony: Naprawiony", zmiany w Trade-in).
+Numery łączy bez rozróżniania wielkości liter, ale muszą być wpisane identycznie w każdym module.
+Nie ma jeszcze własnych, edytowalnych danych produktu — to odczyt.
+
 ## Regulamin premiowania (12.10.2026) — co z niego wynika dla kodu
 
 Zasady, które kształtują Serwis i Trade-in (pełny PDF ma właściciel):
@@ -173,6 +182,10 @@ Configuration) musi być aktualny adres produkcyjny, inaczej magic link nie zadz
   Pliki `supabase/*.sql` są idempotentne i trzymają aktualny kształt tabel.
 - Supabase (PostgREST) zwraca domyślnie **max 1000 wierszy** na zapytanie — przy większych
   tabelach paginuj przez `.range()` (tak robi cache Fakturowni).
+- `buyback_orders` nie pokrywa wszystkich zamówień: stan na 2026-09-25 to 2342 zamówienia, prawie wszystkie
+  zakończone są ze stycznia–lutego i września, a z marca–sierpnia niemal żadne, choć magazyn ma z tego okresu
+  setki sztuk (ich `description` = numer zamówienia). Przyczyna nieustalona (do sprawdzenia: `count` z API
+  vs zapisane, filtr `status`). Skutek: karta nie pokaże zamówienia dla starszych sztuk.
 - Back Market najpewniej filtruje po IP — endpointów nie da się testować z sandboxa
   asystenta (401 nawet dla działających). Testuje się na Vercelu albo na komputerze
   właściciela.
@@ -189,7 +202,7 @@ Configuration) musi być aktualny adres produkcyjny, inaczej magic link nie zadz
 3. ✅ Serwis: rejestr napraw i punktacja · ⬜ Serwis jako moduł napraw sprzętu z magazynu
 4. ✅ Bidder skupu Back Market (na produkcji)
 5. ✅ Trade-in: zamówienia BuyBack + obsługa paczek z punktacją · ⬜ rola "Trade-in"
-6. ⬜ Karta towaru z magazynu (dane + log zmian, jak karta zamówienia)
+6. 🟡 Karta produktu po numerze seryjnym: odczyt + log z testów/serwisu/Trade-in zrobione · ⬜ własne edytowalne dane produktu
 7. ✅ Testy: rejestr i punktacja · ⬜ łączne podsumowanie miesięczne ze wszystkich obszarów
 8. ⬜ Ewidencja czasu pracy → wydajność pkt/h i premia z regulaminu
 9. ⬜ Integracje z kanałami sprzedaży (Allegro, eBay) — osobny etap, wymaga kluczy API

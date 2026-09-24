@@ -5,7 +5,15 @@ import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import InlineEditCell from "./InlineEditCell";
-import { INTERVALS, fmtDuration, rangeStart, type Interval } from "@/lib/workLog";
+import ProductCardDrawer from "./ProductCardDrawer";
+import {
+  INTERVALS,
+  SERVICE_STATUSES as STATUSES,
+  SERVICE_TASKS,
+  fmtDuration,
+  rangeStart,
+  type Interval,
+} from "@/lib/workLog";
 
 // Rejestracja pracy serwisanta wg tabeli punktowej z Regulaminu premiowania (§2, 12.10.2026).
 // Nie liczy premii w zł (Regulamin §4-§7) — wymagałoby to danych o czasie pracy/urlopach,
@@ -17,22 +25,9 @@ import { INTERVALS, fmtDuration, rangeStart, type Interval } from "@/lib/workLog
 // napraw. Punkty do podsumowania liczą się tylko dla status="naprawiony" (Regulamin §2 ust. 4:
 // punkty nalicza się dopiero po prawidłowym zakończeniu procesu).
 
-const SERVICE_TASKS = [
-  { key: "joycon_pair", label: "Joy-Con, para (Nintendo Switch)", points: 15 },
-  { key: "ps4_controller", label: "Kontroler PS4", points: 25 },
-  { key: "xbox_controller", label: "Kontroler Xbox One / Xbox One X", points: 35 },
-  { key: "ps5_controller", label: "Kontroler PS5 (DualSense)", points: 12 },
-  { key: "console_cleaning", label: "Czyszczenie konsoli", points: 45 },
-] as const;
-
 type TaskKey = (typeof SERVICE_TASKS)[number]["key"];
 const TASK_LABEL: Record<string, string> = Object.fromEntries(SERVICE_TASKS.map((t) => [t.key, t.label]));
 
-const STATUSES = [
-  { key: "w_naprawie", label: "W naprawie" },
-  { key: "naprawiony", label: "Naprawiony" },
-  { key: "uszkodzony", label: "Uszkodzony" },
-] as const;
 type StatusKey = (typeof STATUSES)[number]["key"];
 const STATUS_STYLE: Record<StatusKey, string> = {
   w_naprawie: "bg-ambersoft text-amber",
@@ -71,6 +66,7 @@ export default function ServiceView({ session, members }: { session: Session; me
   const [deviceRef, setDeviceRef] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
+  const [openSerial, setOpenSerial] = useState<string | null>(null);
 
   useEffect(() => {
     load();
@@ -250,7 +246,13 @@ export default function ServiceView({ session, members }: { session: Session; me
                 <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDateTime(r.started_at)}</td>
                 <td className="p-3">{displayNameForEmail(r.employee_email, members)}</td>
                 <td className="p-3">{TASK_LABEL[r.task_type] || r.task_type}</td>
-                <td className="p-3 font-mono">{r.device_ref || "—"}</td>
+                <td className="p-3">
+                  {r.device_ref ? (
+                    <button onClick={() => setOpenSerial(r.device_ref)} className="font-mono font-semibold text-teal hover:underline">{r.device_ref}</button>
+                  ) : (
+                    "—"
+                  )}
+                </td>
                 <td className="p-3">
                   <select
                     value={r.status}
@@ -270,6 +272,8 @@ export default function ServiceView({ session, members }: { session: Session; me
           </tbody>
         </table>
       </div>
+
+      {openSerial && <ProductCardDrawer serial={openSerial} members={members} onClose={() => setOpenSerial(null)} />}
     </div>
   );
 }

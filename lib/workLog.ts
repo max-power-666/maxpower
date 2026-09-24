@@ -29,3 +29,36 @@ export function fmtDuration(startIso: string, endIso: string | null): string {
   const m = totalMin % 60;
   return h > 0 ? `${h} godz. ${m} min` : `${m} min`;
 }
+
+// Etykiety typów czynności i statusów — jedno źródło prawdy dla list (Serwis, Testy, Trade-in)
+// i karty produktu, żeby log nigdy nie rozjechał się z tym, co widać w tabelach.
+
+export const SERVICE_TASKS = [
+  { key: "joycon_pair", label: "Joy-Con, para (Nintendo Switch)", points: 15 },
+  { key: "ps4_controller", label: "Kontroler PS4", points: 25 },
+  { key: "xbox_controller", label: "Kontroler Xbox One / Xbox One X", points: 35 },
+  { key: "ps5_controller", label: "Kontroler PS5 (DualSense)", points: 12 },
+  { key: "console_cleaning", label: "Czyszczenie konsoli", points: 45 },
+] as const;
+
+export const SERVICE_STATUSES = [
+  { key: "w_naprawie", label: "W naprawie" },
+  { key: "naprawiony", label: "Naprawiony" },
+  { key: "uszkodzony", label: "Uszkodzony" },
+] as const;
+
+export const TEST_STATUSES = [
+  { key: "w_trakcie", label: "W trakcie" },
+  { key: "przetestowane", label: "Przetestowane" },
+  { key: "przerwany", label: "Przerwany" },
+] as const;
+
+export const INTAKE_STATUSES = [
+  { key: "w_trakcie", label: "W trakcie" },
+  { key: "obsluzona", label: "Obsłużona" },
+  { key: "problem", label: "Problem" },
+] as const;
+
+export function labelFor(list: readonly { key: string; label: string }[], key: string): string {
+  return list.find((x) => x.key === key)?.label ?? key;
+}

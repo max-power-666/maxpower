@@ -5,7 +5,8 @@ import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import InlineEditCell from "./InlineEditCell";
-import { INTERVALS, fmtDuration, rangeStart, type Interval } from "@/lib/workLog";
+import ProductCardDrawer from "./ProductCardDrawer";
+import { INTERVALS, TEST_STATUSES as STATUSES, fmtDuration, rangeStart, type Interval } from "@/lib/workLog";
 
 // Rejestr testów urządzeń wg Regulaminu premiowania (§2, 12.10.2026): 100/6,5 pkt = 200/13 pkt
 // za prawidłowo przetestowane urządzenie, bez zaokrąglania (wartość ustawia default w bazie).
@@ -13,11 +14,6 @@ import { INTERVALS, fmtDuration, rangeStart, type Interval } from "@/lib/workLog
 // "przetestowane" (§2 ust. 4). "Czas" jest tylko informacyjny — regulamin liczy wydajność jako
 // punkty / godziny przepracowane (§4). Nie liczy premii w zł (wymaga ewidencji czasu pracy).
 
-const STATUSES = [
-  { key: "w_trakcie", label: "W trakcie" },
-  { key: "przetestowane", label: "Przetestowane" },
-  { key: "przerwany", label: "Przerwany" },
-] as const;
 type StatusKey = (typeof STATUSES)[number]["key"];
 const STATUS_STYLE: Record<StatusKey, string> = {
   w_trakcie: "bg-ambersoft text-amber",
@@ -57,6 +53,7 @@ export default function TestsView({ session, members }: { session: Session; memb
   const [serial, setSerial] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
+  const [openSerial, setOpenSerial] = useState<string | null>(null);
 
   useEffect(() => {
     load();
@@ -237,7 +234,9 @@ export default function TestsView({ session, members }: { session: Session; memb
               <tr key={r.id} className="border-b border-line last:border-b-0 hover:bg-paper">
                 <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDateTime(r.started_at)}</td>
                 <td className="p-3">{displayNameForEmail(r.employee_email, members)}</td>
-                <td className="p-3 font-mono">{r.serial_number}</td>
+                <td className="p-3">
+                  <button onClick={() => setOpenSerial(r.serial_number)} className="font-mono font-semibold text-teal hover:underline">{r.serial_number}</button>
+                </td>
                 <td className="p-3">
                   <select
                     value={r.status}
@@ -257,6 +256,8 @@ export default function TestsView({ session, members }: { session: Session; memb
           </tbody>
         </table>
       </div>
+
+      {openSerial && <ProductCardDrawer serial={openSerial} members={members} onClose={() => setOpenSerial(null)} />}
     </div>
   );
 }
