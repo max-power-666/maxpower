@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import TradeInView from "./_components/TradeInView";
+import TradeInOrdersView from "./_components/TradeInOrdersView";
 
 /* ---------------- model danych (ten sam co w prototypie) ---------------- */
 
@@ -56,7 +57,7 @@ const CATEGORIES: Record<string, { label: string; fields: FieldDef[] }> = {
 const STATUSES = ["Przyjęte", "Kontrola jakości", "Gotowe do sprzedaży", "Sprzedane", "W naprawie", "Złom"];
 const ROLES = ["Admin", "Magazyn", "Serwis", "Bidder"];
 
-type ViewKey = "overview" | "inventory" | "team" | "service" | "tradein";
+type ViewKey = "overview" | "inventory" | "team" | "service" | "tradein" | "orders";
 
 const TABS: { key: ViewKey; label: string }[] = [
   { key: "overview", label: "Przegląd" },
@@ -64,6 +65,7 @@ const TABS: { key: ViewKey; label: string }[] = [
   { key: "team", label: "Zespół" },
   { key: "service", label: "Serwis" },
   { key: "tradein", label: "Bidder" },
+  { key: "orders", label: "Trade-in" },
 ];
 
 // Kto widzi jaką zakładkę — rola = zakładka, Admin ma dostęp do wszystkiego,
@@ -71,8 +73,10 @@ const TABS: { key: ViewKey; label: string }[] = [
 // nawigację w tej przeglądarce — to nie jest twarde zabezpieczenie (RLS pozwala
 // każdemu authenticated na wszystko, patrz supabase/schema.sql). Zmień tę mapę,
 // żeby dopasować dostęp do ról.
+// "orders" (zakładka Trade-in — podgląd zamówień BuyBack) na razie tylko dla Admina,
+// dopóki nie ustalimy docelowej roli dla osoby przetwarzającej zamówienia.
 const ROLE_ACCESS: Record<string, ViewKey[]> = {
-  Admin: ["overview", "inventory", "team", "service", "tradein"],
+  Admin: ["overview", "inventory", "team", "service", "tradein", "orders"],
   Magazyn: ["overview", "inventory"],
   Serwis: ["overview", "service"],
   Bidder: ["overview", "tradein"],
@@ -455,6 +459,8 @@ export default function Home() {
           )}
 
           {view === "tradein" && <TradeInView session={session} />}
+
+          {view === "orders" && <TradeInOrdersView session={session} />}
         </div>
       </main>
 
