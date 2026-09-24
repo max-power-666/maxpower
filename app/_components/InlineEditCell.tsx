@@ -2,9 +2,19 @@
 
 import { useRef, useState } from "react";
 
-// Pole uwag edytowane wprost w wierszu listy (Serwis, Testy, Trade-in). Zapisuje przy wyjściu z pola
+// Pole tekstowe edytowane wprost w wierszu listy (uwagi, numer seryjny). Zapisuje przy wyjściu z pola
 // lub Enterem, tylko jeśli tekst faktycznie się zmienił; Escape porzuca zmianę.
-export default function NotesCell({ value, onSave }: { value: string | null; onSave: (next: string | null) => void }) {
+export default function InlineEditCell({
+  value,
+  onSave,
+  placeholder = "Dodaj uwagę",
+  className = "w-56",
+}: {
+  value: string | null;
+  onSave: (next: string | null) => void;
+  placeholder?: string;
+  className?: string;
+}) {
   const [draft, setDraft] = useState<string | null>(null);
   const cancelled = useRef(false);
   const current = value ?? "";
@@ -30,8 +40,8 @@ export default function NotesCell({ value, onSave }: { value: string | null; onS
           e.currentTarget.blur();
         }
       }}
-      placeholder="Dodaj uwagę"
-      className="w-56 border border-transparent hover:border-line focus:border-line bg-transparent focus:bg-white px-2 py-1 rounded text-sm"
+      placeholder={placeholder}
+      className={`${className} border border-transparent hover:border-line focus:border-line bg-transparent focus:bg-white px-2 py-1 rounded text-sm`}
     />
   );
 }

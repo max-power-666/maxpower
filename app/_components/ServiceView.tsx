@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
-import NotesCell from "./NotesCell";
+import InlineEditCell from "./InlineEditCell";
 import { INTERVALS, fmtDuration, rangeStart, type Interval } from "@/lib/workLog";
 
 // Rejestracja pracy serwisanta wg tabeli punktowej z Regulaminu premiowania (§2, 12.10.2026).
@@ -262,7 +262,7 @@ export default function ServiceView({ session, members }: { session: Session; me
                     ))}
                   </select>
                 </td>
-                <td className="p-3"><NotesCell value={r.notes} onSave={(n) => saveNotes(r, n)} /></td>
+                <td className="p-3"><InlineEditCell value={r.notes} onSave={(n) => saveNotes(r, n)} /></td>
                 <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDuration(r.started_at, r.finished_at)}</td>
                 <td className="p-3 text-right font-mono font-semibold">{r.status === "naprawiony" ? r.points : "—"}</td>
               </tr>

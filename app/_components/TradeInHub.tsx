@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import TradeInOrdersView from "./TradeInOrdersView";
-import NotesCell from "./NotesCell";
+import InlineEditCell from "./InlineEditCell";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { INTERVALS, fmtDuration, rangeStart, type Interval } from "@/lib/workLog";
 
@@ -244,19 +244,19 @@ function IntakeView({
     }
   }
 
-  // Uwagi z listy trafiają do tego samego logu zmian co edycja na karcie zamówienia.
-  async function saveNotes(row: IntakeEntry, notes: string | null) {
+  // Edycje z listy (uwagi, numer seryjny) trafiają do tego samego logu zmian co edycja na karcie.
+  async function saveField(row: IntakeEntry, column: "notes" | "serial_number", label: string, value: string | null) {
     const entry: HistoryEntry = {
       action: "edited",
       by_email: session.user.email ?? null,
       at: new Date().toISOString(),
-      changes: [{ field: "Uwagi", from: row.notes, to: notes }],
+      changes: [{ field: label, from: row[column], to: value }],
     };
     const { error: err } = await supabase
       .from("buyback_order_intake")
-      .update({ notes, history: [...(row.history || []), entry] })
+      .update({ [column]: value, history: [...(row.history || []), entry] })
       .eq("id", row.id);
-    if (err) setError(`Nie udało się zapisać uwag: ${err.message}`);
+    if (err) setError(`Nie udało się zapisać (${label}): ${err.message}`);
   }
 
   async function changeStatus(row: IntakeEntry, status: IntakeStatus) {
@@ -344,6 +344,7 @@ function IntakeView({
               <th className="p-3">Pracownik</th>
               <th className="p-3">Numer zamówienia</th>
               <th className="p-3">Numer przesyłki</th>
+              <th className="p-3">Numer seryjny</th>
               <th className="p-3">Status</th>
               <th className="p-3">Uwagi</th>
               <th className="p-3">Czas</th>
@@ -352,7 +353,7 @@ function IntakeView({
           </thead>
           <tbody>
             {!loading && entries.length === 0 && (
-              <tr><td colSpan={8} className="p-6 text-center text-inksoft text-sm">Brak paczek — rozpocznij pierwszą powyżej.</td></tr>
+              <tr><td colSpan={9} className="p-6 text-center text-inksoft text-sm">Brak paczek — rozpocznij pierwszą powyżej.</td></tr>
             )}
             {entries.map((e) => (
               <tr key={e.id} className="border-b border-line last:border-b-0 hover:bg-paper">
@@ -365,6 +366,14 @@ function IntakeView({
                 </td>
                 <td className="p-3 font-mono">{e.buyback_orders?.tracking_number || "—"}</td>
                 <td className="p-3">
+                  <InlineEditCell
+                    value={e.serial_number}
+                    placeholder="Dodaj numer"
+                    className="w-44 font-mono"
+                    onSave={(v) => saveField(e, "serial_number", "Numer seryjny", v)}
+                  />
+                </td>
+                <td className="p-3">
                   <select
                     value={e.status}
                     onChange={(ev) => changeStatus(e, ev.target.value as IntakeStatus)}
@@ -375,7 +384,7 @@ function IntakeView({
                     ))}
                   </select>
                 </td>
-                <td className="p-3"><NotesCell value={e.notes} onSave={(n) => saveNotes(e, n)} /></td>
+                <td className="p-3"><InlineEditCell value={e.notes} onSave={(n) => saveField(e, "notes", "Uwagi", n)} /></td>
                 <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDuration(e.entered_at, e.finished_at)}</td>
                 <td className="p-3 text-right font-mono font-semibold">{e.status === "obsluzona" ? fmtPoints(e.points) : "—"}</td>
               </tr>
