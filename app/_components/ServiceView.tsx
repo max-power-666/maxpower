@@ -8,6 +8,12 @@ import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 // Rejestracja pracy serwisanta wg tabeli punktowej z Regulaminu premiowania (§2, 12.10.2026).
 // Nie liczy premii w zł (Regulamin §4-§7) — wymagałoby to danych o czasie pracy/urlopach,
 // których apka nie ma. Tu tylko czynności + punkty + podsumowanie w wybranym okresie.
+//
+// Jeden wiersz = jedna naprawa, z cyklem życia w statusie (start -> naprawiony/uszkodzony).
+// "Czas" (finished_at - started_at) jest tylko informacyjny dla zespołu — regulamin liczy
+// wydajność jako punkty / godziny przepracowane (ewidencja czasu pracy), nie sumę czasów
+// napraw. Punkty do podsumowania liczą się tylko dla status="naprawiony" (Regulamin §2 ust. 4:
+// punkty nalicza się dopiero po prawidłowym zakończeniu procesu).
 
 const SERVICE_TASKS = [
   { key: "joycon_pair", label: "Joy-Con, para (Nintendo Switch)", points: 15 },
@@ -18,8 +24,19 @@ const SERVICE_TASKS = [
 ] as const;
 
 type TaskKey = (typeof SERVICE_TASKS)[number]["key"];
-
 const TASK_LABEL: Record<string, string> = Object.fromEntries(SERVICE_TASKS.map((t) => [t.key, t.label]));
+
+const STATUSES = [
+  { key: "w_naprawie", label: "W naprawie" },
+  { key: "naprawiony", label: "Naprawiony" },
+  { key: "uszkodzony", label: "Uszkodzony" },
+] as const;
+type StatusKey = (typeof STATUSES)[number]["key"];
+const STATUS_STYLE: Record<StatusKey, string> = {
+  w_naprawie: "bg-ambersoft text-amber",
+  naprawiony: "bg-tealsoft text-teal",
+  uszkodzony: "bg-rustsoft text-rust",
+};
 
 type Interval = "today" | "week" | "month";
 const INTERVALS: { key: Interval; label: string }[] = [
@@ -34,8 +51,9 @@ type LogRow = {
   task_type: string;
   points: number;
   device_ref: string | null;
-  notes: string | null;
-  created_at: string;
+  status: StatusKey;
+  started_at: string;
+  finished_at: string | null;
 };
 
 function rangeStart(interval: Interval): string {
@@ -54,6 +72,15 @@ function fmtDateTime(iso: string) {
   return new Date(iso).toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+function fmtDuration(startIso: string, endIso: string | null) {
+  if (!endIso) return "w trakcie";
+  const ms = Date.parse(endIso) - Date.parse(startIso);
+  const totalMin = Math.max(0, Math.round(ms / 60000));
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return h > 0 ? `${h} godz. ${m} min` : `${m} min`;
+}
+
 const btnPrimary = "bg-ink text-paper px-4 py-2 rounded text-sm font-semibold disabled:opacity-50";
 const pill = (active: boolean) =>
   `px-3 py-1.5 rounded-full text-sm font-semibold border ${active ? "bg-ink text-paper border-ink" : "bg-white border-line"}`;
@@ -67,7 +94,6 @@ export default function ServiceView({ session, members }: { session: Session; me
 
   const [taskType, setTaskType] = useState<TaskKey>(SERVICE_TASKS[0].key);
   const [deviceRef, setDeviceRef] = useState("");
-  const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
 
@@ -88,11 +114,15 @@ export default function ServiceView({ session, members }: { session: Session; me
     setError("");
     try {
       const [{ data: rangeData, error: rangeErr }, { data: recentData, error: recentErr }] = await Promise.all([
-        supabase.from("service_log").select("employee_email, points").gte("created_at", rangeStart(interval)),
         supabase
           .from("service_log")
-          .select("id, employee_email, task_type, points, device_ref, notes, created_at")
-          .order("created_at", { ascending: false })
+          .select("employee_email, points")
+          .eq("status", "naprawiony")
+          .gte("finished_at", rangeStart(interval)),
+        supabase
+          .from("service_log")
+          .select("id, employee_email, task_type, points, device_ref, status, started_at, finished_at")
+          .order("started_at", { ascending: false })
           .limit(50),
       ]);
       if (rangeErr) throw rangeErr;
@@ -131,11 +161,10 @@ export default function ServiceView({ session, members }: { session: Session; me
         task_type: task.key,
         points: task.points,
         device_ref: deviceRef.trim() || null,
-        notes: notes.trim() || null,
+        status: "w_naprawie",
       });
       if (err) throw err;
       setDeviceRef("");
-      setNotes("");
     } catch (e: any) {
       setFormError(e.message || "Błąd zapisu.");
     } finally {
@@ -143,10 +172,18 @@ export default function ServiceView({ session, members }: { session: Session; me
     }
   }
 
+  async function changeStatus(row: LogRow, status: StatusKey) {
+    const patch: { status: StatusKey; finished_at: string | null } = {
+      status,
+      finished_at: status === "w_naprawie" ? null : new Date().toISOString(),
+    };
+    await supabase.from("service_log").update(patch).eq("id", row.id);
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
-        <h2 className="text-xs font-semibold text-inksoft">PODSUMOWANIE PUNKTACJI</h2>
+        <h2 className="text-xs font-semibold text-inksoft">PODSUMOWANIE PUNKTACJI (naprawione)</h2>
         <div className="flex gap-2">
           {INTERVALS.map((i) => (
             <button key={i.key} onClick={() => setInterval(i.key)} className={pill(interval === i.key)}>{i.label}</button>
@@ -158,13 +195,13 @@ export default function ServiceView({ session, members }: { session: Session; me
           <thead>
             <tr className="text-left text-xs text-inksoft border-b border-line">
               <th className="p-3">Pracownik</th>
-              <th className="p-3 text-right">Liczba czynności</th>
+              <th className="p-3 text-right">Liczba napraw</th>
               <th className="p-3 text-right">Punkty</th>
             </tr>
           </thead>
           <tbody>
             {!loading && summary.length === 0 && (
-              <tr><td colSpan={3} className="p-6 text-center text-inksoft text-sm">Brak zarejestrowanych czynności w tym okresie.</td></tr>
+              <tr><td colSpan={3} className="p-6 text-center text-inksoft text-sm">Brak zakończonych napraw w tym okresie.</td></tr>
             )}
             {summary.map((s) => (
               <tr key={s.email} className="border-b border-line last:border-b-0">
@@ -180,8 +217,8 @@ export default function ServiceView({ session, members }: { session: Session; me
       {error && <p className="text-rust text-xs mb-3">{error}</p>}
 
       <div className="border border-line bg-white p-4 mb-6">
-        <h2 className="text-xs font-semibold text-inksoft mb-3">ZAREJESTRUJ CZYNNOŚĆ</h2>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3">
+        <h2 className="text-xs font-semibold text-inksoft mb-3">ROZPOCZNIJ NAPRAWĘ</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
           <div>
             <label className="text-xs font-semibold text-inksoft block mb-1">Typ czynności *</label>
             <select
@@ -202,46 +239,50 @@ export default function ServiceView({ session, members }: { session: Session; me
               className="w-full border border-line bg-white px-2 py-2 rounded text-sm font-mono"
             />
           </div>
-          <div className="md:col-span-2">
-            <label className="text-xs font-semibold text-inksoft block mb-1">Uwagi</label>
-            <input
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              className="w-full border border-line bg-white px-2 py-2 rounded text-sm"
-            />
-          </div>
         </div>
         {formError && <p className="text-rust text-xs mb-2">{formError}</p>}
         <button onClick={submit} disabled={submitting} className={btnPrimary}>
-          {submitting ? "Zapisywanie…" : "Zarejestruj"}
+          {submitting ? "Zapisywanie…" : "Rozpocznij naprawę"}
         </button>
       </div>
 
-      <h2 className="text-xs font-semibold text-inksoft mb-2">OSTATNIE WPISY</h2>
+      <h2 className="text-xs font-semibold text-inksoft mb-2">OSTATNIE NAPRAWY</h2>
       <div className="border border-line bg-white overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-inksoft border-b border-line">
-              <th className="p-3">Data i godzina</th>
+              <th className="p-3">Rozpoczęto</th>
               <th className="p-3">Pracownik</th>
               <th className="p-3">Czynność</th>
-              <th className="p-3 text-right">Punkty</th>
               <th className="p-3">Numer seryjny</th>
-              <th className="p-3">Uwagi</th>
+              <th className="p-3">Status</th>
+              <th className="p-3">Czas</th>
+              <th className="p-3 text-right">Punkty</th>
             </tr>
           </thead>
           <tbody>
             {!loading && recent.length === 0 && (
-              <tr><td colSpan={6} className="p-6 text-center text-inksoft text-sm">Brak wpisów — zarejestruj pierwszy powyżej.</td></tr>
+              <tr><td colSpan={7} className="p-6 text-center text-inksoft text-sm">Brak wpisów — rozpocznij pierwszą naprawę powyżej.</td></tr>
             )}
             {recent.map((r) => (
               <tr key={r.id} className="border-b border-line last:border-b-0 hover:bg-paper">
-                <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDateTime(r.created_at)}</td>
+                <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDateTime(r.started_at)}</td>
                 <td className="p-3">{displayNameForEmail(r.employee_email, members)}</td>
                 <td className="p-3">{TASK_LABEL[r.task_type] || r.task_type}</td>
-                <td className="p-3 text-right font-mono font-semibold">{r.points}</td>
                 <td className="p-3 font-mono">{r.device_ref || "—"}</td>
-                <td className="p-3 text-inksoft">{r.notes || "—"}</td>
+                <td className="p-3">
+                  <select
+                    value={r.status}
+                    onChange={(e) => changeStatus(r, e.target.value as StatusKey)}
+                    className={`text-xs font-semibold px-2 py-1 rounded-full border-none ${STATUS_STYLE[r.status]}`}
+                  >
+                    {STATUSES.map((s) => (
+                      <option key={s.key} value={s.key}>{s.label}</option>
+                    ))}
+                  </select>
+                </td>
+                <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDuration(r.started_at, r.finished_at)}</td>
+                <td className="p-3 text-right font-mono font-semibold">{r.status === "naprawiony" ? r.points : "—"}</td>
               </tr>
             ))}
           </tbody>
