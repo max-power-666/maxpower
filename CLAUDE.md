@@ -97,9 +97,15 @@ Macu jest wyłączony; bidder działa na produkcji, włącznik: `buyback_setting
   przesyłki, aplikacja znajduje zamówienie (`buyback_order_intake`, unikalne na
   `order_public_id` — ta sama paczka nie zaliczy się dwa razy). Status:
   W trakcie / Obsłużona / Problem, czas obsługi, punkty 100/6 za paczkę tylko po
-  "Obsłużona", podsumowanie punktacji Dziś/7/30 dni.
+  "Obsłużona", podsumowanie punktacji Dziś/7/30 dni. Numer przesyłki służy tylko do
+  znalezienia zamówienia przy rozpoczynaniu (w liście nie ma kolumny przesyłki; jest na karcie).
+- Kolumny edytowane w wierszu: Numer seryjny, SKU, Pady (liczba padów w zestawie — konsole; int >= 0,
+  0 jest poprawną wartością), Uwagi. **Warunek:** status "Obsłużona" wymaga numeru seryjnego, SKU i padów —
+  pilnuje tego UI (`changeStatus`, komunikat co brakuje) i trigger `buyback_order_intake_require_complete`
+  w bazie (sprawdza przy przejściu na "Obsłużona" i przy czyszczeniu pola w już obsłużonej paczce,
+  więc stare obsłużone wiersze bez danych można uzupełniać po jednym polu).
 - Numer zamówienia jest linkiem do **karty zamówienia** (panel boczny): dane z API + dane
-  pracownika (numer seryjny, SKU, uwagi — edytowalne, opcjonalne) + numerowany log zmian.
+  pracownika (numer seryjny, SKU, pady, uwagi — edytowalne) + numerowany log zmian.
 
 **Serwis** (`ServiceView.tsx`, `service_log`). Rejestr napraw wg tabeli z regulaminu:
 Joy-Con para 15 pkt, kontroler PS4 25, Xbox One 35, PS5 12, czyszczenie konsoli 45.
@@ -153,7 +159,7 @@ miesięczny (§2 ust. 6) — dziś każdy obszar ma osobną tabelę i podsumowan
 - **Kto to zrobił:** zapisujemy e-mail (stały identyfikator), a wyświetlamy przez
   `displayNameForEmail(email, members)` → skrócone imię, w razie braku imienia e-mail.
 - **Uwagi w wierszu listy:** kolumna "Uwagi" (między Statusem a Czasem) w Serwisie, Testach i Trade-in
-  to `InlineEditCell` (tak samo kolumna "Numer seryjny" w Trade-in) — zapis przy wyjściu z pola/Enterem,
+  to `InlineEditCell` (tak samo kolumny "Numer seryjny", "SKU" i "Pady" w Trade-in) — zapis przy wyjściu z pola/Enterem,
   Escape porzuca. W Trade-in edycja trafia też do logu zmian karty zamówienia.
 - **Cykl życia rekordu:** status + `started_at`/`finished_at`, `finished_at` czyszczone przy
   powrocie do statusu początkowego (wzór: `service_log`, `buyback_order_intake`).

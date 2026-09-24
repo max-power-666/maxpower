@@ -36,6 +36,7 @@ type IntakeEntry = {
   order_public_id: string;
   serial_number: string | null;
   sku: string | null;
+  pads: number | null;
   notes: string | null;
   entered_by_email: string | null;
   entered_at: string;
@@ -43,10 +44,9 @@ type IntakeEntry = {
   status: IntakeStatus;
   points: number;
   history: HistoryEntry[];
-  buyback_orders?: { tracking_number: string | null } | null;
 };
 
-const INTAKE_COLUMNS = "id, order_public_id, serial_number, sku, notes, entered_by_email, entered_at, finished_at, status, points, history";
+const INTAKE_COLUMNS = "id, order_public_id, serial_number, sku, pads, notes, entered_by_email, entered_at, finished_at, status, points, history";
 
 function fmtPoints(n: number | string) {
   return Number(n).toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -178,14 +178,14 @@ function IntakeView({
           .gte("finished_at", rangeStart(interval)),
         supabase
           .from("buyback_order_intake")
-          .select(`${INTAKE_COLUMNS}, buyback_orders(tracking_number)`)
+          .select(INTAKE_COLUMNS)
           .order("entered_at", { ascending: false })
           .limit(50),
       ]);
       if (rangeErr) throw rangeErr;
       if (listErr) throw listErr;
       setRangeRows(rangeData || []);
-      setEntries((listData as unknown as IntakeEntry[]) || []);
+      setEntries((listData as IntakeEntry[]) || []);
     } catch (e: any) {
       setError(`Nie udało się wczytać paczek: ${e.message || e}`);
     } finally {
@@ -270,13 +270,14 @@ function IntakeView({
     else await load();
   }
 
-  // Edycje z listy (uwagi, numer seryjny) trafiają do tego samego logu zmian co edycja na karcie.
-  async function saveField(row: IntakeEntry, column: "notes" | "serial_number", label: string, value: string | null) {
+  // Edycje z listy (uwagi, numer seryjny, SKU, pady) trafiają do tego samego logu zmian co edycja na karcie.
+  async function saveField(row: IntakeEntry, column: "notes" | "serial_number" | "sku" | "pads", label: string, value: string | number | null) {
+    setError("");
     const entry: HistoryEntry = {
       action: "edited",
       by_email: session.user.email ?? null,
       at: new Date().toISOString(),
-      changes: [{ field: label, from: row[column], to: value }],
+      changes: [{ field: label, from: row[column] === null ? null : String(row[column]), to: value === null ? null : String(value) }],
     };
     const { error: err } = await supabase
       .from("buyback_order_intake")
@@ -285,8 +286,35 @@ function IntakeView({
     if (err) setError(`Nie udało się zapisać (${label}): ${err.message}`);
   }
 
+  // Pady to liczba całkowita >= 0 (0 = zestaw bez padów, też jest poprawną, uzupełnioną wartością).
+  function savePads(row: IntakeEntry, text: string | null) {
+    if (text === null) return saveField(row, "pads", "Pady", null);
+    if (!/^\d{1,3}$/.test(text)) {
+      setError("Pady: podaj liczbę całkowitą (0 lub więcej).");
+      return;
+    }
+    return saveField(row, "pads", "Pady", Number(text));
+  }
+
+  // Brakujące dane blokujące status "Obsłużona" (ten sam warunek pilnuje trigger w bazie).
+  function missingForDone(row: IntakeEntry): string[] {
+    const missing: string[] = [];
+    if (!row.serial_number?.trim()) missing.push("numer seryjny");
+    if (!row.sku?.trim()) missing.push("SKU");
+    if (row.pads === null || row.pads === undefined) missing.push("pady");
+    return missing;
+  }
+
   async function changeStatus(row: IntakeEntry, status: IntakeStatus) {
     if (status === row.status) return;
+    setError("");
+    if (status === "obsluzona") {
+      const missing = missingForDone(row);
+      if (missing.length > 0) {
+        setError(`Paczki ${row.order_public_id} nie można oznaczyć jako Obsłużona — uzupełnij: ${missing.join(", ")}.`);
+        return;
+      }
+    }
     const now = new Date().toISOString();
     const entry: HistoryEntry = {
       action: "edited",
@@ -369,8 +397,9 @@ function IntakeView({
               <th className="p-3">Rozpoczęto</th>
               <th className="p-3">Pracownik</th>
               <th className="p-3">Numer zamówienia</th>
-              <th className="p-3">Numer przesyłki</th>
               <th className="p-3">Numer seryjny</th>
+              <th className="p-3">SKU</th>
+              <th className="p-3">Pady</th>
               <th className="p-3">Status</th>
               <th className="p-3">Uwagi</th>
               <th className="p-3">Czas</th>
@@ -380,7 +409,7 @@ function IntakeView({
           </thead>
           <tbody>
             {!loading && entries.length === 0 && (
-              <tr><td colSpan={isAdmin ? 10 : 9} className="p-6 text-center text-inksoft text-sm">Brak paczek — rozpocznij pierwszą powyżej.</td></tr>
+              <tr><td colSpan={isAdmin ? 11 : 10} className="p-6 text-center text-inksoft text-sm">Brak paczek — rozpocznij pierwszą powyżej.</td></tr>
             )}
             {entries.map((e) => (
               <tr key={e.id} className="border-b border-line last:border-b-0 hover:bg-paper">
@@ -391,7 +420,6 @@ function IntakeView({
                     {e.order_public_id}
                   </button>
                 </td>
-                <td className="p-3 font-mono">{e.buyback_orders?.tracking_number || "—"}</td>
                 <td className="p-3">
                   <div className="flex items-center gap-1">
                     <InlineEditCell
@@ -410,6 +438,22 @@ function IntakeView({
                       </button>
                     )}
                   </div>
+                </td>
+                <td className="p-3">
+                  <InlineEditCell
+                    value={e.sku}
+                    placeholder="Dodaj SKU"
+                    className="w-40 font-mono"
+                    onSave={(v) => saveField(e, "sku", "SKU", v)}
+                  />
+                </td>
+                <td className="p-3">
+                  <InlineEditCell
+                    value={e.pads === null ? null : String(e.pads)}
+                    placeholder="np. 2"
+                    className="w-16 font-mono"
+                    onSave={(v) => savePads(e, v)}
+                  />
                 </td>
                 <td className="p-3">
                   <select
@@ -463,6 +507,7 @@ function OrderCardDrawer({
   const [editing, setEditing] = useState(false);
   const [serialDraft, setSerialDraft] = useState("");
   const [skuDraft, setSkuDraft] = useState("");
+  const [padsDraft, setPadsDraft] = useState("");
   const [notesDraft, setNotesDraft] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -488,23 +533,31 @@ function OrderCardDrawer({
   function startEdit() {
     setSerialDraft(intake?.serial_number || "");
     setSkuDraft(intake?.sku || "");
+    setPadsDraft(intake?.pads === null || intake?.pads === undefined ? "" : String(intake.pads));
     setNotesDraft(intake?.notes || "");
     setEditing(true);
   }
 
   async function saveEdit() {
     if (!intake) return;
+    const padsText = padsDraft.trim();
+    if (padsText && !/^\d{1,3}$/.test(padsText)) {
+      setError("Pady: podaj liczbę całkowitą (0 lub więcej).");
+      return;
+    }
     const next = {
       serial_number: serialDraft.trim() || null,
       sku: skuDraft.trim() || null,
+      pads: padsText ? Number(padsText) : null,
       notes: notesDraft.trim() || null,
     };
     const changes: FieldChange[] = [];
-    const diff = (field: string, from: string | null, to: string | null) => {
-      if ((from ?? "") !== (to ?? "")) changes.push({ field, from, to });
+    const diff = (field: string, from: string | number | null, to: string | number | null) => {
+      if ((from ?? "") !== (to ?? "")) changes.push({ field, from: from === null ? null : String(from), to: to === null ? null : String(to) });
     };
     diff("Numer seryjny", intake.serial_number, next.serial_number);
     diff("SKU", intake.sku, next.sku);
+    diff("Pady", intake.pads, next.pads);
     diff("Uwagi", intake.notes, next.notes);
 
     if (changes.length === 0) {
@@ -563,6 +616,7 @@ function OrderCardDrawer({
                   <Row label="Czas obsługi" value={fmtDuration(intake.entered_at, intake.finished_at)} />
                   <Row label="Numer seryjny" value={intake.serial_number} mono />
                   <Row label="SKU" value={intake.sku} mono />
+                  <Row label="Pady" value={intake.pads === null ? null : String(intake.pads)} mono />
                   <Row label="Uwagi" value={intake.notes} />
                 </>
               )}
@@ -575,6 +629,10 @@ function OrderCardDrawer({
                   <div>
                     <label className="text-xs font-semibold text-inksoft block mb-1">SKU</label>
                     <input value={skuDraft} onChange={(e) => setSkuDraft(e.target.value)} className="w-full border border-line bg-white px-2 py-1.5 rounded text-sm font-mono" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-inksoft block mb-1">Pady (liczba w zestawie)</label>
+                    <input value={padsDraft} onChange={(e) => setPadsDraft(e.target.value)} inputMode="numeric" className="w-full border border-line bg-white px-2 py-1.5 rounded text-sm font-mono" />
                   </div>
                   <div>
                     <label className="text-xs font-semibold text-inksoft block mb-1">Uwagi</label>

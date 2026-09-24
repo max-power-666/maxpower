@@ -85,8 +85,9 @@ create policy "authenticated read buyback_orders_sync_meta" on buyback_orders_sy
 create table if not exists buyback_order_intake (
   id bigint generated always as identity primary key,
   order_public_id text not null references buyback_orders(order_public_id),
-  serial_number text,                        -- opcjonalne, uzupełniane na karcie zamówienia
-  sku text,                                  -- opcjonalne, uzupełniane na karcie zamówienia
+  serial_number text,                        -- wymagane do statusu "obsluzona" (trigger poniżej)
+  sku text,                                  -- wymagane do statusu "obsluzona" (trigger poniżej)
+  pads int check (pads is null or pads >= 0), -- liczba padów w zestawie (konsole); wymagane do "obsluzona", 0 jest dozwolone
   notes text default '',
   entered_by_user_id uuid references auth.users(id),
   entered_by_email text,
@@ -107,6 +108,13 @@ alter table buyback_order_intake alter column sku drop not null;
 alter table buyback_order_intake add column if not exists status text not null default 'w_trakcie';
 alter table buyback_order_intake add column if not exists finished_at timestamptz;
 alter table buyback_order_intake add column if not exists points numeric not null default (100.0 / 6.0);
+alter table buyback_order_intake add column if not exists pads int;
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'buyback_order_intake_pads_check') then
+    alter table buyback_order_intake add constraint buyback_order_intake_pads_check check (pads is null or pads >= 0);
+  end if;
+end $$;
 
 create index if not exists buyback_order_intake_order_idx on buyback_order_intake (order_public_id);
 create index if not exists buyback_order_intake_entered_idx on buyback_order_intake (entered_at desc);
@@ -119,6 +127,38 @@ begin
     alter table buyback_order_intake add constraint buyback_order_intake_order_unique unique (order_public_id);
   end if;
 end $$;
+
+-- Warunek kompletności: status "obsluzona" wymaga numeru seryjnego, SKU i liczby padów. To twarde
+-- zabezpieczenie w bazie (działa też przy bezpośrednim wywołaniu API); UI pokazuje ten sam komunikat.
+-- Sprawdzamy przy przejściu NA "obsluzona" oraz gdy w już obsłużonej paczce ktoś czyści któreś z pól.
+-- Dzięki temu stare, już obsłużone wiersze bez tych danych można dalej edytować (np. uzupełniać po jednym polu).
+create or replace function buyback_order_intake_require_complete() returns trigger
+language plpgsql as $$
+declare
+  entering boolean := tg_op = 'INSERT' or old.status is distinct from 'obsluzona';
+  missing text[] := '{}';
+begin
+  if new.status <> 'obsluzona' then
+    return new;
+  end if;
+  if coalesce(btrim(new.serial_number), '') = '' and (entering or coalesce(btrim(old.serial_number), '') <> '') then
+    missing := array_append(missing, 'numer seryjny');
+  end if;
+  if coalesce(btrim(new.sku), '') = '' and (entering or coalesce(btrim(old.sku), '') <> '') then
+    missing := array_append(missing, 'SKU');
+  end if;
+  if new.pads is null and (entering or old.pads is not null) then
+    missing := array_append(missing, 'pady');
+  end if;
+  if array_length(missing, 1) > 0 then
+    raise exception 'Status „Obsłużona” wymaga uzupełnienia: %.', array_to_string(missing, ', ')
+      using errcode = '23514';
+  end if;
+  return new;
+end $$;
+drop trigger if exists buyback_order_intake_require_complete on buyback_order_intake;
+create trigger buyback_order_intake_require_complete before insert or update on buyback_order_intake
+  for each row execute function buyback_order_intake_require_complete();
 
 alter table buyback_order_intake enable row level security;
 
