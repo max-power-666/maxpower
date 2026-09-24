@@ -30,7 +30,8 @@ function escapeLike(v: string) {
   return v.replace(/[\\%]/g, "").replace(/_/g, "\\_");
 }
 
-export default function InventoryRawView() {
+// reloadKey rośnie po ręcznym "Odśwież" w nagłówku Magazynu — wymusza ponowne wczytanie listy.
+export default function InventoryRawView({ reloadKey = 0 }: { reloadKey?: number }) {
   const [pageSize, setPageSize] = useState(50);
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState("");
@@ -87,7 +88,7 @@ export default function InventoryRawView() {
     return () => {
       cancelled = true;
     };
-  }, [page, pageSize, search, reloadTick]);
+  }, [page, pageSize, search, reloadTick, reloadKey]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const needsBackfill = !search && rows.length > 0 && rows.every((r) => r.name === null);

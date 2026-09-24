@@ -138,6 +138,7 @@ export default function Home() {
   const [members, setMembers] = useState<Member[]>([]);
   const [view, setView] = useState<ViewKey>("overview");
   const [invSub, setInvSub] = useState<"summary" | "raw">("summary");
+  const [rawReloadKey, setRawReloadKey] = useState(0);
   const [fakturowniaSummary, setFakturowniaSummary] = useState<FakturowniaSummary | null>(null);
   const [fakturowniaLastSynced, setFakturowniaLastSynced] = useState<string | null>(null);
   const [fakturowniaLoading, setFakturowniaLoading] = useState(false);
@@ -280,6 +281,7 @@ export default function Home() {
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Nie udało się zsynchronizować danych z Fakturowni.");
       await loadFakturowniaSummaryFromDb();
+      setRawReloadKey((n) => n + 1);
     } catch (e: any) {
       setFakturowniaError(e.message || "Nie udało się zsynchronizować danych z Fakturowni.");
     } finally {
@@ -371,7 +373,7 @@ export default function Home() {
                 </div>
               )}
 
-              {invSub === "raw" && <InventoryRawView />}
+              {invSub === "raw" && <InventoryRawView reloadKey={rawReloadKey} />}
             </div>
           )}
 

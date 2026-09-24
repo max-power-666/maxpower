@@ -1,5 +1,6 @@
 -- Magazyn ERP — schemat startowy
 -- Uruchom ten plik w Supabase: Dashboard -> SQL Editor -> New query -> wklej -> Run
+-- Można uruchomić ponownie bez błędów (tabele/kolumny/indeksy "if not exists", polityki "drop if exists").
 
 create extension if not exists "pgcrypto";
 
@@ -78,9 +79,11 @@ alter table fakturownia_sync_meta enable row level security;
 -- dokładnie tak jak w prototypie. Twardsze uprawnienia per-rola (np. tylko
 -- Manager może usuwać) to kolejny krok, gdy będzie potrzebny.
 
+drop policy if exists "authenticated read members" on members;
 create policy "authenticated read members" on members
   for select using (auth.role() = 'authenticated');
 
+drop policy if exists "user upserts own member row" on members;
 create policy "user upserts own member row" on members
   for insert with check (auth.uid() = user_id);
 
@@ -88,25 +91,33 @@ create policy "user upserts own member row" on members
 -- Admin mógł przypisywać role innym z zakładki Zespół. Tak samo jak przy units:
 -- to nie jest twarde zabezpieczenie, tylko UI (zakładka Zespół) chowa tę możliwość
 -- przed osobami bez roli Admin.
+drop policy if exists "user updates own member row" on members;
+drop policy if exists "authenticated update members" on members;
 create policy "authenticated update members" on members
   for update using (auth.role() = 'authenticated');
 
+drop policy if exists "authenticated read units" on units;
 create policy "authenticated read units" on units
   for select using (auth.role() = 'authenticated');
 
+drop policy if exists "authenticated insert units" on units;
 create policy "authenticated insert units" on units
   for insert with check (auth.role() = 'authenticated');
 
+drop policy if exists "authenticated update units" on units;
 create policy "authenticated update units" on units
   for update using (auth.role() = 'authenticated');
 
+drop policy if exists "authenticated delete units" on units;
 create policy "authenticated delete units" on units
   for delete using (auth.role() = 'authenticated');
 
 -- Tylko odczyt dla zespołu — brak polityk insert/update/delete dla "authenticated"
 -- to celowe: te dwie tabele zapisuje wyłącznie serwer (service_role, poza RLS).
+drop policy if exists "authenticated read fakturownia_stock_cache" on fakturownia_stock_cache;
 create policy "authenticated read fakturownia_stock_cache" on fakturownia_stock_cache
   for select using (auth.role() = 'authenticated');
 
+drop policy if exists "authenticated read fakturownia_sync_meta" on fakturownia_sync_meta;
 create policy "authenticated read fakturownia_sync_meta" on fakturownia_sync_meta
   for select using (auth.role() = 'authenticated');
