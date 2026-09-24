@@ -54,7 +54,7 @@ const CATEGORIES: Record<string, { label: string; fields: FieldDef[] }> = {
 };
 
 const STATUSES = ["Przyjęte", "Kontrola jakości", "Gotowe do sprzedaży", "Sprzedane", "W naprawie", "Złom"];
-const ROLES = ["Admin", "Magazyn", "Serwis", "Trade-in"];
+const ROLES = ["Admin", "Magazyn", "Serwis", "Bidder"];
 
 type ViewKey = "overview" | "inventory" | "team" | "service" | "tradein";
 
@@ -63,7 +63,7 @@ const TABS: { key: ViewKey; label: string }[] = [
   { key: "inventory", label: "Magazyn" },
   { key: "team", label: "Zespół" },
   { key: "service", label: "Serwis" },
-  { key: "tradein", label: "Trade-in" },
+  { key: "tradein", label: "Bidder" },
 ];
 
 // Kto widzi jaką zakładkę — rola = zakładka, Admin ma dostęp do wszystkiego,
@@ -75,7 +75,7 @@ const ROLE_ACCESS: Record<string, ViewKey[]> = {
   Admin: ["overview", "inventory", "team", "service", "tradein"],
   Magazyn: ["overview", "inventory"],
   Serwis: ["overview", "service"],
-  "Trade-in": ["overview", "tradein"],
+  Bidder: ["overview", "tradein"],
 };
 
 type Member = { user_id: string; role: string; email: string };
