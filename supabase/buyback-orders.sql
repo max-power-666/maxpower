@@ -42,11 +42,23 @@ create index if not exists buyback_orders_modification_idx on buyback_orders (mo
 create index if not exists buyback_orders_creation_idx on buyback_orders (creation_date desc);
 
 -- Jeden wiersz: od kiedy liczyć kolejną synchronizację przyrostową (parametr modificationDate API)
+-- full_scan_done = false: następne wywołanie robi pełny skan od 1 stycznia (w porcjach, z kursorem
+-- scan_page); dopiero po jego ukończeniu przechodzimy na przyrostowe (last_synced_at). scan_started_at
+-- to data startu trwającego skanu — od niej liczymy pierwszą synchronizację przyrostową.
+-- Dla istniejącej bazy kolumna full_scan_done dostaje false, więc pierwszy przebieg po wdrożeniu
+-- uzupełni zamówienia, które wcześniej urwał limit 200 stron (patrz lib/scanOrders.ts).
 create table if not exists buyback_orders_sync_meta (
   id int primary key default 1,
   last_synced_at timestamptz,
+  full_scan_done boolean not null default false,
+  scan_page int not null default 1,
+  scan_started_at timestamptz,
   constraint buyback_orders_sync_meta_singleton check (id = 1)
 );
+alter table buyback_orders_sync_meta add column if not exists full_scan_done boolean not null default false;
+alter table buyback_orders_sync_meta add column if not exists scan_page int not null default 1;
+alter table buyback_orders_sync_meta add column if not exists scan_started_at timestamptz;
+insert into buyback_orders_sync_meta (id) values (1) on conflict (id) do nothing;
 
 alter table buyback_orders enable row level security;
 alter table buyback_orders_sync_meta enable row level security;

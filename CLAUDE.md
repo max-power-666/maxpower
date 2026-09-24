@@ -31,7 +31,8 @@ numerach seryjnych, wielokanałowa synchronizacja stanów, naprawy, auto-wycena)
 - `lib/` — `supabaseClient.ts`, `buyback.ts` (logika biddera + `isAuthorized`),
   `displayName.ts` (skrócone imię: "Maksymilian J."), `workLog.ts` (interwały Dziś/7/30 dni,
   liczenie czasu i **etykiety typów czynności/statusów** — jedno źródło dla list i karty produktu),
-  `search.ts` (`escapeLike` do wyszukiwania po numerze seryjnym).
+  `search.ts` (`escapeLike` do wyszukiwania po numerze seryjnym), `scanOrders.ts` (stronicowany skan
+  zamówień Back Market z budżetem czasu i kursorem).
 - `supabase/*.sql` — schemat, każdy plik idempotentny: `schema.sql` (units, members,
   cache Fakturowni), `tradein.sql` (bidder), `buyback-orders.sql` (zamówienia + obsługa
   paczek), `service.sql` (rejestr napraw), `tests.sql` (rejestr testów).
@@ -90,8 +91,8 @@ Macu jest wyłączony; bidder działa na produkcji, włącznik: `buyback_setting
 
 **Trade-in** (zakładka Trade-in, `TradeInHub.tsx`) — dwa podwidoki:
 - *Raw data*: podgląd zsynchronizowanych zamówień BuyBack (`buyback_orders`, sync co 15 min
-  z `GET /ws/buyback/v1/orders`: pierwszy przebieg od 1 stycznia przez `creationDate`,
-  potem `modificationDate` — łapie nowe i zmiany statusu). Zapis tylko serwer.
+  z `GET /ws/buyback/v1/orders`: pełny skan od 1 stycznia przez `creationDate` w porcjach z kursorem,
+  potem przyrostowo przez `modificationDate` — łapie nowe i zmiany statusu). Zapis tylko serwer.
 - *Wprowadzanie*: obsługa paczek przez pracowników. Pracownik podaje numer zamówienia LUB
   przesyłki, aplikacja znajduje zamówienie (`buyback_order_intake`, unikalne na
   `order_public_id` — ta sama paczka nie zaliczy się dwa razy). Status:
@@ -182,10 +183,12 @@ Configuration) musi być aktualny adres produkcyjny, inaczej magic link nie zadz
   Pliki `supabase/*.sql` są idempotentne i trzymają aktualny kształt tabel.
 - Supabase (PostgREST) zwraca domyślnie **max 1000 wierszy** na zapytanie — przy większych
   tabelach paginuj przez `.range()` (tak robi cache Fakturowni).
-- `buyback_orders` nie pokrywa wszystkich zamówień: stan na 2026-09-25 to 2342 zamówienia, prawie wszystkie
-  zakończone są ze stycznia–lutego i września, a z marca–sierpnia niemal żadne, choć magazyn ma z tego okresu
-  setki sztuk (ich `description` = numer zamówienia). Przyczyna nieustalona (do sprawdzenia: `count` z API
-  vs zapisane, filtr `status`). Skutek: karta nie pokaże zamówienia dla starszych sztuk.
+- Synchronizacja zamówień BuyBack (`orders-sync`) idzie w **porcjach z kursorem** (`lib/scanOrders.ts`,
+  `buyback_orders_sync_meta.scan_page`): pełny skan od 1 stycznia trwa kilka minut, więc po wyczerpaniu
+  budżetu czasu zapisuje kursor i kontynuuje przy następnym wywołaniu (cron co 15 min albo "Odśwież").
+  Skan jest ukończony tylko wtedy, gdy API samo zakończy listę. Powód: do 2026-09-25 twardy limit 200
+  stron (x 10 zamówień) urywał pierwsze pobranie po cichu na 2000 zamówieniach (do 15 lutego) i oznaczał je
+  jako gotowe, więc zamówień z marca–sierpnia w bazie nie było. Nie wracać do "limitu stron = koniec".
 - Back Market najpewniej filtruje po IP — endpointów nie da się testować z sandboxa
   asystenta (401 nawet dla działających). Testuje się na Vercelu albo na komputerze
   właściciela.

@@ -77,8 +77,9 @@ zalogowały się choć raz.
 
 - **Fakturownia** — zakładka Magazyn → **Odśwież**. Pierwsza synchronizacja skanuje cały
   katalog (~19 tys. produktów, ok. minuty), kolejne są przyrostowe (cron codziennie ok. północy).
-- **Zamówienia BuyBack** — zakładka Trade-in → Raw data → **Odśwież** (pierwszy raz pobiera
-  zamówienia od 1 stycznia bieżącego roku; potem cron co 15 minut). Back Market najpewniej
+- **Zamówienia BuyBack** — zakładka Trade-in → Raw data → **Odśwież**. Pierwszy raz pobiera
+  zamówienia od 1 stycznia bieżącego roku w porcjach (kilka minut na porcję); niedokończone dociąga
+  się samo co 15 minut, a przycisk mówi, ile zostało. Potem synchronizacja jest przyrostowa. Back Market najpewniej
   filtruje po adresie IP, więc to działa z Vercela lub z komputera właściciela, nie z każdego
   środowiska.
 - **Bidder** — `node scripts/import-buyback.mjs` przenosi SKU, ceny max i ostatnie ceny ze

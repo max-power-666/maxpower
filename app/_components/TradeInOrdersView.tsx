@@ -42,6 +42,7 @@ export default function TradeInOrdersView({ session, onOpenOrder }: { session: S
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState("");
+  const [note, setNote] = useState("");
 
   useEffect(() => {
     load();
@@ -90,12 +91,21 @@ export default function TradeInOrdersView({ session, onOpenOrder }: { session: S
   async function syncNow() {
     setSyncing(true);
     setError("");
+    setNote("");
     try {
       const res = await fetch("/api/tradein/orders-sync", {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Błąd synchronizacji.");
+      // Pełny skan historii idzie w porcjach — niedokończony nie jest błędem, ale trzeba to powiedzieć.
+      if (data.finished === false) {
+        setNote(
+          `Pobrano kolejną porcję (${data.processed} zamówień, ${data.mode === "full" ? "pełny skan historii" : "synchronizacja"} w toku` +
+            (data.apiCount ? `, Back Market zgłasza ${data.apiCount} łącznie` : "") +
+            `). Reszta dociągnie się automatycznie co 15 minut — możesz też kliknąć Odśwież ponownie.`
+        );
+      }
       await load();
     } catch (e: any) {
       setError(e.message || "Błąd synchronizacji.");
@@ -137,6 +147,7 @@ export default function TradeInOrdersView({ session, onOpenOrder }: { session: S
       </div>
 
       {error && <p className="text-rust text-xs mb-3">{error}</p>}
+      {note && <p className="text-inksoft text-xs mb-3">{note}</p>}
 
       <div className="border border-line bg-white overflow-x-auto">
         <table className="w-full text-sm">
