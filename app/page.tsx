@@ -198,6 +198,15 @@ export default function Home() {
     return () => sub.subscription.unsubscribe();
   }, []);
 
+  // Zapamiętaj aktywną zakładkę, żeby odświeżenie strony (F5) nie wracało do Przeglądu.
+  useEffect(() => {
+    const saved = localStorage.getItem("magazyn-view");
+    if (saved && TABS.some((t) => t.key === saved)) setView(saved as ViewKey);
+  }, []);
+  useEffect(() => {
+    localStorage.setItem("magazyn-view", view);
+  }, [view]);
+
   useEffect(() => {
     if (!session) return;
     loadRole();
