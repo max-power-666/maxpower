@@ -10,23 +10,23 @@ import { supabase } from "@/lib/supabaseClient";
 
 type Order = {
   order_public_id: string;
+  creation_date: string;
+  payment_date: string | null;
   status: string;
   market: string | null;
-  product_title: string | null;
   sku: string | null;
   customer_first_name: string | null;
   customer_last_name: string | null;
   original_price: number | null;
   original_price_currency: string | null;
-  creation_date: string;
-  modification_date: string;
+  counter_offer_price: number | null;
 };
 
 const PAGE_SIZES = [10, 20, 50];
 
-function fmtPrice(n: number | null, currency: string | null) {
+function fmtNumber(n: number | null) {
   if (n === null || n === undefined) return "—";
-  return n.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " " + (currency || "");
+  return n.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function fmtDateTime(iso: string | null) {
@@ -69,10 +69,10 @@ export default function TradeInOrdersView({ session }: { session: Session }) {
         supabase
           .from("buyback_orders")
           .select(
-            "order_public_id, status, market, product_title, sku, customer_first_name, customer_last_name, original_price, original_price_currency, creation_date, modification_date",
+            "order_public_id, creation_date, payment_date, status, market, sku, customer_first_name, customer_last_name, original_price, original_price_currency, counter_offer_price",
             { count: "exact" }
           )
-          .order("modification_date", { ascending: false })
+          .order("creation_date", { ascending: false })
           .limit(limit),
         supabase.from("buyback_orders_sync_meta").select("last_synced_at").eq("id", 1).maybeSingle(),
       ]);
@@ -143,34 +143,37 @@ export default function TradeInOrdersView({ session }: { session: Session }) {
           <thead>
             <tr className="text-left text-xs text-inksoft border-b border-line">
               <th className="p-3">Zamówienie</th>
+              <th className="p-3">Utworzono</th>
+              <th className="p-3">Data płatności</th>
               <th className="p-3">Status</th>
               <th className="p-3">Rynek</th>
-              <th className="p-3">Produkt</th>
-              <th className="p-3">Klient</th>
-              <th className="p-3 text-right">Cena</th>
-              <th className="p-3">Utworzono</th>
-              <th className="p-3">Zmieniono</th>
+              <th className="p-3">SKU</th>
+              <th className="p-3">Imię</th>
+              <th className="p-3">Nazwisko</th>
+              <th className="p-3 text-right">Cena pocz.</th>
+              <th className="p-3">Waluta</th>
+              <th className="p-3 text-right">Kontroferta</th>
             </tr>
           </thead>
           <tbody>
             {!loading && orders.length === 0 && (
-              <tr><td colSpan={8} className="p-6 text-center text-inksoft text-sm">Brak zsynchronizowanych zamówień.</td></tr>
+              <tr><td colSpan={11} className="p-6 text-center text-inksoft text-sm">Brak zsynchronizowanych zamówień.</td></tr>
             )}
             {orders.map((o) => (
               <tr key={o.order_public_id} className="border-b border-line last:border-b-0 hover:bg-paper">
                 <td className="p-3 font-mono font-semibold whitespace-nowrap">{o.order_public_id}</td>
+                <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDateTime(o.creation_date)}</td>
+                <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDateTime(o.payment_date)}</td>
                 <td className="p-3">
                   <span className="text-xs font-semibold px-2 py-1 rounded-full bg-tealsoft text-teal">{o.status}</span>
                 </td>
                 <td className="p-3">{o.market || "—"}</td>
-                <td className="p-3">
-                  <div className="font-semibold">{o.product_title || "—"}</div>
-                  {o.sku && <div className="text-xs text-inksoft font-mono">{o.sku}</div>}
-                </td>
-                <td className="p-3">{[o.customer_first_name, o.customer_last_name].filter(Boolean).join(" ") || "—"}</td>
-                <td className="p-3 text-right font-mono">{fmtPrice(o.original_price, o.original_price_currency)}</td>
-                <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDateTime(o.creation_date)}</td>
-                <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDateTime(o.modification_date)}</td>
+                <td className="p-3 font-mono">{o.sku || "—"}</td>
+                <td className="p-3">{o.customer_first_name || "—"}</td>
+                <td className="p-3">{o.customer_last_name || "—"}</td>
+                <td className="p-3 text-right font-mono">{fmtNumber(o.original_price)}</td>
+                <td className="p-3">{o.original_price_currency || "—"}</td>
+                <td className="p-3 text-right font-mono">{fmtNumber(o.counter_offer_price)}</td>
               </tr>
             ))}
           </tbody>
