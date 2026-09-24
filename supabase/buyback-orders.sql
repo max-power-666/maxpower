@@ -65,6 +65,8 @@ create policy "authenticated read buyback_orders_sync_meta" on buyback_orders_sy
 -- (musi już istnieć w buyback_orders, stąd klucz obcy) i uzupełnia numer seryjny + SKU.
 -- Wpisy nie są edytowalne z UI (tylko insert) — to log tego, kto i kiedy co wprowadził,
 -- tak jak history w units.
+-- Jeden wpis = jedna karta zakupu Trade-in (unique na order_public_id — kolejne "wpisy"
+-- dla tego samego zamówienia to EDYCJE tego wiersza, nie nowe rekordy).
 create table if not exists buyback_order_intake (
   id bigint generated always as identity primary key,
   order_public_id text not null references buyback_orders(order_public_id),
@@ -73,10 +75,18 @@ create table if not exists buyback_order_intake (
   notes text default '',
   entered_by_user_id uuid references auth.users(id),
   entered_by_email text,
-  entered_at timestamptz not null default now()
+  entered_at timestamptz not null default now(),
+  history jsonb not null default '[]'::jsonb   -- [{action: "created"|"edited", by_email, at}, ...]
 );
 create index if not exists buyback_order_intake_order_idx on buyback_order_intake (order_public_id);
 create index if not exists buyback_order_intake_entered_idx on buyback_order_intake (entered_at desc);
+
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'buyback_order_intake_order_unique') then
+    alter table buyback_order_intake add constraint buyback_order_intake_order_unique unique (order_public_id);
+  end if;
+end $$;
 
 alter table buyback_order_intake enable row level security;
 
@@ -86,6 +96,9 @@ create policy "authenticated read buyback_order_intake" on buyback_order_intake
 drop policy if exists "authenticated insert buyback_order_intake" on buyback_order_intake;
 create policy "authenticated insert buyback_order_intake" on buyback_order_intake
   for insert with check (auth.role() = 'authenticated');
+drop policy if exists "authenticated update buyback_order_intake" on buyback_order_intake;
+create policy "authenticated update buyback_order_intake" on buyback_order_intake
+  for update using (auth.role() = 'authenticated');
 
 do $$
 begin

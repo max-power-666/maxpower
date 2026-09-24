@@ -34,7 +34,7 @@ function fmtDateTime(iso: string | null) {
   return new Date(iso).toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-export default function TradeInOrdersView({ session }: { session: Session }) {
+export default function TradeInOrdersView({ session, onOpenOrder }: { session: Session; onOpenOrder?: (id: string) => void }) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [limit, setLimit] = useState(20);
   const [totalCount, setTotalCount] = useState<number | null>(null);
@@ -161,7 +161,13 @@ export default function TradeInOrdersView({ session }: { session: Session }) {
             )}
             {orders.map((o) => (
               <tr key={o.order_public_id} className="border-b border-line last:border-b-0 hover:bg-paper">
-                <td className="p-3 font-mono font-semibold whitespace-nowrap">{o.order_public_id}</td>
+                <td className="p-3 font-mono font-semibold whitespace-nowrap">
+                  {onOpenOrder ? (
+                    <button onClick={() => onOpenOrder(o.order_public_id)} className="text-teal hover:underline">{o.order_public_id}</button>
+                  ) : (
+                    o.order_public_id
+                  )}
+                </td>
                 <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDateTime(o.creation_date)}</td>
                 <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDateTime(o.payment_date)}</td>
                 <td className="p-3">

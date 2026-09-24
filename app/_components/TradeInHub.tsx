@@ -13,6 +13,8 @@ const pill = (active: boolean) =>
   `px-3 py-1.5 rounded-full text-sm font-semibold border ${active ? "bg-ink text-paper border-ink" : "bg-white border-line"}`;
 const btnPrimary = "bg-ink text-paper px-4 py-2 rounded text-sm font-semibold disabled:opacity-50";
 
+type HistoryEntry = { action: "created" | "edited"; by_email: string | null; at: string };
+
 type IntakeEntry = {
   id: number;
   order_public_id: string;
@@ -21,6 +23,7 @@ type IntakeEntry = {
   notes: string | null;
   entered_by_email: string | null;
   entered_at: string;
+  history: HistoryEntry[];
 };
 
 type OrderDetail = {
@@ -74,9 +77,9 @@ export default function TradeInHub({ session }: { session: Session }) {
       </div>
 
       {sub === "intake" && <IntakeView session={session} onOpenOrder={setOpenOrderId} />}
-      {sub === "raw" && <TradeInOrdersView session={session} />}
+      {sub === "raw" && <TradeInOrdersView session={session} onOpenOrder={setOpenOrderId} />}
 
-      {openOrderId && <OrderDetailDrawer orderPublicId={openOrderId} onClose={() => setOpenOrderId(null)} />}
+      {openOrderId && <OrderCardDrawer orderPublicId={openOrderId} session={session} onClose={() => setOpenOrderId(null)} />}
     </div>
   );
 }
@@ -111,7 +114,7 @@ function IntakeView({ session, onOpenOrder }: { session: Session; onOpenOrder: (
     setError("");
     const { data, error: err } = await supabase
       .from("buyback_order_intake")
-      .select("id, order_public_id, serial_number, sku, notes, entered_by_email, entered_at")
+      .select("id, order_public_id, serial_number, sku, notes, entered_by_email, entered_at, history")
       .order("entered_at", { ascending: false })
       .limit(100);
     if (err) setError(`Nie udało się wczytać wpisów: ${err.message}`);
@@ -130,6 +133,7 @@ function IntakeView({ session, onOpenOrder }: { session: Session; onOpenOrder: (
     }
     setSubmitting(true);
     try {
+      const now = new Date().toISOString();
       const { error } = await supabase.from("buyback_order_intake").insert({
         order_public_id: orderId,
         serial_number: serial,
@@ -137,8 +141,12 @@ function IntakeView({ session, onOpenOrder }: { session: Session; onOpenOrder: (
         notes: notes.trim() || null,
         entered_by_user_id: session.user.id,
         entered_by_email: session.user.email,
+        history: [{ action: "created", by_email: session.user.email, at: now }],
       });
       if (error) {
+        if (error.code === "23505" || error.message.includes("duplicate key")) {
+          throw new Error(`To zamówienie ma już kartę — otwórz ją z listy poniżej, żeby edytować.`);
+        }
         if (error.message.includes("foreign key")) {
           throw new Error(`Nie znaleziono zamówienia "${orderId}" wśród zsynchronizowanych — sprawdź numer albo poczekaj na synchronizację (zakładka Raw data).`);
         }
@@ -239,23 +247,75 @@ function IntakeView({ session, onOpenOrder }: { session: Session; onOpenOrder: (
   );
 }
 
-/* ---------------- panel szczegółów zamówienia ---------------- */
+/* ---------------- karta zamówienia (dane z API + dane pracownika + log) ---------------- */
 
-function OrderDetailDrawer({ orderPublicId, onClose }: { orderPublicId: string; onClose: () => void }) {
+const ACTION_LABEL: Record<HistoryEntry["action"], string> = { created: "Utworzono", edited: "Edytowano" };
+
+function OrderCardDrawer({ orderPublicId, session, onClose }: { orderPublicId: string; session: Session; onClose: () => void }) {
   const [order, setOrder] = useState<OrderDetail | null>(null);
+  const [intake, setIntake] = useState<IntakeEntry | null>(null);
   const [error, setError] = useState("");
 
+  const [editing, setEditing] = useState(false);
+  const [serialDraft, setSerialDraft] = useState("");
+  const [skuDraft, setSkuDraft] = useState("");
+  const [notesDraft, setNotesDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+
   useEffect(() => {
-    supabase
-      .from("buyback_orders")
-      .select("*")
-      .eq("order_public_id", orderPublicId)
-      .maybeSingle()
-      .then(({ data, error: err }) => {
-        if (err) setError(err.message);
-        setOrder((data as OrderDetail) ?? null);
-      });
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderPublicId]);
+
+  async function load() {
+    const [{ data: orderData, error: orderErr }, { data: intakeData }] = await Promise.all([
+      supabase.from("buyback_orders").select("*").eq("order_public_id", orderPublicId).maybeSingle(),
+      supabase
+        .from("buyback_order_intake")
+        .select("id, order_public_id, serial_number, sku, notes, entered_by_email, entered_at, history")
+        .eq("order_public_id", orderPublicId)
+        .maybeSingle(),
+    ]);
+    if (orderErr) setError(orderErr.message);
+    setOrder((orderData as OrderDetail) ?? null);
+    setIntake((intakeData as IntakeEntry) ?? null);
+  }
+
+  function startEdit() {
+    setSerialDraft(intake?.serial_number || "");
+    setSkuDraft(intake?.sku || "");
+    setNotesDraft(intake?.notes || "");
+    setEditing(true);
+  }
+
+  async function saveEdit() {
+    if (!intake) return;
+    if (!serialDraft.trim() || !skuDraft.trim()) {
+      setError("Numer seryjny i SKU są obowiązkowe.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      const entry: HistoryEntry = { action: "edited", by_email: session.user.email ?? null, at: new Date().toISOString() };
+      const { error: err } = await supabase
+        .from("buyback_order_intake")
+        .update({
+          serial_number: serialDraft.trim(),
+          sku: skuDraft.trim(),
+          notes: notesDraft.trim() || null,
+          history: [...(intake.history || []), entry],
+        })
+        .eq("id", intake.id);
+      if (err) throw err;
+      setEditing(false);
+      await load();
+    } catch (e: any) {
+      setError(e.message || "Błąd zapisu.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   const address = order?.return_address;
 
@@ -273,6 +333,45 @@ function OrderDetailDrawer({ orderPublicId, onClose }: { orderPublicId: string; 
         {order && (
           <>
             <span className="inline-block text-xs font-semibold px-2 py-1 rounded-full bg-tealsoft text-teal mb-6">{order.status}</span>
+
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-xs font-semibold text-inksoft">DANE WPROWADZONE PRZEZ PRACOWNIKA</h3>
+              {intake && !editing && (
+                <button onClick={startEdit} className="text-xs font-semibold text-teal hover:underline">Edytuj</button>
+              )}
+            </div>
+            <div className="border border-line bg-white mb-6">
+              {!intake && !editing && (
+                <div className="p-3 text-sm text-inksoft">Brak jeszcze danych — dodaj je w zakładce "Wprowadzanie".</div>
+              )}
+              {intake && !editing && (
+                <>
+                  <Row label="Numer seryjny" value={intake.serial_number} mono />
+                  <Row label="SKU" value={intake.sku} mono />
+                  <Row label="Uwagi" value={intake.notes} />
+                </>
+              )}
+              {editing && (
+                <div className="p-3 space-y-2">
+                  <div>
+                    <label className="text-xs font-semibold text-inksoft block mb-1">Numer seryjny *</label>
+                    <input value={serialDraft} onChange={(e) => setSerialDraft(e.target.value)} className="w-full border border-line bg-white px-2 py-1.5 rounded text-sm font-mono" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-inksoft block mb-1">SKU *</label>
+                    <input value={skuDraft} onChange={(e) => setSkuDraft(e.target.value)} className="w-full border border-line bg-white px-2 py-1.5 rounded text-sm font-mono" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-inksoft block mb-1">Uwagi</label>
+                    <input value={notesDraft} onChange={(e) => setNotesDraft(e.target.value)} className="w-full border border-line bg-white px-2 py-1.5 rounded text-sm" />
+                  </div>
+                  <div className="flex gap-2 pt-1">
+                    <button onClick={saveEdit} disabled={saving} className={btnPrimary}>{saving ? "Zapisywanie…" : "Zapisz"}</button>
+                    <button onClick={() => setEditing(false)} className="px-4 py-2 border border-line rounded text-sm font-semibold">Anuluj</button>
+                  </div>
+                </div>
+              )}
+            </div>
 
             <h3 className="text-xs font-semibold text-inksoft mb-2">PRODUKT</h3>
             <div className="border border-line bg-white mb-6">
@@ -332,6 +431,17 @@ function OrderDetailDrawer({ orderPublicId, onClose }: { orderPublicId: string; 
                 </div>
               </>
             ) : null}
+
+            <h3 className="text-xs font-semibold text-inksoft mb-2">LOG ZMIAN</h3>
+            <div className="border border-line bg-white mb-6 p-3 text-sm">
+              {!intake?.history?.length && <div className="text-inksoft">Brak jeszcze wpisów.</div>}
+              {intake?.history?.map((h, i) => (
+                <div key={i} className="mb-1">
+                  <span className="font-mono text-inksoft mr-1">{i + 1}.</span>
+                  {ACTION_LABEL[h.action] || h.action} przez <span className="font-semibold">{h.by_email || "—"}</span>, {fmtDateTime(h.at)}
+                </div>
+              ))}
+            </div>
           </>
         )}
       </div>
