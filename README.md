@@ -1,85 +1,110 @@
-# Magazyn ERP — prototyp (Next.js + Supabase)
+# Magazyn ERP (Next.js + Supabase)
 
-Aplikacja odwzorowuje moduł magazynowy z prototypu: kategorie urządzeń
-z własnymi polami (IMEI, bateria, ocena...), statusy (Przyjęte → Kontrola
-jakości → Gotowe do sprzedaży → Sprzedane / W naprawie / Złom), historia
-zmian, logowanie e-mailem (magic link) i role zespołu.
+Wewnętrzny system firmy do obsługi magazynu, napraw i skupu elektroniki. Moduły:
 
-## 1. Załóż projekt w Supabase (baza danych + logowanie)
+- **Magazyn** — sztuki sprzętu ze statusami + podsumowanie stanu z Fakturowni (liczba, wartość, wykres per kategoria)
+- **Zespół** — użytkownicy, role i dostęp do zakładek (rolę nadaje Admin)
+- **Serwis** — rejestr napraw z punktacją wg regulaminu premiowania
+- **Bidder** — automat cen skupu na Back Market
+- **Trade-in** — zamówienia BuyBack z Back Marketu i obsługa paczek przez pracowników
 
-1. Wejdź na https://supabase.com → "New project" (konto zakładasz przez GitHub albo e-mail).
-2. Poczekaj ok. 2 minuty, aż projekt się utworzy.
-3. W panelu projektu wejdź w **SQL Editor** → **New query**.
-4. Wklej całą zawartość pliku `supabase/schema.sql` z tego repo i kliknij **Run**.
-   To tworzy tabele `units` i `members` oraz reguły dostępu.
-5. Wejdź w **Authentication → Providers** i upewnij się, że **Email** jest włączony
-   (jest domyślnie). W **Authentication → URL Configuration** dodaj adres, pod którym
-   aplikacja będzie działać (na razie możesz zostawić `http://localhost:3000`,
-   dopiszesz adres z Vercela w kroku 4).
-6. **Ważne dla własnej firmy:** w **Authentication → Providers → Email** możesz
-   wyłączyć "Allow new users to sign up", jeśli chcesz sam ręcznie zapraszać
-   konkretne osoby z zespołu (Authentication → Users → Invite user) zamiast
-   pozwalać każdemu się zarejestrować.
-7. Wejdź w **Project Settings → API** — będą Ci potrzebne dwie wartości:
-   `Project URL` i `anon public` key.
+Szczegóły techniczne, model danych i decyzje projektowe: [CLAUDE.md](CLAUDE.md).
 
-## 2. Uruchom aplikację lokalnie (żeby sprawdzić, że działa)
+## Czego potrzebujesz
+
+Node.js 18.17 lub nowszy, konta: Supabase, GitHub, Vercel (plan **Pro** — bidder używa crona co minutę,
+a plan Hobby pozwala tylko na crony raz dziennie i deploy by się nie udał). Do integracji:
+token API Fakturowni i dane dostępowe do API Back Market.
+
+## 1. Supabase (baza danych + logowanie)
+
+1. https://supabase.com → **New project**, poczekaj ok. 2 minuty.
+2. **SQL Editor → New query** i uruchom (**Run**) kolejno pliki z `supabase/`, każdy w całości:
+   1. `schema.sql` — użytkownicy, sztuki sprzętu, cache Fakturowni
+   2. `tradein.sql` — bidder
+   3. `buyback-orders.sql` — zamówienia BuyBack i obsługa paczek
+   4. `service.sql` — rejestr napraw
+
+   Pliki są idempotentne — po zmianach w repo można je uruchomić ponownie, nic nie zepsują.
+   Po każdej aktualizacji kodu, która zmienia schemat, uruchom odpowiedni plik.
+3. **Authentication → Providers**: Email włączony (domyślnie). Dla firmowej aplikacji warto
+   wyłączyć "Allow new users to sign up" i zapraszać osoby ręcznie
+   (**Authentication → Users → Invite user**).
+4. **Authentication → URL Configuration**: dodaj adres aplikacji (lokalnie
+   `http://localhost:3000`, na produkcji adres z Vercela) jako Site URL / Redirect URL.
+   Przy każdej zmianie domeny trzeba to zaktualizować, inaczej link logowania nie zadziała.
+5. **Project Settings → API**: skopiuj `Project URL`, klucz `anon` oraz `service_role`.
+
+## 2. Zmienne środowiskowe
+
+`cp .env.local.example .env.local` i uzupełnij:
+
+| Zmienna | Skąd |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase → Project Settings → API |
+| `SUPABASE_SERVICE_ROLE_KEY` | to samo miejsce; **sekret** z pełnym dostępem do bazy, tylko po stronie serwera |
+| `CRON_SECRET` | dowolny losowy ciąg: `openssl rand -hex 24` |
+| `FAKTUROWNIA_DOMAIN` | sama subdomena, np. `recoo` dla `recoo.fakturownia.pl` |
+| `FAKTUROWNIA_API_TOKEN` | Fakturownia → Ustawienia konta → Integracja → Kod autoryzacyjny API |
+| `BACKMARKET_AUTH`, `BACKMARKET_LANG`, `BACKMARKET_UA`, `BACKMARKET_BASE_URL` | dane API Back Market (patrz `.env.local.example`) |
+
+`.env.local` nie trafia do gita. Nie wpisuj prawdziwych kluczy do `.env.local.example`.
+
+## 3. Uruchomienie lokalne
 
 ```bash
-cd magazyn-erp
-cp .env.local.example .env.local
-# wklej do .env.local wartości z kroku 1.7
 npm install
 npm run dev
 ```
 
-Otwórz `http://localhost:3000`, zaloguj się swoim e-mailem (przyjdzie link),
-wybierz rolę i dodaj pierwsze urządzenie.
+Otwórz `http://localhost:3000` i zaloguj się e-mailem (przyjdzie link).
 
-## 3. Wrzuć kod na GitHub
+**Pierwszy administrator.** Nowa osoba po zalogowaniu widzi komunikat "poproś administratora
+o rolę", a roli nikomu nie da się nadać, dopóki nie ma żadnego Admina. Pierwszą rolę nadaj
+sobie w Supabase (SQL Editor), po pierwszym zalogowaniu:
 
-```bash
-git init
-git add .
-git commit -m "Magazyn ERP - pierwszy prototyp"
+```sql
+update members set role = 'Admin' where email = 'twoj@email.pl';
 ```
 
-Załóż puste repozytorium na https://github.com/new i wypchnij kod zgodnie
-z instrukcją, którą GitHub pokaże po utworzeniu repo (`git remote add origin ...`,
-`git push -u origin main`).
+Kolejne osoby dostają role w zakładce **Zespół** (tam też wpisuje się imię i nazwisko —
+w logach pokazuje się skrócone, np. "Maksymilian J."). Zespół pokazuje tylko osoby, które
+zalogowały się choć raz.
 
-## 4. Wdróż na Vercel
+## 4. Pierwsze dane
 
-1. Wejdź na https://vercel.com → zaloguj się przez GitHub.
-2. **Add New → Project** → wybierz repozytorium `magazyn-erp`.
-3. W sekcji **Environment Variables** dodaj te same dwie zmienne co w `.env.local`:
-   - `NEXT_PUBLIC_SUPABASE_URL`
-   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-4. Kliknij **Deploy**. Po ok. minucie dostaniesz publiczny adres
-   (np. `magazyn-erp.vercel.app`).
-5. Wróć do Supabase → **Authentication → URL Configuration** i dopisz ten
-   adres jako dozwolony (Site URL / Redirect URLs), żeby logowanie linkiem
-   działało też na produkcji.
+- **Fakturownia** — zakładka Magazyn → **Odśwież**. Pierwsza synchronizacja skanuje cały
+  katalog (~19 tys. produktów, ok. minuty), kolejne są przyrostowe (cron codziennie ok. północy).
+- **Zamówienia BuyBack** — zakładka Trade-in → Raw data → **Odśwież** (pierwszy raz pobiera
+  zamówienia od 1 stycznia bieżącego roku; potem cron co 15 minut). Back Market najpewniej
+  filtruje po adresie IP, więc to działa z Vercela lub z komputera właściciela, nie z każdego
+  środowiska.
+- **Bidder** — `node scripts/import-buyback.mjs` przenosi SKU, ceny max i ostatnie ceny ze
+  starego programu (`~/Documents/Buyback Bidder 2`). Włącznik jest domyślnie wyłączony:
+  wyłącz stary program, potem w zakładce Bidder kliknij "włącz". Dwa biddery naraz
+  nadpisywałyby sobie ceny.
 
-Od tego momentu Ty i Twój zespół logujecie się pod tym adresem, z dowolnego
-miejsca — dane są współdzielone i zapisują się na żywo w Supabase.
+## 5. Wdrożenie na Vercel
 
-## Zakładka Trade-in (bidder Back Market)
+1. Wrzuć kod na GitHub (`git push`). Przy pushu przez HTTPS zamiast hasła podaj
+   **Personal Access Token** (GitHub → Settings → Developer settings → Tokens, uprawnienie `repo`).
+2. https://vercel.com → **Add New → Project** → wybierz repozytorium, framework wykryje się sam.
+3. W **Environment Variables** dodaj wszystkie zmienne z kroku 2 (wartości z `.env.local`).
+4. **Deploy**. Kolejne pushe na `main` wdrażają się automatycznie.
+5. Dopisz adres z Vercela w Supabase (krok 1.4).
 
-1. Supabase → **SQL Editor** → wklej `supabase/tradein.sql` → **Run**.
-2. Dopisz do `.env.local` zmienne `BACKMARKET_*` (patrz `.env.local.example`).
-3. `node scripts/import-buyback.mjs` — przenosi SKU, ceny max, ignorowane SKU
-   i ostatnie ceny ze starego programu (`~/Documents/Buyback Bidder 2`).
-4. Na Vercelu: plan **Pro** (cron co minutę) i te same zmienne `BACKMARKET_*`
-   w Environment Variables.
-5. Wyłącz stary bidder na Macu, potem w zakładce Trade-in kliknij „włącz”.
+Crony z `vercel.json` włączają się same po wdrożeniu (Vercel liczy je w UTC):
 
-## Co dalej
+| Ścieżka | Harmonogram | Co robi |
+|---|---|---|
+| `/api/fakturownia/sync` | codziennie 23:00 | synchronizacja stanów z Fakturowni |
+| `/api/tradein/bidder` | co minutę | kolejny "tick" biddera (przy wyłączonym bidderze nic nie robi, poza ręcznym "Uruchom teraz") |
+| `/api/tradein/orders-sync` | co 15 minut | zamówienia BuyBack z Back Marketu |
 
-- Zaproś resztę zespołu: Supabase → Authentication → Users → Invite user.
-- Kolejne moduły (Zamówienia, Serwis, integracje marketplace) dobudowujemy
-  tak samo — najlepiej przez Claude Code, wskazując mu ten projekt jako
-  punkt startowy.
-- To wciąż wersja jednofirmowa, bez twardych uprawnień per-rola (każdy
-  zalogowany może edytować wszystko) — dopracujemy to w kolejnym kroku,
-  jeśli będzie potrzebne.
+Zmiana zmiennej środowiskowej na Vercelu wymaga nowego deployu.
+
+## Uprawnienia
+
+Rola decyduje tylko o tym, jakie zakładki widzisz w menu. To nie jest twarde zabezpieczenie —
+reguły w Supabase pozwalają każdemu zalogowanemu czytać i w dużej mierze zapisywać dane.
+Twarde uprawnienia per rola są w planie (patrz [CLAUDE.md](CLAUDE.md)).
