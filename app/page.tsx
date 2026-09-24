@@ -5,6 +5,7 @@ import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import TradeInView from "./_components/TradeInView";
 import TradeInHub from "./_components/TradeInHub";
+import ServiceView from "./_components/ServiceView";
 
 /* ---------------- model danych (ten sam co w prototypie) ---------------- */
 
@@ -462,9 +463,7 @@ export default function Home() {
             />
           )}
 
-          {view === "service" && (
-            <PlaceholderView title="Serwis" description="Moduł napraw jest w budowie — pojawi się tutaj wkrótce." />
-          )}
+          {view === "service" && <ServiceView session={session} members={members} />}
 
           {view === "tradein" && <TradeInView session={session} />}
 
@@ -740,17 +739,6 @@ function TeamView({
           })}
         </tbody>
       </table>
-    </div>
-  );
-}
-
-/* ---------------- zakładka w budowie ---------------- */
-
-function PlaceholderView({ title, description }: { title: string; description: string }) {
-  return (
-    <div className="border border-line bg-white p-10 text-center">
-      <h2 className="text-lg font-semibold mb-2">{title}</h2>
-      <p className="text-inksoft text-sm">{description}</p>
     </div>
   );
 }
