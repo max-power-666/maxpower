@@ -2,93 +2,175 @@
 
 ## Cel biznesowy
 
-Wewnętrzny system do zarządzania magazynem sprzedaży/naprawy elektroniki
-(smartfony, tablety, laptopy, konsole). Budowany na potrzeby **własnej
-działalności** — na tym etapie żadnych zewnętrznych klientów korzystających
-z aplikacji, tylko właściciel i mały zespół (kilka-kilkanaście osób, role:
-Magazyn / Serwis / Obsługa klienta / Manager).
+Wewnętrzny system firmy (marka Recoo) do obsługi sprzedaży/naprawy/skupu elektroniki
+(konsole, smartfony, tablety, laptopy). Budowany na potrzeby **własnej działalności** —
+żadnych zewnętrznych klientów, tylko właściciel i mały zespół (kilka-kilkanaście osób).
 
-Docelowa inspiracja funkcjonalna: Margixa (ERP dla sprzedawców elektroniki:
-magazyn po numerach seryjnych, wielokanałowa synchronizacja stanów,
-naprawy, auto-wycena, obsługa klienta).
+Docelowa inspiracja funkcjonalna: Margixa (ERP dla sprzedawców elektroniki: magazyn po
+numerach seryjnych, wielokanałowa synchronizacja stanów, naprawy, auto-wycena).
 
-## Stack techniczny
+## Stack i hosting
 
-- **Frontend + backend:** Next.js 14 (App Router), TypeScript, Tailwind CSS
-- **Baza danych + auth:** Supabase (Postgres, magic link email login)
-- **Hosting docelowy:** Vercel (frontend) + Supabase (baza) — oba na
-  darmowych planach, bo to wciąż etap prototypu na własny użytek
-- Kod aplikacji: `app/page.tsx` (jeden duży client component —
-  świadomie uproszczone na etapie MVP). Wyjątek: zakładka Trade-in jest
-  osobno w `app/_components/TradeInView.tsx` (duży, samodzielny moduł).
+- **Next.js 14** (App Router), TypeScript, Tailwind CSS
+- **Supabase** (Postgres, realtime, magic link email login) — plan darmowy (limit 500 MB;
+  nie było decyzji o upgrade)
+- **Vercel Pro** — wymagany, bo cron co minutę (bidder) na Hobby wysadza deploy (Hobby: cron
+  tylko raz dziennie). Deploy automatyczny po `git push` na `main`.
+- Repo: `github.com/max-power-666/maxpower`
+- Cron w `vercel.json` (Vercel liczy w UTC): sync Fakturowni `0 23 * * *`, bidder `* * * * *`,
+  sync zamówień BuyBack `*/15 * * * *`. Autoryzacja crona: nagłówek `Bearer CRON_SECRET`.
 
-## Model danych (Supabase, patrz `supabase/schema.sql`)
+## Struktura kodu
 
-**Tabela `units`** — każda fizyczna sztuka sprzętu:
-- `category`: smartfon | tablet | laptop | konsola | inne
-- `fields` (jsonb): pola zależne od kategorii — smartfon ma IMEI/pojemność/
-  baterię/SIM, laptop ma CPU/RAM, itd. — patrz obiekt `CATEGORIES` w
-  `app/page.tsx`, tam jest źródło prawdy o polach per kategoria
-- `status`: Przyjęte → Kontrola jakości → Gotowe do sprzedaży →
-  Sprzedane / W naprawie / Złom
-- `history` (jsonb): log zmian statusu z `user_id` i `at` — "unit journey"
-- `price_cost`, `price_sell`, `location`, `notes`
+- `app/page.tsx` — jeden duży client component: logowanie, nawigacja, role, zakładki
+  Przegląd / Magazyn / Zespół. Większe moduły są osobno w `app/_components/`:
+  `ServiceView.tsx` (Serwis), `TradeInHub.tsx` + `TradeInOrdersView.tsx` (Trade-in),
+  `TradeInView.tsx` (Bidder).
+- `app/api/*/route.ts` — endpointy serwerowe (sekrety tylko tu, nigdy w przeglądarce):
+  `fakturownia/sync`, `tradein/bidder`, `tradein/competitors`, `tradein/orders-sync`.
+- `lib/` — `supabaseClient.ts`, `buyback.ts` (logika biddera + `isAuthorized`),
+  `displayName.ts` (skrócone imię: "Maksymilian J."), `workLog.ts` (interwały Dziś/7/30 dni
+  i liczenie czasu — wspólne dla Serwisu i Trade-in).
+- `supabase/*.sql` — schemat, każdy plik idempotentny: `schema.sql` (units, members,
+  cache Fakturowni), `tradein.sql` (bidder), `buyback-orders.sql` (zamówienia + obsługa
+  paczek), `service.sql` (rejestr napraw).
+- `scripts/import-buyback.mjs` — jednorazowy import ze starego programu Buyback Bidder.
 
-**Tabela `members`** — rola każdego zalogowanego użytkownika
-(Magazyn / Serwis / Obsługa klienta / Manager). Przy pierwszym logowaniu
-użytkownik wybiera rolę (ekran `RolePicker` w `app/page.tsx`).
+## Zakładki i role
 
-**Uwaga o uprawnieniach:** obecnie każdy zalogowany użytkownik może
-czytać/edytować wszystko (RLS pozwala każdemu `authenticated`). Role są na
-razie tylko informacyjne, nie blokują akcji. To świadomy uproszczony stan
-MVP — twarde uprawnienia per-rola to zaplanowany, ale jeszcze niezrobiony,
-kolejny krok.
+Role: **Admin, Magazyn, Serwis, Bidder**. Rolę nadaje Admin w zakładce Zespół (tam też
+imię i nazwisko — `members.name`). Nowa osoba po pierwszym logowaniu dostaje pusty wiersz
+w `members` i ekran "poproś administratora o rolę" (`NoRoleScreen`); sama roli nie wybiera.
+Przegląd jest wspólną stroną startową. Mapa dostępu: `ROLE_ACCESS` w `app/page.tsx`.
 
-## Moduł Trade-in (bidder cen skupu Back Market)
+| Zakładka | Klucz widoku | Kto widzi |
+|---|---|---|
+| Przegląd | `overview` | wszyscy |
+| Magazyn | `inventory` | Admin, Magazyn |
+| Zespół | `team` | Admin |
+| Serwis | `service` | Admin, Serwis |
+| Bidder | `tradein` | Admin, Bidder |
+| Trade-in | `orders` | tylko Admin (nie ma jeszcze roli "Trade-in") |
 
-Przeniesiony ze starego programu "Buyback Bidder" (Node + pliki JSON + launchd
-na Macu, folder `~/Documents/Buyback Bidder 2`). Teraz:
-- dane w Supabase: `buyback_skus`, `buyback_runs`, `buyback_log`,
-  `buyback_price_history`, `buyback_settings` — schemat w `supabase/tradein.sql`
-- logika: `lib/buyback.ts`; wołana przez `app/api/tradein/bidder/route.ts`
-  (GET = Vercel Cron co minutę, POST = przycisk "Uruchom teraz")
-- przebieg (~180 SKU × ~3 s) jest dzielony na "ticki" po max ~2 min, bo funkcja
-  Vercela ma limit czasu; kursor to `last_attempt_at < run.started_at`
-- **wymaga Vercel Pro** (cron co minutę + `maxDuration = 300`); na Hobby deploy
-  z takim cronem się nie uda
-- `buyback_settings.enabled` = główny włącznik; domyślnie wyłączony. Nie włączać,
-  dopóki stary bidder na Macu działa — oba nadpisywałyby sobie ceny
-- UWAGA: bidder na chwilę ustawia 10 € na listingu (żeby odczytać prawdziwe
-  price_to_win). `in_progress_since` pilnuje, żeby po ubitej funkcji przywrócić ceny
-- historia cen zapisywana tylko przy zmianie ceny (limit 500 MB bazy na darmowym Supabase)
-- import danych ze starego programu: `node scripts/import-buyback.mjs`
+Uwaga: nazwa zakładki "Bidder" to klucz `tradein`, a zakładka "Trade-in" to klucz `orders` —
+historyczne, nie mylić. Aktywna zakładka jest zapamiętywana w `localStorage`.
 
-## Historia projektu / decyzje
+## Model danych i moduły
 
-- Zaczęliśmy od prototypu jako artefakt HTML z bazą wbudowaną w Claude —
-  ten Next.js + Supabase to jego "prawdziwa" wersja produkcyjna.
-- Naprawiony bug: `role` state musi rozróżniać `undefined` (jeszcze nie
-  wczytano z bazy) od `""` (wczytano, brak przypisanej roli → pokaż
-  RolePicker) — wcześniej oba stany błędnie renderowały pustą stronę.
-- Autoryzacja: Supabase magic link (e-mail). Rozważ wyłączenie "Allow new
-  users to sign up" w Supabase i ręczne zapraszanie osób z zespołu, skoro
-  to zamknięta aplikacja firmowa.
+**Magazyn.** Tabela `units` (sztuki sprzętu: `category`, `fields` jsonb, `status`, `history`
+jsonb, ceny) — źródło prawdy o polach per kategoria to `CATEGORIES` w `page.tsx`. Przycisk
+"+ Dodaj urządzenie" został **usunięty z UI** na prośbę właściciela (kod `AddModal`/`addUnit`
+nadal jest w `page.tsx`, ale nic go nie wywołuje). Pod tabelą `units` jest podsumowanie z
+Fakturowni: liczba sztuk ze `stock_level = 1`, wartość wg **ceny zakupu brutto**
+(`price_gross` jest w Fakturowni puste dla większości sztuk), wykres kołowy per kategoria
+(top 5 + "Inne"). Dane: `fakturownia_stock_cache` (tylko sztuki ze stanem 1) +
+`fakturownia_sync_meta`. Sync `app/api/fakturownia/sync`: pierwszy pełny (~19 tys. produktów,
+~1 min, zrobiony już), kolejne przyrostowe przez `date_from`. Zapis tylko serwer
+(service_role); zespół ma tylko odczyt.
 
-## Plan rozwoju (kolejność, jak dotąd ustalona)
+**Bidder** (zakładka Bidder, `TradeInView.tsx`). Automat cen skupu Back Market (DE/ES/FR/IT):
+dla każdego SKU ustawia chwilowo 10 €, czyta `price_to_win` i ustawia `min(price_to_win, cena max)`.
+Tabele `buyback_skus`, `buyback_runs`, `buyback_log`, `buyback_price_history`,
+`buyback_settings` (`tradein.sql`). Logika `lib/buyback.ts`, route `tradein/bidder`
+(GET = cron, POST = "Uruchom teraz"). Przebieg (~135 SKU × ~3 s) dzielony na "ticki" po
+max ~2 min; kursor to `last_attempt_at < run.started_at`. `in_progress_since` pilnuje
+przywrócenia cen po ubitej funkcji. Historia cen tylko przy zmianie ceny. Stary program na
+Macu jest wyłączony; bidder działa na produkcji, włącznik: `buyback_settings.enabled`.
 
-1. ✅ Magazyn/Inwentarz (obecny stan)
-2. ⬜ Zamówienia
-3. ⬜ Serwis / naprawy
-4. 🟡 Trade-in / bidder skupu Back Market — zrobione, czeka na wdrożenie
-5. ⬜ Integracje z kanałami sprzedaży (Allegro, eBay, Back Market) —
-   osobny etap, wymaga kluczy API tych platform
-6. ⬜ Twarde uprawnienia per-rola
+**Trade-in** (zakładka Trade-in, `TradeInHub.tsx`) — dwa podwidoki:
+- *Raw data*: podgląd zsynchronizowanych zamówień BuyBack (`buyback_orders`, sync co 15 min
+  z `GET /ws/buyback/v1/orders`: pierwszy przebieg od 1 stycznia przez `creationDate`,
+  potem `modificationDate` — łapie nowe i zmiany statusu). Zapis tylko serwer.
+- *Wprowadzanie*: obsługa paczek przez pracowników. Pracownik podaje numer zamówienia LUB
+  przesyłki, aplikacja znajduje zamówienie (`buyback_order_intake`, unikalne na
+  `order_public_id` — ta sama paczka nie zaliczy się dwa razy). Status:
+  W trakcie / Obsłużona / Problem, czas obsługi, punkty 100/6 za paczkę tylko po
+  "Obsłużona", podsumowanie punktacji Dziś/7/30 dni.
+- Numer zamówienia jest linkiem do **karty zamówienia** (panel boczny): dane z API + dane
+  pracownika (numer seryjny, SKU, uwagi — edytowalne, opcjonalne) + numerowany log zmian.
+
+**Serwis** (`ServiceView.tsx`, `service_log`). Rejestr napraw wg tabeli z regulaminu:
+Joy-Con para 15 pkt, kontroler PS4 25, Xbox One 35, PS5 12, czyszczenie konsoli 45.
+Jeden wiersz = jedna naprawa: `started_at`, status (w_naprawie / naprawiony / uszkodzony),
+`finished_at`. Pracownik = zawsze zalogowana osoba (nie do wyboru). Wpisów nie da się
+usuwać z UI. Podsumowanie punktacji u góry (Dziś/7/30 dni) liczy tylko "naprawiony".
+
+## Regulamin premiowania (12.10.2026) — co z niego wynika dla kodu
+
+Zasady, które kształtują Serwis i Trade-in (pełny PDF ma właściciel):
+- punkty tylko po **prawidłowym zakończeniu** procesu (§2 ust. 4) → liczymy dopiero dla
+  statusu końcowego "naprawiony" / "obsłużona";
+- jedna paczka/urządzenie zaliczone **raz**, zakaz przypisywania sobie cudzej pracy i
+  wielokrotnego rejestrowania (§2 ust. 3, §9) → unikalność paczki, pracownik z sesji, brak
+  usuwania wpisów;
+- Trade-in i testerzy: dokładne ułamki (100/6 pkt za paczkę, 100/6,5 za urządzenie), **bez
+  zaokrąglania** przed ustaleniem progu (§2 ust. 7, §4 ust. 8);
+- "Czas" naprawy/paczki jest **tylko informacyjny** — wydajność w regulaminie to punkty /
+  godziny *przepracowane* z ewidencji czasu pracy (§4), nie suma czasów zadań.
+
+Świadomie **nie zrobione**: kwota premii w zł, wydajność pkt/h, wskaźnik kwalifikacyjny 90%
+(§4-§7) — wymagają ewidencji godzin pracy, urlopów i nieobecności, której apka nie ma.
+Nie zrobione też: punkty testerów. Punkty z różnych obszarów mają się sumować w jeden wynik
+miesięczny (§2 ust. 6) — dziś każdy obszar ma osobną tabelę i podsumowanie.
+
+## Wzorce w kodzie (używaj ich przy nowych modułach)
+
+- **Log zmian w jsonb:** `history` = `[{action: "created"|"edited", by_email, at, changes?:
+  [{field, from, to}]}]` (karta zamówienia; wcześniej `units.history`). Docelowo ten sam
+  wzorzec dla kart towarów z magazynu i zamówień marketplace.
+- **Dane zewnętrzne:** cron Vercela → route serwerowy woła API → zapis do tabeli
+  w Supabase kluczem `service_role` → UI czyta tabelę (plus realtime). Zespół ma
+  tylko `select`. Sekrety wyłącznie w route'ach.
+- **Autoryzacja route'ów:** `isAuthorized` (sekret crona albo token zalogowanego użytkownika
+  w `Authorization: Bearer`).
+- **Kto to zrobił:** zapisujemy e-mail (stały identyfikator), a wyświetlamy przez
+  `displayNameForEmail(email, members)` → skrócone imię, w razie braku imienia e-mail.
+- **Cykl życia rekordu:** status + `started_at`/`finished_at`, `finished_at` czyszczone przy
+  powrocie do statusu początkowego (wzór: `service_log`, `buyback_order_intake`).
+
+## Uprawnienia
+
+Filtrowanie zakładek według roli to **tylko UI** (chowa pozycje w menu). RLS w Supabase
+nadal pozwala każdemu `authenticated` czytać prawie wszystko, a wiele tabel także zapisywać
+(`units`, `members`, ceny max i włącznik biddera, `service_log`, `buyback_order_intake`).
+To świadomy stan MVP — twarde uprawnienia per rola są zaplanowane. Ważne przy Bidderze:
+zmienia ceny na żywym Back Markecie, więc to pierwszy kandydat do zaostrzenia.
+
+## Zmienne środowiskowe (tylko nazwy; wartości w `.env.local` i w Vercel)
+
+`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`,
+`CRON_SECRET`, `FAKTUROWNIA_DOMAIN` (sama subdomena, np. `recoo`), `FAKTUROWNIA_API_TOKEN`,
+`BACKMARKET_AUTH`, `BACKMARKET_LANG`, `BACKMARKET_UA`, `BACKMARKET_BASE_URL`.
+Zmiana zmiennej na Vercelu wymaga nowego deployu. W Supabase (Authentication → URL
+Configuration) musi być aktualny adres produkcyjny, inaczej magic link nie zadziała.
 
 ## Rzeczy, o które trzeba dbać
 
-- `.env.local` (klucze Supabase) **nigdy** nie trafia do gita — sprawdź
-  `.gitignore`.
-- Przy każdej nowej funkcji: jedna zmiana na raz, testowana na
-  `localhost:3000` (`npm run dev`) przed przejściem dalej.
-- Po każdej działającej zmianie: commit, żeby można było bezpiecznie
-  cofnąć eksperymenty.
+- `.env.local` **nigdy** nie trafia do gita (jest w `.gitignore`). Nie wklejać prawdziwych
+  kluczy do `.env.local.example`.
+- **Migracje SQL uruchamia człowiek** w Supabase → SQL Editor (asystent ma tylko REST po
+  service role, bez DDL). Po każdej zmianie schematu przypomnij, który plik uruchomić.
+  Pliki `supabase/*.sql` są idempotentne i trzymają aktualny kształt tabel.
+- Supabase (PostgREST) zwraca domyślnie **max 1000 wierszy** na zapytanie — przy większych
+  tabelach paginuj przez `.range()` (tak robi cache Fakturowni).
+- Back Market najpewniej filtruje po IP — endpointów nie da się testować z sandboxa
+  asystenta (401 nawet dla działających). Testuje się na Vercelu albo na komputerze
+  właściciela.
+- Cron Vercela liczy w UTC; "północ" polska to `23:00`/`22:00` UTC zależnie od czasu.
+- Bidder: nie włączać drugiej instancji (np. starego programu) — nadpisywałyby sobie ceny.
+- Przy każdej nowej funkcji: jedna zmiana na raz, sprawdzona przed przejściem dalej
+  (`npx tsc --noEmit`, lokalnie `npm run dev`). Po każdej działającej zmianie: commit i push
+  (Vercel deployuje z `main`).
+
+## Plan rozwoju
+
+1. ✅ Magazyn / inwentarz + podsumowanie z Fakturowni
+2. ⬜ Zamówienia z marketplace (karta jak w Trade-in, ten sam wzorzec logu)
+3. ✅ Serwis: rejestr napraw i punktacja · ⬜ Serwis jako moduł napraw sprzętu z magazynu
+4. ✅ Bidder skupu Back Market (na produkcji)
+5. ✅ Trade-in: zamówienia BuyBack + obsługa paczek z punktacją · ⬜ rola "Trade-in"
+6. ⬜ Karta towaru z magazynu (dane + log zmian, jak karta zamówienia)
+7. ⬜ Punkty testerów i łączne podsumowanie miesięczne ze wszystkich obszarów
+8. ⬜ Ewidencja czasu pracy → wydajność pkt/h i premia z regulaminu
+9. ⬜ Integracje z kanałami sprzedaży (Allegro, eBay) — osobny etap, wymaga kluczy API
+10. ⬜ Twarde uprawnienia per rola (RLS)
