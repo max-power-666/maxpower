@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
+import { INTERVALS, fmtDuration, rangeStart, type Interval } from "@/lib/workLog";
 
 // Rejestracja pracy serwisanta wg tabeli punktowej z Regulaminu premiowania (§2, 12.10.2026).
 // Nie liczy premii w zł (Regulamin §4-§7) — wymagałoby to danych o czasie pracy/urlopach,
@@ -38,13 +39,6 @@ const STATUS_STYLE: Record<StatusKey, string> = {
   uszkodzony: "bg-rustsoft text-rust",
 };
 
-type Interval = "today" | "week" | "month";
-const INTERVALS: { key: Interval; label: string }[] = [
-  { key: "today", label: "Dziś" },
-  { key: "week", label: "Ostatnie 7 dni" },
-  { key: "month", label: "Ostatnie 30 dni" },
-];
-
 type LogRow = {
   id: number;
   employee_email: string | null;
@@ -56,29 +50,8 @@ type LogRow = {
   finished_at: string | null;
 };
 
-function rangeStart(interval: Interval): string {
-  const d = new Date();
-  if (interval === "today") {
-    d.setHours(0, 0, 0, 0);
-  } else if (interval === "week") {
-    d.setDate(d.getDate() - 7);
-  } else {
-    d.setDate(d.getDate() - 30);
-  }
-  return d.toISOString();
-}
-
 function fmtDateTime(iso: string) {
   return new Date(iso).toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
-}
-
-function fmtDuration(startIso: string, endIso: string | null) {
-  if (!endIso) return "w trakcie";
-  const ms = Date.parse(endIso) - Date.parse(startIso);
-  const totalMin = Math.max(0, Math.round(ms / 60000));
-  const h = Math.floor(totalMin / 60);
-  const m = totalMin % 60;
-  return h > 0 ? `${h} godz. ${m} min` : `${m} min`;
 }
 
 const btnPrimary = "bg-ink text-paper px-4 py-2 rounded text-sm font-semibold disabled:opacity-50";

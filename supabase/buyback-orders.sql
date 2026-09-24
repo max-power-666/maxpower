@@ -61,25 +61,45 @@ drop policy if exists "authenticated read buyback_orders_sync_meta" on buyback_o
 create policy "authenticated read buyback_orders_sync_meta" on buyback_orders_sync_meta
   for select using (auth.role() = 'authenticated');
 
--- Ręczne wprowadzanie zamówień przez pracowników — pracownik podaje numer zamówienia
--- (musi już istnieć w buyback_orders, stąd klucz obcy) i uzupełnia numer seryjny + SKU.
--- Wpisy nie są edytowalne z UI (tylko insert) — to log tego, kto i kiedy co wprowadził,
--- tak jak history w units.
--- Jeden wpis = jedna karta zakupu Trade-in (unique na order_public_id — kolejne "wpisy"
--- dla tego samego zamówienia to EDYCJE tego wiersza, nie nowe rekordy).
+-- Obsługa paczek Trade-in przez pracowników (Regulamin premiowania z 12.10.2026, §2).
+-- Pracownik podaje numer zamówienia LUB numer przesyłki — aplikacja znajduje zamówienie
+-- w buyback_orders (stąd klucz obcy) i zakłada rekord ze statusem "w_trakcie".
+--
+-- Jeden wiersz = jedna paczka = jedna karta (unique na order_public_id). To zarazem
+-- pilnuje Regulaminu §2 ust. 3 i §9 ust. 2: ta sama paczka nie może być zaliczona dwa razy.
+-- entered_at = początek obsługi; finished_at ustawia się przy przejściu na status końcowy.
+-- "Czas" (finished_at - entered_at) jest tylko informacyjny. Punkty do podsumowania liczą się
+-- tylko dla status='obsluzona' (§2 ust. 4: po prawidłowym zakończeniu procesu).
 create table if not exists buyback_order_intake (
   id bigint generated always as identity primary key,
   order_public_id text not null references buyback_orders(order_public_id),
-  serial_number text not null,
-  sku text not null,
+  serial_number text,                        -- opcjonalne, uzupełniane na karcie zamówienia
+  sku text,                                  -- opcjonalne, uzupełniane na karcie zamówienia
   notes text default '',
   entered_by_user_id uuid references auth.users(id),
   entered_by_email text,
   entered_at timestamptz not null default now(),
-  history jsonb not null default '[]'::jsonb   -- [{action: "created"|"edited", by_email, at}, ...]
+  history jsonb not null default '[]'::jsonb,  -- [{action: "created"|"edited", by_email, at, changes?}, ...]
+  status text not null default 'w_trakcie',    -- w_trakcie | obsluzona | problem
+  finished_at timestamptz,
+  -- Migawka punktów za paczkę: 100/6 (Regulamin §2 tabela). Celowo bez zaokrąglania (§2 ust. 7,
+  -- §4 ust. 8) — zaokrąglamy dopiero przy wyświetlaniu. Gdyby stawka się zmieniła, zmieniamy
+  -- default; stare wiersze zachowują swoją wartość.
+  points numeric not null default (100.0 / 6.0)
 );
+
+-- Migracja z poprzedniej wersji (serial_number/sku wymagane, brak statusu) — bezpieczna do
+-- wielokrotnego uruchomienia.
+alter table buyback_order_intake alter column serial_number drop not null;
+alter table buyback_order_intake alter column sku drop not null;
+alter table buyback_order_intake add column if not exists status text not null default 'w_trakcie';
+alter table buyback_order_intake add column if not exists finished_at timestamptz;
+alter table buyback_order_intake add column if not exists points numeric not null default (100.0 / 6.0);
+
 create index if not exists buyback_order_intake_order_idx on buyback_order_intake (order_public_id);
 create index if not exists buyback_order_intake_entered_idx on buyback_order_intake (entered_at desc);
+create index if not exists buyback_order_intake_finished_idx on buyback_order_intake (finished_at desc);
+create index if not exists buyback_orders_tracking_idx on buyback_orders (tracking_number);
 
 do $$
 begin

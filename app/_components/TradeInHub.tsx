@@ -1,14 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import TradeInOrdersView from "./TradeInOrdersView";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
+import { INTERVALS, fmtDuration, rangeStart, type Interval } from "@/lib/workLog";
 
-// Zakładka Trade-in: domyślnie wprowadzanie zamówień przez pracowników (IntakeView),
-// plus podstrona "Raw data" z pełną, zsynchronizowaną listą zamówień BuyBack
-// (TradeInOrdersView — bez zmian, tylko przeniesiona pod ten sam nav item).
+// Zakładka Trade-in: domyślnie obsługa paczek przez pracowników (IntakeView — rejestr pracy
+// wg Regulaminu premiowania, jak Serwis), plus podstrona "Raw data" z pełną, zsynchronizowaną
+// listą zamówień BuyBack (TradeInOrdersView).
+//
+// Jedna paczka = jeden rekord z cyklem życia w statusie. Punkty (100/6 za paczkę) liczą się do
+// podsumowania dopiero dla "Obsłużona" (Regulamin §2 ust. 4). "Czas" jest tylko informacyjny.
 
 const pill = (active: boolean) =>
   `px-3 py-1.5 rounded-full text-sm font-semibold border ${active ? "bg-ink text-paper border-ink" : "bg-white border-line"}`;
@@ -17,16 +21,39 @@ const btnPrimary = "bg-ink text-paper px-4 py-2 rounded text-sm font-semibold di
 type FieldChange = { field: string; from: string | null; to: string | null };
 type HistoryEntry = { action: "created" | "edited"; by_email: string | null; at: string; changes?: FieldChange[] };
 
+const INTAKE_STATUSES = [
+  { key: "w_trakcie", label: "W trakcie" },
+  { key: "obsluzona", label: "Obsłużona" },
+  { key: "problem", label: "Problem" },
+] as const;
+type IntakeStatus = (typeof INTAKE_STATUSES)[number]["key"];
+const INTAKE_STATUS_LABEL = Object.fromEntries(INTAKE_STATUSES.map((s) => [s.key, s.label])) as Record<IntakeStatus, string>;
+const INTAKE_STATUS_STYLE: Record<IntakeStatus, string> = {
+  w_trakcie: "bg-ambersoft text-amber",
+  obsluzona: "bg-tealsoft text-teal",
+  problem: "bg-rustsoft text-rust",
+};
+
 type IntakeEntry = {
   id: number;
   order_public_id: string;
-  serial_number: string;
-  sku: string;
+  serial_number: string | null;
+  sku: string | null;
   notes: string | null;
   entered_by_email: string | null;
   entered_at: string;
+  finished_at: string | null;
+  status: IntakeStatus;
+  points: number;
   history: HistoryEntry[];
+  buyback_orders?: { tracking_number: string | null } | null;
 };
+
+const INTAKE_COLUMNS = "id, order_public_id, serial_number, sku, notes, entered_by_email, entered_at, finished_at, status, points, history";
+
+function fmtPoints(n: number | string) {
+  return Number(n).toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
 
 type OrderDetail = {
   order_public_id: string;
@@ -88,7 +115,7 @@ export default function TradeInHub({ session, members }: { session: Session; mem
   );
 }
 
-/* ---------------- wprowadzanie danych przez pracowników ---------------- */
+/* ---------------- obsługa paczek Trade-in przez pracowników ---------------- */
 
 function IntakeView({
   session,
@@ -99,14 +126,13 @@ function IntakeView({
   members: MemberLite[];
   onOpenOrder: (id: string) => void;
 }) {
+  const [interval, setInterval] = useState<Interval>("today");
+  const [rangeRows, setRangeRows] = useState<{ entered_by_email: string | null; points: number }[]>([]);
   const [entries, setEntries] = useState<IntakeEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const [orderPublicId, setOrderPublicId] = useState("");
-  const [serialNumber, setSerialNumber] = useState("");
-  const [sku, setSku] = useState("");
-  const [notes, setNotes] = useState("");
+  const [lookup, setLookup] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
 
@@ -119,55 +145,97 @@ function IntakeView({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [interval]);
 
   async function load() {
     setLoading(true);
     setError("");
-    const { data, error: err } = await supabase
-      .from("buyback_order_intake")
-      .select("id, order_public_id, serial_number, sku, notes, entered_by_email, entered_at, history")
-      .order("entered_at", { ascending: false })
-      .limit(100);
-    if (err) setError(`Nie udało się wczytać wpisów: ${err.message}`);
-    setEntries((data as IntakeEntry[]) || []);
-    setLoading(false);
+    try {
+      const [{ data: rangeData, error: rangeErr }, { data: listData, error: listErr }] = await Promise.all([
+        supabase
+          .from("buyback_order_intake")
+          .select("entered_by_email, points")
+          .eq("status", "obsluzona")
+          .gte("finished_at", rangeStart(interval)),
+        supabase
+          .from("buyback_order_intake")
+          .select(`${INTAKE_COLUMNS}, buyback_orders(tracking_number)`)
+          .order("entered_at", { ascending: false })
+          .limit(50),
+      ]);
+      if (rangeErr) throw rangeErr;
+      if (listErr) throw listErr;
+      setRangeRows(rangeData || []);
+      setEntries((listData as unknown as IntakeEntry[]) || []);
+    } catch (e: any) {
+      setError(`Nie udało się wczytać paczek: ${e.message || e}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const summary = useMemo(() => {
+    const totals = new Map<string, { count: number; points: number }>();
+    for (const r of rangeRows) {
+      const key = r.entered_by_email || "—";
+      const entry = totals.get(key) || { count: 0, points: 0 };
+      entry.count += 1;
+      entry.points += Number(r.points) || 0;
+      totals.set(key, entry);
+    }
+    return Array.from(totals.entries())
+      .map(([email, v]) => ({ email, ...v }))
+      .sort((a, b) => b.points - a.points);
+  }, [rangeRows]);
+
+  // Numer zamówienia albo numer przesyłki -> order_public_id z zsynchronizowanych zamówień.
+  async function resolveOrderId(value: string): Promise<string> {
+    const { data: byOrder } = await supabase
+      .from("buyback_orders")
+      .select("order_public_id")
+      .eq("order_public_id", value)
+      .maybeSingle();
+    if (byOrder) return byOrder.order_public_id as string;
+
+    const { data: byTracking } = await supabase
+      .from("buyback_orders")
+      .select("order_public_id")
+      .eq("tracking_number", value)
+      .limit(2);
+    if (byTracking && byTracking.length === 1) return byTracking[0].order_public_id as string;
+    if (byTracking && byTracking.length > 1) {
+      throw new Error(`Numer przesyłki "${value}" pasuje do kilku zamówień — podaj numer zamówienia.`);
+    }
+    throw new Error(
+      `Nie znaleziono zamówienia ani przesyłki "${value}" wśród zsynchronizowanych — sprawdź numer albo poczekaj na synchronizację (zakładka Raw data).`
+    );
   }
 
   async function submit() {
     setFormError("");
-    const orderId = orderPublicId.trim();
-    const serial = serialNumber.trim();
-    const skuVal = sku.trim();
-    if (!orderId || !serial || !skuVal) {
-      setFormError("Numer zamówienia, numer seryjny i SKU są obowiązkowe.");
+    const value = lookup.trim().toUpperCase();
+    if (!value) {
+      setFormError("Podaj numer zamówienia lub numer przesyłki.");
       return;
     }
     setSubmitting(true);
     try {
-      const now = new Date().toISOString();
-      const { error } = await supabase.from("buyback_order_intake").insert({
+      const orderId = await resolveOrderId(value);
+      const { error: err } = await supabase.from("buyback_order_intake").insert({
         order_public_id: orderId,
-        serial_number: serial,
-        sku: skuVal,
-        notes: notes.trim() || null,
         entered_by_user_id: session.user.id,
         entered_by_email: session.user.email,
-        history: [{ action: "created", by_email: session.user.email, at: now }],
+        status: "w_trakcie",
+        history: [{ action: "created", by_email: session.user.email, at: new Date().toISOString() }],
       });
-      if (error) {
-        if (error.code === "23505" || error.message.includes("duplicate key")) {
-          throw new Error(`To zamówienie ma już kartę — otwórz ją z listy poniżej, żeby edytować.`);
+      if (err) {
+        if (err.code === "23505" || err.message.includes("duplicate key")) {
+          throw new Error(`Paczka ${orderId} jest już zarejestrowana — otwórz ją z listy poniżej.`);
         }
-        if (error.message.includes("foreign key")) {
-          throw new Error(`Nie znaleziono zamówienia "${orderId}" wśród zsynchronizowanych — sprawdź numer albo poczekaj na synchronizację (zakładka Raw data).`);
-        }
-        throw error;
+        throw err;
       }
-      setOrderPublicId("");
-      setSerialNumber("");
-      setSku("");
-      setNotes("");
+      setLookup("");
     } catch (e: any) {
       setFormError(e.message || "Błąd zapisu.");
     } finally {
@@ -175,81 +243,123 @@ function IntakeView({
     }
   }
 
+  async function changeStatus(row: IntakeEntry, status: IntakeStatus) {
+    if (status === row.status) return;
+    const now = new Date().toISOString();
+    const entry: HistoryEntry = {
+      action: "edited",
+      by_email: session.user.email ?? null,
+      at: now,
+      changes: [{ field: "Status", from: INTAKE_STATUS_LABEL[row.status], to: INTAKE_STATUS_LABEL[status] }],
+    };
+    const { error: err } = await supabase
+      .from("buyback_order_intake")
+      .update({
+        status,
+        finished_at: status === "w_trakcie" ? null : now,
+        history: [...(row.history || []), entry],
+      })
+      .eq("id", row.id);
+    if (err) setError(`Nie udało się zmienić statusu: ${err.message}`);
+  }
+
   return (
     <div>
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="text-xs font-semibold text-inksoft">PODSUMOWANIE PUNKTACJI (obsłużone paczki)</h2>
+        <div className="flex gap-2">
+          {INTERVALS.map((i) => (
+            <button key={i.key} onClick={() => setInterval(i.key)} className={pill(interval === i.key)}>{i.label}</button>
+          ))}
+        </div>
+      </div>
+      <div className="border border-line bg-white mb-6">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-inksoft border-b border-line">
+              <th className="p-3">Pracownik</th>
+              <th className="p-3 text-right">Liczba paczek</th>
+              <th className="p-3 text-right">Punkty</th>
+            </tr>
+          </thead>
+          <tbody>
+            {!loading && summary.length === 0 && (
+              <tr><td colSpan={3} className="p-6 text-center text-inksoft text-sm">Brak obsłużonych paczek w tym okresie.</td></tr>
+            )}
+            {summary.map((s) => (
+              <tr key={s.email} className="border-b border-line last:border-b-0">
+                <td className="p-3 font-semibold">{displayNameForEmail(s.email, members)}</td>
+                <td className="p-3 text-right font-mono">{s.count}</td>
+                <td className="p-3 text-right font-mono font-semibold">{fmtPoints(s.points)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {error && <p className="text-rust text-xs mb-3">{error}</p>}
+
       <div className="border border-line bg-white p-4 mb-6">
-        <h2 className="text-xs font-semibold text-inksoft mb-3">NOWY WPIS</h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
-          <div>
-            <label className="text-xs font-semibold text-inksoft block mb-1">Numer zamówienia *</label>
+        <h2 className="text-xs font-semibold text-inksoft mb-3">ROZPOCZNIJ OBSŁUGĘ PACZKI</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+          <div className="md:col-span-2">
+            <label className="text-xs font-semibold text-inksoft block mb-1">Numer zamówienia lub numer przesyłki *</label>
             <input
-              value={orderPublicId}
-              onChange={(e) => setOrderPublicId(e.target.value)}
-              placeholder="np. US-24527-ABCDE"
+              value={lookup}
+              onChange={(e) => setLookup(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && !submitting && submit()}
+              placeholder="np. ES-26394-ODTNR"
               className="w-full border border-line bg-white px-2 py-2 rounded text-sm font-mono"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-semibold text-inksoft block mb-1">Numer seryjny *</label>
-            <input
-              value={serialNumber}
-              onChange={(e) => setSerialNumber(e.target.value)}
-              className="w-full border border-line bg-white px-2 py-2 rounded text-sm font-mono"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-semibold text-inksoft block mb-1">SKU *</label>
-            <input
-              value={sku}
-              onChange={(e) => setSku(e.target.value)}
-              className="w-full border border-line bg-white px-2 py-2 rounded text-sm font-mono"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-semibold text-inksoft block mb-1">Uwagi</label>
-            <input
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              className="w-full border border-line bg-white px-2 py-2 rounded text-sm"
             />
           </div>
         </div>
         {formError && <p className="text-rust text-xs mb-2">{formError}</p>}
         <button onClick={submit} disabled={submitting} className={btnPrimary}>
-          {submitting ? "Zapisywanie…" : "Dodaj wpis"}
+          {submitting ? "Szukanie…" : "Rozpocznij"}
         </button>
       </div>
 
-      {error && <p className="text-rust text-xs mb-3">{error}</p>}
-
+      <h2 className="text-xs font-semibold text-inksoft mb-2">OSTATNIE PACZKI</h2>
       <div className="border border-line bg-white overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-inksoft border-b border-line">
-              <th className="p-3">Numer zamówienia</th>
+              <th className="p-3">Rozpoczęto</th>
               <th className="p-3">Pracownik</th>
-              <th className="p-3">Data wprowadzenia</th>
-              <th className="p-3">Numer seryjny</th>
-              <th className="p-3">SKU</th>
-              <th className="p-3">Uwagi</th>
+              <th className="p-3">Numer zamówienia</th>
+              <th className="p-3">Numer przesyłki</th>
+              <th className="p-3">Status</th>
+              <th className="p-3">Czas</th>
+              <th className="p-3 text-right">Punkty</th>
             </tr>
           </thead>
           <tbody>
             {!loading && entries.length === 0 && (
-              <tr><td colSpan={6} className="p-6 text-center text-inksoft text-sm">Brak wpisów — dodaj pierwszy powyżej.</td></tr>
+              <tr><td colSpan={7} className="p-6 text-center text-inksoft text-sm">Brak paczek — rozpocznij pierwszą powyżej.</td></tr>
             )}
             {entries.map((e) => (
               <tr key={e.id} className="border-b border-line last:border-b-0 hover:bg-paper">
+                <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDateTime(e.entered_at)}</td>
+                <td className="p-3">{displayNameForEmail(e.entered_by_email, members)}</td>
                 <td className="p-3">
                   <button onClick={() => onOpenOrder(e.order_public_id)} className="font-mono font-semibold text-teal hover:underline">
                     {e.order_public_id}
                   </button>
                 </td>
-                <td className="p-3">{displayNameForEmail(e.entered_by_email, members)}</td>
-                <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDateTime(e.entered_at)}</td>
-                <td className="p-3 font-mono">{e.serial_number}</td>
-                <td className="p-3 font-mono">{e.sku}</td>
-                <td className="p-3 text-inksoft">{e.notes || "—"}</td>
+                <td className="p-3 font-mono">{e.buyback_orders?.tracking_number || "—"}</td>
+                <td className="p-3">
+                  <select
+                    value={e.status}
+                    onChange={(ev) => changeStatus(e, ev.target.value as IntakeStatus)}
+                    className={`text-xs font-semibold px-2 py-1 rounded-full border-none ${INTAKE_STATUS_STYLE[e.status]}`}
+                  >
+                    {INTAKE_STATUSES.map((s) => (
+                      <option key={s.key} value={s.key}>{s.label}</option>
+                    ))}
+                  </select>
+                </td>
+                <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDuration(e.entered_at, e.finished_at)}</td>
+                <td className="p-3 text-right font-mono font-semibold">{e.status === "obsluzona" ? fmtPoints(e.points) : "—"}</td>
               </tr>
             ))}
           </tbody>
@@ -294,7 +404,7 @@ function OrderCardDrawer({
       supabase.from("buyback_orders").select("*").eq("order_public_id", orderPublicId).maybeSingle(),
       supabase
         .from("buyback_order_intake")
-        .select("id, order_public_id, serial_number, sku, notes, entered_by_email, entered_at, history")
+        .select(INTAKE_COLUMNS)
         .eq("order_public_id", orderPublicId)
         .maybeSingle(),
     ]);
@@ -312,11 +422,11 @@ function OrderCardDrawer({
 
   async function saveEdit() {
     if (!intake) return;
-    if (!serialDraft.trim() || !skuDraft.trim()) {
-      setError("Numer seryjny i SKU są obowiązkowe.");
-      return;
-    }
-    const next = { serial_number: serialDraft.trim(), sku: skuDraft.trim(), notes: notesDraft.trim() || null };
+    const next = {
+      serial_number: serialDraft.trim() || null,
+      sku: skuDraft.trim() || null,
+      notes: notesDraft.trim() || null,
+    };
     const changes: FieldChange[] = [];
     const diff = (field: string, from: string | null, to: string | null) => {
       if ((from ?? "") !== (to ?? "")) changes.push({ field, from, to });
@@ -373,10 +483,12 @@ function OrderCardDrawer({
             </div>
             <div className="border border-line bg-white mb-6">
               {!intake && !editing && (
-                <div className="p-3 text-sm text-inksoft">Brak jeszcze danych — dodaj je w zakładce "Wprowadzanie".</div>
+                <div className="p-3 text-sm text-inksoft">Ta paczka nie jest jeszcze zarejestrowana — rozpocznij jej obsługę w zakładce "Wprowadzanie".</div>
               )}
               {intake && !editing && (
                 <>
+                  <Row label="Status" value={INTAKE_STATUS_LABEL[intake.status] || intake.status} />
+                  <Row label="Czas obsługi" value={fmtDuration(intake.entered_at, intake.finished_at)} />
                   <Row label="Numer seryjny" value={intake.serial_number} mono />
                   <Row label="SKU" value={intake.sku} mono />
                   <Row label="Uwagi" value={intake.notes} />
@@ -385,11 +497,11 @@ function OrderCardDrawer({
               {editing && (
                 <div className="p-3 space-y-2">
                   <div>
-                    <label className="text-xs font-semibold text-inksoft block mb-1">Numer seryjny *</label>
+                    <label className="text-xs font-semibold text-inksoft block mb-1">Numer seryjny</label>
                     <input value={serialDraft} onChange={(e) => setSerialDraft(e.target.value)} className="w-full border border-line bg-white px-2 py-1.5 rounded text-sm font-mono" />
                   </div>
                   <div>
-                    <label className="text-xs font-semibold text-inksoft block mb-1">SKU *</label>
+                    <label className="text-xs font-semibold text-inksoft block mb-1">SKU</label>
                     <input value={skuDraft} onChange={(e) => setSkuDraft(e.target.value)} className="w-full border border-line bg-white px-2 py-1.5 rounded text-sm font-mono" />
                   </div>
                   <div>
