@@ -21,7 +21,7 @@ token API Fakturowni i dane dostępowe do API Back Market.
 
 1. https://supabase.com → **New project**, poczekaj ok. 2 minuty.
 2. **SQL Editor → New query** i uruchom (**Run**) kolejno pliki z `supabase/`, każdy w całości:
-   1. `schema.sql` — użytkownicy, sztuki sprzętu, cache Fakturowni
+   1. `schema.sql` — użytkownicy, cache Fakturowni, uprawnienia Admina i log usunięć (**musi być pierwszy**, reszta z niego korzysta)
    2. `tradein.sql` — bidder
    3. `buyback-orders.sql` — zamówienia BuyBack i obsługa paczek
    4. `service.sql` — rejestr napraw
@@ -108,6 +108,8 @@ Zmiana zmiennej środowiskowej na Vercelu wymaga nowego deployu.
 
 ## Uprawnienia
 
-Rola decyduje tylko o tym, jakie zakładki widzisz w menu. To nie jest twarde zabezpieczenie —
+Rola decyduje głównie o tym, jakie zakładki widzisz w menu — to nie jest twarde zabezpieczenie,
 reguły w Supabase pozwalają każdemu zalogowanemu czytać i w dużej mierze zapisywać dane.
-Twarde uprawnienia per rola są w planie (patrz [CLAUDE.md](CLAUDE.md)).
+Twardo (w bazie) chronione jest tylko: usuwanie wpisów w Serwisie, Testach i Trade-in (tylko Admin,
+z zapisem w tabeli `deleted_records`) oraz zmiana ról i imion w `members` (tylko Admin).
+Reszta twardych uprawnień per rola jest w planie (patrz [CLAUDE.md](CLAUDE.md)).

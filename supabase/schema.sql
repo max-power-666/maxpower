@@ -75,26 +75,58 @@ alter table fakturownia_stock_cache enable row level security;
 alter table fakturownia_sync_meta enable row level security;
 
 -- Uwaga: to jest model "jedna firma = jeden projekt Supabase".
--- Każdy zalogowany użytkownik Twojego projektu widzi i edytuje wszystko —
--- dokładnie tak jak w prototypie. Twardsze uprawnienia per-rola (np. tylko
--- Manager może usuwać) to kolejny krok, gdy będzie potrzebny.
+-- Większość tabel: każdy zalogowany użytkownik widzi i edytuje wszystko, a role tylko
+-- chowają zakładki w UI. WYJĄTEK — twarde uprawnienia dla operacji destrukcyjnych i dla
+-- samych ról (niżej): usuwanie wpisów w Serwisie/Testach/Trade-in tylko dla Admina,
+-- z zapisem każdego usunięcia w deleted_records.
+
+-- Czy zalogowany użytkownik ma rolę Admin. SECURITY DEFINER, żeby polityki na innych tabelach
+-- nie zależały od RLS samej tabeli members.
+create or replace function is_admin() returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from members where user_id = auth.uid() and role = 'Admin');
+$$;
+
+-- Ślad po każdym usunięciu (wiersz jako json, kto i kiedy) — wypełnia go trigger audit_delete()
+-- podpięty do tabel z usuwaniem. Odczyt tylko dla Admina; nikt nie zapisuje tu z UI.
+create table if not exists deleted_records (
+  id bigint generated always as identity primary key,
+  table_name text not null,
+  row_data jsonb not null,
+  deleted_by uuid,
+  deleted_by_email text,
+  deleted_at timestamptz not null default now()
+);
+alter table deleted_records enable row level security;
+drop policy if exists "admin read deleted_records" on deleted_records;
+create policy "admin read deleted_records" on deleted_records
+  for select using (is_admin());
+
+create or replace function audit_delete() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  insert into deleted_records (table_name, row_data, deleted_by, deleted_by_email)
+  values (tg_table_name, to_jsonb(old), auth.uid(), (select email from members where user_id = auth.uid()));
+  return old;
+end $$;
 
 drop policy if exists "authenticated read members" on members;
 create policy "authenticated read members" on members
   for select using (auth.role() = 'authenticated');
 
+-- Nowa osoba zakłada TYLKO własny wiersz i TYLKO z pustą rolą (aplikacja tak robi przy pierwszym
+-- logowaniu) — nie może więc sama sobie wpisać roli Admin.
 drop policy if exists "user upserts own member row" on members;
 create policy "user upserts own member row" on members
-  for insert with check (auth.uid() = user_id);
+  for insert with check (auth.uid() = user_id and role = '');
 
--- Każdy zalogowany może zmienić rolę każdemu (nie tylko swoją) — potrzebne, żeby
--- Admin mógł przypisywać role innym z zakładki Zespół. Tak samo jak przy units:
--- to nie jest twarde zabezpieczenie, tylko UI (zakładka Zespół) chowa tę możliwość
--- przed osobami bez roli Admin.
+-- Role i imiona zmienia wyłącznie Admin (zakładka Zespół). Wcześniej mógł każdy zalogowany, co
+-- pozwalało nadać sobie Admina i obejść każde zabezpieczenie oparte na roli.
 drop policy if exists "user updates own member row" on members;
 drop policy if exists "authenticated update members" on members;
-create policy "authenticated update members" on members
-  for update using (auth.role() = 'authenticated');
+drop policy if exists "admin update members" on members;
+create policy "admin update members" on members
+  for update using (is_admin());
 
 drop policy if exists "authenticated read units" on units;
 create policy "authenticated read units" on units

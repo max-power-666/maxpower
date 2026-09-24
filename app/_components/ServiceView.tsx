@@ -55,7 +55,15 @@ const btnPrimary = "bg-ink text-paper px-4 py-2 rounded text-sm font-semibold di
 const pill = (active: boolean) =>
   `px-3 py-1.5 rounded-full text-sm font-semibold border ${active ? "bg-ink text-paper border-ink" : "bg-white border-line"}`;
 
-export default function ServiceView({ session, members }: { session: Session; members: MemberLite[] }) {
+export default function ServiceView({
+  session,
+  members,
+  isAdmin,
+}: {
+  session: Session;
+  members: MemberLite[];
+  isAdmin: boolean;
+}) {
   const [interval, setInterval] = useState<Interval>("today");
   const [rangeRows, setRangeRows] = useState<{ employee_email: string | null; points: number }[]>([]);
   const [recent, setRecent] = useState<LogRow[]>([]);
@@ -141,6 +149,15 @@ export default function ServiceView({ session, members }: { session: Session; me
     } finally {
       setSubmitting(false);
     }
+  }
+
+  // Usuwanie tylko dla Admina (polityka w bazie: is_admin(); każde usunięcie trafia do deleted_records).
+  async function deleteRow(row: LogRow) {
+    if (!confirm(`Usunąć wpis „${row.device_ref || TASK_LABEL[row.task_type] || row.task_type}”? Tej operacji nie można cofnąć.`)) return;
+    const { data, error: err } = await supabase.from("service_log").delete().eq("id", row.id).select("id");
+    if (err) setError(`Nie udało się usunąć: ${err.message}`);
+    else if (!data?.length) setError("Nie usunięto — brak uprawnień (tylko Admin) albo wpis już nie istnieje.");
+    else await load();
   }
 
   async function saveNotes(row: LogRow, notes: string | null) {
@@ -235,11 +252,12 @@ export default function ServiceView({ session, members }: { session: Session; me
               <th className="p-3">Uwagi</th>
               <th className="p-3">Czas</th>
               <th className="p-3 text-right">Punkty</th>
+              {isAdmin && <th className="p-3"></th>}
             </tr>
           </thead>
           <tbody>
             {!loading && recent.length === 0 && (
-              <tr><td colSpan={8} className="p-6 text-center text-inksoft text-sm">Brak wpisów — rozpocznij pierwszą naprawę powyżej.</td></tr>
+              <tr><td colSpan={isAdmin ? 9 : 8} className="p-6 text-center text-inksoft text-sm">Brak wpisów — rozpocznij pierwszą naprawę powyżej.</td></tr>
             )}
             {recent.map((r) => (
               <tr key={r.id} className="border-b border-line last:border-b-0 hover:bg-paper">
@@ -267,6 +285,13 @@ export default function ServiceView({ session, members }: { session: Session; me
                 <td className="p-3"><InlineEditCell value={r.notes} onSave={(n) => saveNotes(r, n)} /></td>
                 <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDuration(r.started_at, r.finished_at)}</td>
                 <td className="p-3 text-right font-mono font-semibold">{r.status === "naprawiony" ? r.points : "—"}</td>
+                {isAdmin && (
+                  <td className="p-3 text-right">
+                    <button onClick={() => deleteRow(r)} className="text-xs font-semibold text-rust hover:underline">
+                      Usuń
+                    </button>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>

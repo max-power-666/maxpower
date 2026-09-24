@@ -91,7 +91,15 @@ function fmtMoney(n: number | null, currency: string | null) {
   return n.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " " + (currency || "");
 }
 
-export default function TradeInHub({ session, members }: { session: Session; members: MemberLite[] }) {
+export default function TradeInHub({
+  session,
+  members,
+  isAdmin,
+}: {
+  session: Session;
+  members: MemberLite[];
+  isAdmin: boolean;
+}) {
   const [sub, setSub] = useState<"intake" | "raw">("intake");
   const [openOrderId, setOpenOrderId] = useState<string | null>(null);
   const [openSerial, setOpenSerial] = useState<string | null>(null);
@@ -103,7 +111,13 @@ export default function TradeInHub({ session, members }: { session: Session; mem
         <button onClick={() => setSub("raw")} className={pill(sub === "raw")}>Raw data</button>
       </div>
 
-      {sub === "intake" && <IntakeView session={session} members={members} onOpenOrder={setOpenOrderId} onOpenProduct={setOpenSerial} />}
+      {sub === "intake" && <IntakeView
+          session={session}
+          members={members}
+          isAdmin={isAdmin}
+          onOpenOrder={setOpenOrderId}
+          onOpenProduct={setOpenSerial}
+        />}
       {sub === "raw" && <TradeInOrdersView session={session} onOpenOrder={setOpenOrderId} />}
 
       {openOrderId && (
@@ -120,11 +134,13 @@ export default function TradeInHub({ session, members }: { session: Session; mem
 function IntakeView({
   session,
   members,
+  isAdmin,
   onOpenOrder,
   onOpenProduct,
 }: {
   session: Session;
   members: MemberLite[];
+  isAdmin: boolean;
   onOpenOrder: (id: string) => void;
   onOpenProduct: (serial: string) => void;
 }) {
@@ -245,6 +261,15 @@ function IntakeView({
     }
   }
 
+  // Usuwanie tylko dla Admina (polityka w bazie: is_admin(); każde usunięcie trafia do deleted_records).
+  async function deleteRow(row: IntakeEntry) {
+    if (!confirm(`Usunąć wpis „${row.order_public_id}”? Tej operacji nie można cofnąć.`)) return;
+    const { data, error: err } = await supabase.from("buyback_order_intake").delete().eq("id", row.id).select("id");
+    if (err) setError(`Nie udało się usunąć: ${err.message}`);
+    else if (!data?.length) setError("Nie usunięto — brak uprawnień (tylko Admin) albo wpis już nie istnieje.");
+    else await load();
+  }
+
   // Edycje z listy (uwagi, numer seryjny) trafiają do tego samego logu zmian co edycja na karcie.
   async function saveField(row: IntakeEntry, column: "notes" | "serial_number", label: string, value: string | null) {
     const entry: HistoryEntry = {
@@ -350,11 +375,12 @@ function IntakeView({
               <th className="p-3">Uwagi</th>
               <th className="p-3">Czas</th>
               <th className="p-3 text-right">Punkty</th>
+              {isAdmin && <th className="p-3"></th>}
             </tr>
           </thead>
           <tbody>
             {!loading && entries.length === 0 && (
-              <tr><td colSpan={9} className="p-6 text-center text-inksoft text-sm">Brak paczek — rozpocznij pierwszą powyżej.</td></tr>
+              <tr><td colSpan={isAdmin ? 10 : 9} className="p-6 text-center text-inksoft text-sm">Brak paczek — rozpocznij pierwszą powyżej.</td></tr>
             )}
             {entries.map((e) => (
               <tr key={e.id} className="border-b border-line last:border-b-0 hover:bg-paper">
@@ -399,6 +425,13 @@ function IntakeView({
                 <td className="p-3"><InlineEditCell value={e.notes} onSave={(n) => saveField(e, "notes", "Uwagi", n)} /></td>
                 <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDuration(e.entered_at, e.finished_at)}</td>
                 <td className="p-3 text-right font-mono font-semibold">{e.status === "obsluzona" ? fmtPoints(e.points) : "—"}</td>
+                {isAdmin && (
+                  <td className="p-3 text-right">
+                    <button onClick={() => deleteRow(e)} className="text-xs font-semibold text-rust hover:underline">
+                      Usuń
+                    </button>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>

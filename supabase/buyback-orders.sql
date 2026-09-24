@@ -132,6 +132,16 @@ drop policy if exists "authenticated update buyback_order_intake" on buyback_ord
 create policy "authenticated update buyback_order_intake" on buyback_order_intake
   for update using (auth.role() = 'authenticated');
 
+-- Usuwanie wpisów Trade-in: tylko Admin (is_admin() z schema.sql — uruchom ten plik najpierw), a każde
+-- usunięcie ląduje w deleted_records (kto, kiedy, cały wiersz). Polityka to twarde zabezpieczenie:
+-- działa też przy bezpośrednim wywołaniu API, nie tylko gdy przycisk jest ukryty w UI.
+drop policy if exists "admin delete buyback_order_intake" on buyback_order_intake;
+create policy "admin delete buyback_order_intake" on buyback_order_intake
+  for delete using (is_admin());
+drop trigger if exists buyback_order_intake_audit_delete on buyback_order_intake;
+create trigger buyback_order_intake_audit_delete before delete on buyback_order_intake
+  for each row execute function audit_delete();
+
 do $$
 begin
   begin alter publication supabase_realtime add table buyback_orders; exception when duplicate_object then null; end;

@@ -386,13 +386,13 @@ export default function Home() {
             />
           )}
 
-          {view === "service" && <ServiceView session={session} members={members} />}
+          {view === "service" && <ServiceView session={session} members={members} isAdmin={role === "Admin"} />}
 
-          {view === "tests" && <TestsView session={session} members={members} />}
+          {view === "tests" && <TestsView session={session} members={members} isAdmin={role === "Admin"} />}
 
           {view === "tradein" && <TradeInView session={session} />}
 
-          {view === "orders" && <TradeInHub session={session} members={members} />}
+          {view === "orders" && <TradeInHub session={session} members={members} isAdmin={role === "Admin"} />}
         </div>
       </main>
 

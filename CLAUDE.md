@@ -104,8 +104,8 @@ Macu jest wyłączony; bidder działa na produkcji, włącznik: `buyback_setting
 **Serwis** (`ServiceView.tsx`, `service_log`). Rejestr napraw wg tabeli z regulaminu:
 Joy-Con para 15 pkt, kontroler PS4 25, Xbox One 35, PS5 12, czyszczenie konsoli 45.
 Jeden wiersz = jedna naprawa: `started_at`, status (w_naprawie / naprawiony / uszkodzony),
-`finished_at`. Pracownik = zawsze zalogowana osoba (nie do wyboru). Wpisów nie da się
-usuwać z UI. Podsumowanie punktacji u góry (Dziś/7/30 dni) liczy tylko "naprawiony".
+`finished_at`. Pracownik = zawsze zalogowana osoba (nie do wyboru). Wpisy może usuwać
+tylko Admin (przycisk "Usuń", tak samo w Testach i Trade-in). Podsumowanie punktacji u góry (Dziś/7/30 dni) liczy tylko "naprawiony".
 
 **Testy** (`TestsView.tsx`, `test_log`). Rejestr testów urządzeń: pole numer seryjny +
 "Rozpocznij test". Jeden wiersz = jeden test: status (w_trakcie / przetestowane / przerwany),
@@ -128,8 +128,8 @@ Zasady, które kształtują Serwis i Trade-in (pełny PDF ma właściciel):
 - punkty tylko po **prawidłowym zakończeniu** procesu (§2 ust. 4) → liczymy dopiero dla
   statusu końcowego "naprawiony" / "obsłużona";
 - jedna paczka/urządzenie zaliczone **raz**, zakaz przypisywania sobie cudzej pracy i
-  wielokrotnego rejestrowania (§2 ust. 3, §9) → unikalność paczki, pracownik z sesji, brak
-  usuwania wpisów;
+  wielokrotnego rejestrowania (§2 ust. 3, §9) → unikalność paczki, pracownik z sesji,
+  usuwanie wpisów tylko przez Admina z zapisem w `deleted_records`;
 - Trade-in i testerzy: dokładne ułamki (100/6 pkt za paczkę, 100/6,5 za urządzenie), **bez
   zaokrąglania** przed ustaleniem progu (§2 ust. 7, §4 ust. 8);
 - "Czas" naprawy/paczki jest **tylko informacyjny** — wydajność w regulaminie to punkty /
@@ -162,9 +162,18 @@ miesięczny (§2 ust. 6) — dziś każdy obszar ma osobną tabelę i podsumowan
 
 Filtrowanie zakładek według roli to **tylko UI** (chowa pozycje w menu). RLS w Supabase
 nadal pozwala każdemu `authenticated` czytać prawie wszystko, a wiele tabel także zapisywać
-(`units`, `members`, ceny max i włącznik biddera, `service_log`, `buyback_order_intake`).
-To świadomy stan MVP — twarde uprawnienia per rola są zaplanowane. Ważne przy Bidderze:
-zmienia ceny na żywym Back Markecie, więc to pierwszy kandydat do zaostrzenia.
+(`units`, ceny max i włącznik biddera, wpisy w `service_log`, `test_log`, `buyback_order_intake`).
+To świadomy stan MVP — twarde uprawnienia per rola są zaplanowane.
+
+**Twarde (w bazie, działają też przy wołaniu API bez UI) są dziś tylko:**
+- `is_admin()` (SECURITY DEFINER, `schema.sql`) — sprawdza rolę Admin w `members`;
+- usuwanie wpisów w Serwisie, Testach i Trade-in: tylko Admin, a każde usunięcie zapisuje trigger
+  `audit_delete()` w `deleted_records` (cały wiersz jako json, kto, kiedy; odczyt tylko Admin — brak UI,
+  przegląd w Supabase → Table Editor);
+- `members`: role i imiona zmienia tylko Admin, a nowa osoba może założyć wyłącznie własny wiersz
+  z pustą rolą. Bez tego każdy mógłby nadać sobie Admina i obejść resztę.
+Pliki SQL innych modułów używają `is_admin()`, więc `schema.sql` musi być uruchomiony pierwszy.
+Ważne przy Bidderze: zmienia ceny na żywym Back Markecie, więc to pierwszy kandydat do kolejnego zaostrzenia.
 
 ## Zmienne środowiskowe (tylko nazwy; wartości w `.env.local` i w Vercel)
 
