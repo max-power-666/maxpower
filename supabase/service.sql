@@ -20,11 +20,12 @@ create table if not exists service_log (
   points numeric not null,                   -- migawka punktów wg typu czynności (gdyby regulamin się zmienił, stare wpisy zostają poprawne)
   device_ref text,                           -- numer seryjny / identyfikator urządzenia — Regulamin §2 ust. 5 wymaga wskazania urządzenia w ewidencji
   status text not null default 'w_naprawie', -- w_naprawie | naprawiony | uszkodzony
+  notes text,                                -- uwagi, edytowane w wierszu listy
   started_at timestamptz not null default now(),
   finished_at timestamptz                    -- ustawiane przy przejściu na status naprawiony/uszkodzony
 );
 
--- Migracja z poprzedniej wersji (created_at/notes) — bezpieczna do wielokrotnego uruchomienia.
+-- Migracja z poprzednich wersji — bezpieczna do wielokrotnego uruchomienia.
 do $$
 begin
   if exists (select 1 from information_schema.columns where table_name = 'service_log' and column_name = 'created_at') then
@@ -33,7 +34,7 @@ begin
 end $$;
 alter table service_log add column if not exists status text not null default 'w_naprawie';
 alter table service_log add column if not exists finished_at timestamptz;
-alter table service_log drop column if exists notes;
+alter table service_log add column if not exists notes text;
 
 create index if not exists service_log_employee_idx on service_log (employee_user_id, started_at desc);
 create index if not exists service_log_started_idx on service_log (started_at desc);

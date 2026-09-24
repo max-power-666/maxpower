@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import TradeInOrdersView from "./TradeInOrdersView";
+import NotesCell from "./NotesCell";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { INTERVALS, fmtDuration, rangeStart, type Interval } from "@/lib/workLog";
 
@@ -243,6 +244,21 @@ function IntakeView({
     }
   }
 
+  // Uwagi z listy trafiają do tego samego logu zmian co edycja na karcie zamówienia.
+  async function saveNotes(row: IntakeEntry, notes: string | null) {
+    const entry: HistoryEntry = {
+      action: "edited",
+      by_email: session.user.email ?? null,
+      at: new Date().toISOString(),
+      changes: [{ field: "Uwagi", from: row.notes, to: notes }],
+    };
+    const { error: err } = await supabase
+      .from("buyback_order_intake")
+      .update({ notes, history: [...(row.history || []), entry] })
+      .eq("id", row.id);
+    if (err) setError(`Nie udało się zapisać uwag: ${err.message}`);
+  }
+
   async function changeStatus(row: IntakeEntry, status: IntakeStatus) {
     if (status === row.status) return;
     const now = new Date().toISOString();
@@ -329,13 +345,14 @@ function IntakeView({
               <th className="p-3">Numer zamówienia</th>
               <th className="p-3">Numer przesyłki</th>
               <th className="p-3">Status</th>
+              <th className="p-3">Uwagi</th>
               <th className="p-3">Czas</th>
               <th className="p-3 text-right">Punkty</th>
             </tr>
           </thead>
           <tbody>
             {!loading && entries.length === 0 && (
-              <tr><td colSpan={7} className="p-6 text-center text-inksoft text-sm">Brak paczek — rozpocznij pierwszą powyżej.</td></tr>
+              <tr><td colSpan={8} className="p-6 text-center text-inksoft text-sm">Brak paczek — rozpocznij pierwszą powyżej.</td></tr>
             )}
             {entries.map((e) => (
               <tr key={e.id} className="border-b border-line last:border-b-0 hover:bg-paper">
@@ -358,6 +375,7 @@ function IntakeView({
                     ))}
                   </select>
                 </td>
+                <td className="p-3"><NotesCell value={e.notes} onSave={(n) => saveNotes(e, n)} /></td>
                 <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDuration(e.entered_at, e.finished_at)}</td>
                 <td className="p-3 text-right font-mono font-semibold">{e.status === "obsluzona" ? fmtPoints(e.points) : "—"}</td>
               </tr>

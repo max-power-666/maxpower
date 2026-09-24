@@ -142,6 +142,9 @@ miesięczny (§2 ust. 6) — dziś każdy obszar ma osobną tabelę i podsumowan
   w `Authorization: Bearer`).
 - **Kto to zrobił:** zapisujemy e-mail (stały identyfikator), a wyświetlamy przez
   `displayNameForEmail(email, members)` → skrócone imię, w razie braku imienia e-mail.
+- **Uwagi w wierszu listy:** kolumna "Uwagi" (między Statusem a Czasem) w Serwisie, Testach i Trade-in
+  to `NotesCell` — zapis przy wyjściu z pola/Enterem, Escape porzuca. W Trade-in edycja trafia też do
+  logu zmian karty zamówienia.
 - **Cykl życia rekordu:** status + `started_at`/`finished_at`, `finished_at` czyszczone przy
   powrocie do statusu początkowego (wzór: `service_log`, `buyback_order_intake`).
 

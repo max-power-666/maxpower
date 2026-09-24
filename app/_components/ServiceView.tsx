@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
+import NotesCell from "./NotesCell";
 import { INTERVALS, fmtDuration, rangeStart, type Interval } from "@/lib/workLog";
 
 // Rejestracja pracy serwisanta wg tabeli punktowej z Regulaminu premiowania (§2, 12.10.2026).
@@ -46,6 +47,7 @@ type LogRow = {
   points: number;
   device_ref: string | null;
   status: StatusKey;
+  notes: string | null;
   started_at: string;
   finished_at: string | null;
 };
@@ -94,7 +96,7 @@ export default function ServiceView({ session, members }: { session: Session; me
           .gte("finished_at", rangeStart(interval)),
         supabase
           .from("service_log")
-          .select("id, employee_email, task_type, points, device_ref, status, started_at, finished_at")
+          .select("id, employee_email, task_type, points, device_ref, status, notes, started_at, finished_at")
           .order("started_at", { ascending: false })
           .limit(50),
       ]);
@@ -143,6 +145,11 @@ export default function ServiceView({ session, members }: { session: Session; me
     } finally {
       setSubmitting(false);
     }
+  }
+
+  async function saveNotes(row: LogRow, notes: string | null) {
+    const { error: err } = await supabase.from("service_log").update({ notes }).eq("id", row.id);
+    if (err) setError(`Nie udało się zapisać uwag: ${err.message}`);
   }
 
   async function changeStatus(row: LogRow, status: StatusKey) {
@@ -229,13 +236,14 @@ export default function ServiceView({ session, members }: { session: Session; me
               <th className="p-3">Czynność</th>
               <th className="p-3">Numer seryjny</th>
               <th className="p-3">Status</th>
+              <th className="p-3">Uwagi</th>
               <th className="p-3">Czas</th>
               <th className="p-3 text-right">Punkty</th>
             </tr>
           </thead>
           <tbody>
             {!loading && recent.length === 0 && (
-              <tr><td colSpan={7} className="p-6 text-center text-inksoft text-sm">Brak wpisów — rozpocznij pierwszą naprawę powyżej.</td></tr>
+              <tr><td colSpan={8} className="p-6 text-center text-inksoft text-sm">Brak wpisów — rozpocznij pierwszą naprawę powyżej.</td></tr>
             )}
             {recent.map((r) => (
               <tr key={r.id} className="border-b border-line last:border-b-0 hover:bg-paper">
@@ -254,6 +262,7 @@ export default function ServiceView({ session, members }: { session: Session; me
                     ))}
                   </select>
                 </td>
+                <td className="p-3"><NotesCell value={r.notes} onSave={(n) => saveNotes(r, n)} /></td>
                 <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDuration(r.started_at, r.finished_at)}</td>
                 <td className="p-3 text-right font-mono font-semibold">{r.status === "naprawiony" ? r.points : "—"}</td>
               </tr>

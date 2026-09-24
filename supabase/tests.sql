@@ -13,6 +13,7 @@ create table if not exists test_log (
   employee_email text,
   serial_number text not null,
   status text not null default 'w_trakcie',  -- w_trakcie | przetestowane | przerwany
+  notes text,                                -- uwagi, edytowane w wierszu listy
   started_at timestamptz not null default now(),
   finished_at timestamptz,
   -- Migawka punktów za urządzenie: 100/6,5 = 200/13 (Regulamin §2 tabela). Celowo bez
@@ -20,6 +21,8 @@ create table if not exists test_log (
   -- się zmieniła, zmieniamy default; stare wiersze zachowują swoją wartość.
   points numeric not null default (200.0 / 13.0)
 );
+
+alter table test_log add column if not exists notes text;
 
 -- To samo urządzenie nie może mieć dwóch aktywnych wpisów naraz: trwającego albo już
 -- zaliczonego (Regulamin §2 ust. 3 i §9 ust. 2: wielokrotne rejestrowanie tego samego

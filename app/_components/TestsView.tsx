@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
+import NotesCell from "./NotesCell";
 import { INTERVALS, fmtDuration, rangeStart, type Interval } from "@/lib/workLog";
 
 // Rejestr testów urządzeń wg Regulaminu premiowania (§2, 12.10.2026): 100/6,5 pkt = 200/13 pkt
@@ -29,6 +30,7 @@ type TestRow = {
   employee_email: string | null;
   serial_number: string;
   status: StatusKey;
+  notes: string | null;
   started_at: string;
   finished_at: string | null;
   points: number;
@@ -80,7 +82,7 @@ export default function TestsView({ session, members }: { session: Session; memb
           .gte("finished_at", rangeStart(interval)),
         supabase
           .from("test_log")
-          .select("id, employee_email, serial_number, status, started_at, finished_at, points")
+          .select("id, employee_email, serial_number, status, notes, started_at, finished_at, points")
           .order("started_at", { ascending: false })
           .limit(50),
       ]);
@@ -136,6 +138,11 @@ export default function TestsView({ session, members }: { session: Session; memb
     } finally {
       setSubmitting(false);
     }
+  }
+
+  async function saveNotes(row: TestRow, notes: string | null) {
+    const { error: err } = await supabase.from("test_log").update({ notes }).eq("id", row.id);
+    if (err) setError(`Nie udało się zapisać uwag: ${err.message}`);
   }
 
   async function changeStatus(row: TestRow, status: StatusKey) {
@@ -217,13 +224,14 @@ export default function TestsView({ session, members }: { session: Session; memb
               <th className="p-3">Pracownik</th>
               <th className="p-3">Numer seryjny</th>
               <th className="p-3">Status</th>
+              <th className="p-3">Uwagi</th>
               <th className="p-3">Czas</th>
               <th className="p-3 text-right">Punkty</th>
             </tr>
           </thead>
           <tbody>
             {!loading && recent.length === 0 && (
-              <tr><td colSpan={6} className="p-6 text-center text-inksoft text-sm">Brak testów — rozpocznij pierwszy powyżej.</td></tr>
+              <tr><td colSpan={7} className="p-6 text-center text-inksoft text-sm">Brak testów — rozpocznij pierwszy powyżej.</td></tr>
             )}
             {recent.map((r) => (
               <tr key={r.id} className="border-b border-line last:border-b-0 hover:bg-paper">
@@ -241,6 +249,7 @@ export default function TestsView({ session, members }: { session: Session; memb
                     ))}
                   </select>
                 </td>
+                <td className="p-3"><NotesCell value={r.notes} onSave={(n) => saveNotes(r, n)} /></td>
                 <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDuration(r.started_at, r.finished_at)}</td>
                 <td className="p-3 text-right font-mono font-semibold">{r.status === "przetestowane" ? fmtPoints(r.points) : "—"}</td>
               </tr>
