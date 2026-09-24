@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import TradeInView from "./_components/TradeInView";
-import TradeInOrdersView from "./_components/TradeInOrdersView";
+import TradeInHub from "./_components/TradeInHub";
 
 /* ---------------- model danych (ten sam co w prototypie) ---------------- */
 
@@ -460,7 +460,7 @@ export default function Home() {
 
           {view === "tradein" && <TradeInView session={session} />}
 
-          {view === "orders" && <TradeInOrdersView session={session} />}
+          {view === "orders" && <TradeInHub session={session} />}
         </div>
       </main>
 

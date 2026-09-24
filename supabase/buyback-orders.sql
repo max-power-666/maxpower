@@ -61,7 +61,34 @@ drop policy if exists "authenticated read buyback_orders_sync_meta" on buyback_o
 create policy "authenticated read buyback_orders_sync_meta" on buyback_orders_sync_meta
   for select using (auth.role() = 'authenticated');
 
+-- Ręczne wprowadzanie zamówień przez pracowników — pracownik podaje numer zamówienia
+-- (musi już istnieć w buyback_orders, stąd klucz obcy) i uzupełnia numer seryjny + SKU.
+-- Wpisy nie są edytowalne z UI (tylko insert) — to log tego, kto i kiedy co wprowadził,
+-- tak jak history w units.
+create table if not exists buyback_order_intake (
+  id bigint generated always as identity primary key,
+  order_public_id text not null references buyback_orders(order_public_id),
+  serial_number text not null,
+  sku text not null,
+  notes text default '',
+  entered_by_user_id uuid references auth.users(id),
+  entered_by_email text,
+  entered_at timestamptz not null default now()
+);
+create index if not exists buyback_order_intake_order_idx on buyback_order_intake (order_public_id);
+create index if not exists buyback_order_intake_entered_idx on buyback_order_intake (entered_at desc);
+
+alter table buyback_order_intake enable row level security;
+
+drop policy if exists "authenticated read buyback_order_intake" on buyback_order_intake;
+create policy "authenticated read buyback_order_intake" on buyback_order_intake
+  for select using (auth.role() = 'authenticated');
+drop policy if exists "authenticated insert buyback_order_intake" on buyback_order_intake;
+create policy "authenticated insert buyback_order_intake" on buyback_order_intake
+  for insert with check (auth.role() = 'authenticated');
+
 do $$
 begin
   begin alter publication supabase_realtime add table buyback_orders; exception when duplicate_object then null; end;
+  begin alter publication supabase_realtime add table buyback_order_intake; exception when duplicate_object then null; end;
 end $$;
