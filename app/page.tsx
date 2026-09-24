@@ -7,6 +7,7 @@ import TradeInView from "./_components/TradeInView";
 import TradeInHub from "./_components/TradeInHub";
 import ServiceView from "./_components/ServiceView";
 import TestsView from "./_components/TestsView";
+import InventoryRawView from "./_components/InventoryRawView";
 
 /* ---------------- model danych (ten sam co w prototypie) ---------------- */
 
@@ -192,6 +193,7 @@ export default function Home() {
   const [units, setUnits] = useState<Unit[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [view, setView] = useState<ViewKey>("overview");
+  const [invSub, setInvSub] = useState<"summary" | "raw">("summary");
   const [addOpen, setAddOpen] = useState(false);
   const [category, setCategory] = useState("smartfon");
   const [openUnit, setOpenUnit] = useState<Unit | null>(null);
@@ -420,40 +422,34 @@ export default function Home() {
           )}
 
           {view === "inventory" && (
-            <div className="border border-line bg-white">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-xs text-inksoft border-b border-line">
-                    <th className="p-3">Status</th>
-                    <th className="p-3">Kategoria</th>
-                    <th className="p-3">Urządzenie</th>
-                    <th className="p-3">IMEI / nr</th>
-                    <th className="p-3">Cena</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {units.length === 0 && (
-                    <tr><td colSpan={5} className="p-6 text-center text-inksoft text-sm">Magazyn jest pusty — dodaj pierwsze urządzenie.</td></tr>
-                  )}
-                  {units.map((u) => (
-                    <tr key={u.id} onClick={() => setOpenUnit(u)} className="border-b border-line cursor-pointer hover:bg-paper">
-                      <td className="p-3"><span className="text-xs font-semibold px-2 py-1 rounded-full bg-tealsoft text-teal">{u.status}</span></td>
-                      <td className="p-3">{CATEGORIES[u.category]?.label || u.category}</td>
-                      <td className="p-3 font-semibold">{u.name}</td>
-                      <td className="p-3 font-mono text-xs">{u.fields?.imei || "—"}</td>
-                      <td className="p-3 font-mono">{fmtEUR(u.price_sell)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+            <div>
+              <div className="flex gap-2 mb-4">
+                {(
+                  [
+                    ["summary", "Podsumowanie"],
+                    ["raw", "Raw data"],
+                  ] as const
+                ).map(([k, label]) => (
+                  <button
+                    key={k}
+                    onClick={() => setInvSub(k)}
+                    className={`px-3 py-1.5 rounded-full text-sm font-semibold border ${invSub === k ? "bg-ink text-paper border-ink" : "bg-white border-line"}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
 
-          {view === "inventory" && (fakturowniaError || fakturowniaSummary) && (
-            <div className="mt-6">
-              <h2 className="text-xs font-semibold text-inksoft mb-2">PODSUMOWANIE Z FAKTUROWNI (stan magazynowy = 1)</h2>
-              {fakturowniaError && <p className="text-rust text-xs mb-2">{fakturowniaError}</p>}
-              {fakturowniaSummary && <FakturowniaSummaryView summary={fakturowniaSummary} />}
+              {fakturowniaError && <p className="text-rust text-xs mb-3">{fakturowniaError}</p>}
+
+              {invSub === "summary" && fakturowniaSummary && (
+                <div>
+                  <h2 className="text-xs font-semibold text-inksoft mb-2">PODSUMOWANIE Z FAKTUROWNI (stan magazynowy = 1)</h2>
+                  <FakturowniaSummaryView summary={fakturowniaSummary} />
+                </div>
+              )}
+
+              {invSub === "raw" && <InventoryRawView />}
             </div>
           )}
 

@@ -58,16 +58,24 @@ historyczne, nie mylić. Aktywna zakładka jest zapamiętywana w `localStorage`.
 
 ## Model danych i moduły
 
-**Magazyn.** Tabela `units` (sztuki sprzętu: `category`, `fields` jsonb, `status`, `history`
-jsonb, ceny) — źródło prawdy o polach per kategoria to `CATEGORIES` w `page.tsx`. Przycisk
-"+ Dodaj urządzenie" został **usunięty z UI** na prośbę właściciela (kod `AddModal`/`addUnit`
-nadal jest w `page.tsx`, ale nic go nie wywołuje). Pod tabelą `units` jest podsumowanie z
-Fakturowni: liczba sztuk ze `stock_level = 1`, wartość wg **ceny zakupu brutto**
-(`price_gross` jest w Fakturowni puste dla większości sztuk), wykres kołowy per kategoria
-(top 5 + "Inne"). Dane: `fakturownia_stock_cache` (tylko sztuki ze stanem 1) +
-`fakturownia_sync_meta`. Sync `app/api/fakturownia/sync`: pierwszy pełny (~19 tys. produktów,
-~1 min, zrobiony już), kolejne przyrostowe przez `date_from`. Zapis tylko serwer
-(service_role); zespół ma tylko odczyt.
+**Magazyn.** Zakładka ma dwa podwidoki: *Podsumowanie* (liczba sztuk ze `stock_level = 1`, wartość
+wg **ceny zakupu brutto** — `price_gross` jest w Fakturowni puste dla prawie wszystkich sztuk —
+i wykres kołowy per kategoria, top 5 + "Inne") oraz *Raw data* (`InventoryRawView.tsx`): lista
+sztuk ze stronicowaniem po stronie serwera (25/50/100) i wyszukiwaniem po numerze seryjnym.
+W Fakturowni numer seryjny to nazwa produktu (= kod), a `description` to numer zamówienia
+Back Market, z którego sztuka pochodzi. Dane: `fakturownia_stock_cache` (tylko sztuki ze stanem 1;
+kolumny `name`, `description`, `product_created_at`, kategoria, cena zakupu) +
+`fakturownia_sync_meta`. Sync `app/api/fakturownia/sync` (`maxDuration = 300`): pełny skan
+(~19 tys. produktów, ok. minuty) tylko gdy `last_synced_at` jest puste, potem przyrostowo przez
+`date_from`. Po dodaniu nowych kolumn `schema.sql` sam kasuje `last_synced_at`, więc następne
+"Odśwież" robi jednorazowy pełny skan i uzupełnia braki. Zapis tylko serwer (service_role);
+zespół ma tylko odczyt.
+
+Tabela `units` (sztuki z kategoriami i `history`) oraz jej UI zostały **wycofane z Magazynu**
+na prośbę właściciela: nie ma listy `units`, przycisku dodawania ani panelu szczegółów.
+Kod (`AddModal`, `addUnit`, `UnitDrawer`, `updateStatus`) nadal jest w `page.tsx`, ale nic go
+nie wywołuje; zakładka Przegląd wciąż liczy statystyki z `units` (dziś zera). Planowana karta
+towaru z magazynu ma ten kod zastąpić.
 
 **Bidder** (zakładka Bidder, `TradeInView.tsx`). Automat cen skupu Back Market (DE/ES/FR/IT):
 dla każdego SKU ustawia chwilowo 10 €, czyta `price_to_win` i ustawia `min(price_to_win, cena max)`.

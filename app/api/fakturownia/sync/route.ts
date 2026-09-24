@@ -5,12 +5,13 @@ import { createClient } from "@supabase/supabase-js";
 // Wywoływane przez: (1) Vercel Cron codziennie o północy (patrz vercel.json),
 // (2) przycisk "Odśwież" w zakładce Magazyn.
 //
-// Ważne: pierwsza synchronizacja (brak fakturownia_sync_meta.last_synced_at) skanuje
-// CAŁY katalog Fakturowni (u nas ~19 000 produktów, ~190 stron) — to za długo na
-// limit czasu funkcji serwerowej na Vercelu. Kolejne synchronizacje są przyrostowe:
-// pytają Fakturownię tylko o produkty zmienione po dacie ostatniej synchronizacji
-// (parametr date_from), więc trwają ułamek sekundy. Pierwsze zasilenie tabeli robi
-// się osobno (patrz rozmowa/README) — ten route nie jest do tego używany.
+// Brak fakturownia_sync_meta.last_synced_at oznacza pełny skan CAŁEGO katalogu Fakturowni
+// (~19 000 produktów, ~190 stron, ok. minuty) — dlatego maxDuration niżej. Kolejne
+// synchronizacje są przyrostowe: pytają tylko o produkty zmienione po dacie ostatniej
+// synchronizacji (parametr date_from), więc trwają ułamek sekundy. Pełny skan zdarza się
+// pierwszy raz oraz gdy supabase/schema.sql skasuje last_synced_at po dodaniu nowych kolumn.
+
+export const maxDuration = 300;
 
 const PER_PAGE = 100;
 const MAX_PAGES = 300;
@@ -89,6 +90,9 @@ export async function GET(request: Request) {
         category_id: p.category_id ?? null,
         category_name: (p.category_id != null && categoryNames[String(p.category_id)]) || "Bez kategorii",
         purchase_price_gross: Number(p.purchase_price_gross) || 0,
+        name: p.name ?? null,
+        description: p.description ?? null,
+        product_created_at: p.created_at ?? null,
         updated_at: new Date().toISOString(),
       }));
     const toDeleteIds = products.filter((p) => Number(p.stock_level) !== 1).map((p) => p.id);

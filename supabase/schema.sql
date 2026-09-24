@@ -42,8 +42,15 @@ create table if not exists fakturownia_stock_cache (
   category_id bigint,
   category_name text not null default 'Bez kategorii',
   purchase_price_gross numeric not null default 0,
+  name text,                                      -- numer seryjny (w Fakturowni nazwa produktu = kod = numer seryjny)
+  description text,                               -- numer zamówienia Back Market, z którego pochodzi sztuka (np. FR-26225-RKXHR)
+  product_created_at timestamptz,                 -- kiedy produkt dodano w Fakturowni
   updated_at timestamptz not null default now()
 );
+alter table fakturownia_stock_cache add column if not exists name text;
+alter table fakturownia_stock_cache add column if not exists description text;
+alter table fakturownia_stock_cache add column if not exists product_created_at timestamptz;
+create index if not exists fakturownia_stock_cache_created_idx on fakturownia_stock_cache (product_created_at desc);
 
 -- Jeden wiersz: kiedy ostatnio zsynchronizowano dane z Fakturowni, i od jakiego
 -- momentu liczyć kolejną synchronizację przyrostową (parametr date_from API).
@@ -52,6 +59,14 @@ create table if not exists fakturownia_sync_meta (
   last_synced_at timestamptz,
   constraint fakturownia_sync_meta_singleton check (id = 1)
 );
+
+-- Sztuki zsynchronizowane przed dodaniem kolumn name/description/product_created_at ich nie mają,
+-- a synchronizacja przyrostowa dotyka tylko zmienionych produktów. Kasujemy więc datę ostatniej
+-- synchronizacji, żeby następne "Odśwież" zrobiło jeden pełny skan i uzupełniło braki.
+-- Warunek pilnuje, żeby ponowne uruchomienie pliku nie wymuszało pełnego skanu bez potrzeby.
+insert into fakturownia_sync_meta (id) values (1) on conflict (id) do nothing;
+update fakturownia_sync_meta set last_synced_at = null
+  where id = 1 and exists (select 1 from fakturownia_stock_cache where name is null);
 
 alter table members enable row level security;
 alter table units enable row level security;
