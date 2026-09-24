@@ -54,7 +54,7 @@ const CATEGORIES: Record<string, { label: string; fields: FieldDef[] }> = {
 };
 
 const STATUSES = ["Przyjęte", "Kontrola jakości", "Gotowe do sprzedaży", "Sprzedane", "W naprawie", "Złom"];
-const ROLES = ["Magazyn", "Serwis", "Obsługa klienta", "Manager"];
+const ROLES = ["Admin", "Magazyn", "Serwis", "Trade-in"];
 
 type ViewKey = "overview" | "inventory" | "team" | "service" | "tradein";
 
@@ -66,14 +66,16 @@ const TABS: { key: ViewKey; label: string }[] = [
   { key: "tradein", label: "Trade-in" },
 ];
 
-// Kto widzi jaką zakładkę. Na razie tylko filtruje nawigację w tej przeglądarce —
-// to nie jest twarde zabezpieczenie (RLS pozwala każdemu authenticated na wszystko,
-// patrz supabase/schema.sql). Zmień tę mapę, żeby dopasować dostęp do ról.
+// Kto widzi jaką zakładkę — rola = zakładka, Admin ma dostęp do wszystkiego,
+// Przegląd jest wspólną stroną startową dla każdej roli. Na razie tylko filtruje
+// nawigację w tej przeglądarce — to nie jest twarde zabezpieczenie (RLS pozwala
+// każdemu authenticated na wszystko, patrz supabase/schema.sql). Zmień tę mapę,
+// żeby dopasować dostęp do ról.
 const ROLE_ACCESS: Record<string, ViewKey[]> = {
-  Manager: ["overview", "inventory", "team", "service", "tradein"],
-  Magazyn: ["overview", "inventory", "tradein"],
-  Serwis: ["overview", "inventory", "service"],
-  "Obsługa klienta": ["overview", "inventory"],
+  Admin: ["overview", "inventory", "team", "service", "tradein"],
+  Magazyn: ["overview", "inventory"],
+  Serwis: ["overview", "service"],
+  "Trade-in": ["overview", "tradein"],
 };
 
 type Member = { user_id: string; role: string; email: string };
