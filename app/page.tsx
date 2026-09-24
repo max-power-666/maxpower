@@ -82,7 +82,7 @@ const ROLE_ACCESS: Record<string, ViewKey[]> = {
   Bidder: ["overview", "tradein"],
 };
 
-type Member = { user_id: string; role: string; email: string };
+type Member = { user_id: string; role: string; email: string; name: string };
 
 type FakturowniaCacheRow = {
   id: number;
@@ -249,16 +249,19 @@ export default function Home() {
       setRole("");
     }
   }
-  // Zmiana roli innego użytkownika — wywoływane z Zespołu (tylko Admin widzi tę zakładkę).
+  // Zmiana roli / imienia innego użytkownika — wywoływane z Zespołu (tylko Admin widzi tę zakładkę).
   async function changeMemberRole(userId: string, r: string) {
     await supabase.from("members").update({ role: r }).eq("user_id", userId);
+  }
+  async function changeMemberName(userId: string, name: string) {
+    await supabase.from("members").update({ name }).eq("user_id", userId);
   }
   async function loadUnits() {
     const { data } = await supabase.from("units").select("*").order("created_at", { ascending: false });
     setUnits((data as Unit[]) || []);
   }
   async function loadMembers() {
-    const { data } = await supabase.from("members").select("user_id, role, email").order("email");
+    const { data } = await supabase.from("members").select("user_id, role, email, name").order("email");
     setMembers((data as Member[]) || []);
   }
   async function addUnit(draft: any) {
@@ -451,7 +454,12 @@ export default function Home() {
           )}
 
           {view === "team" && (
-            <TeamView members={members} currentUserId={session.user.id} onChangeRole={changeMemberRole} />
+            <TeamView
+              members={members}
+              currentUserId={session.user.id}
+              onChangeRole={changeMemberRole}
+              onChangeName={changeMemberName}
+            />
           )}
 
           {view === "service" && (
@@ -460,7 +468,7 @@ export default function Home() {
 
           {view === "tradein" && <TradeInView session={session} />}
 
-          {view === "orders" && <TradeInHub session={session} />}
+          {view === "orders" && <TradeInHub session={session} members={members} />}
         </div>
       </main>
 
@@ -666,47 +674,70 @@ function TeamView({
   members,
   currentUserId,
   onChangeRole,
+  onChangeName,
 }: {
   members: Member[];
   currentUserId: string;
   onChangeRole: (userId: string, role: string) => void;
+  onChangeName: (userId: string, name: string) => void;
 }) {
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+
+  function saveName(userId: string, value: string) {
+    onChangeName(userId, value.trim());
+    setDrafts(({ [userId]: _omit, ...rest }) => rest);
+  }
+
   return (
     <div className="border border-line bg-white">
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-xs text-inksoft border-b border-line">
             <th className="p-3">Użytkownik</th>
+            <th className="p-3">Email</th>
             <th className="p-3">Rola</th>
             <th className="p-3">Dostęp do zakładek</th>
           </tr>
         </thead>
         <tbody>
           {members.length === 0 && (
-            <tr><td colSpan={3} className="p-6 text-center text-inksoft text-sm">Brak członków zespołu.</td></tr>
+            <tr><td colSpan={4} className="p-6 text-center text-inksoft text-sm">Brak członków zespołu.</td></tr>
           )}
-          {members.map((m) => (
-            <tr key={m.user_id} className="border-b border-line last:border-b-0">
-              <td className="p-3 font-semibold">{m.email || "—"}</td>
-              <td className="p-3">
-                <select
-                  value={m.role}
-                  onChange={(e) => onChangeRole(m.user_id, e.target.value)}
-                  disabled={m.user_id === currentUserId}
-                  title={m.user_id === currentUserId ? "Nie możesz zmienić własnej roli — poproś innego Admina." : undefined}
-                  className="text-xs font-semibold px-2 py-1 rounded-full bg-tealsoft text-teal border-none disabled:opacity-60"
-                >
-                  {!m.role && <option value="">— brak roli —</option>}
-                  {ROLES.map((r) => (
-                    <option key={r} value={r}>{r}</option>
-                  ))}
-                </select>
-              </td>
-              <td className="p-3 text-xs text-inksoft">
-                {(ROLE_ACCESS[m.role] ?? []).map((k) => TABS.find((t) => t.key === k)?.label).join(", ") || "—"}
-              </td>
-            </tr>
-          ))}
+          {members.map((m) => {
+            const draft = drafts[m.user_id];
+            return (
+              <tr key={m.user_id} className="border-b border-line last:border-b-0">
+                <td className="p-3">
+                  <input
+                    value={draft ?? m.name ?? ""}
+                    onChange={(e) => setDrafts({ ...drafts, [m.user_id]: e.target.value })}
+                    onBlur={(e) => saveName(m.user_id, e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
+                    placeholder="Imię i nazwisko"
+                    className="w-full border border-line bg-white px-2 py-1.5 rounded text-sm font-semibold"
+                  />
+                </td>
+                <td className="p-3 text-inksoft">{m.email || "—"}</td>
+                <td className="p-3">
+                  <select
+                    value={m.role}
+                    onChange={(e) => onChangeRole(m.user_id, e.target.value)}
+                    disabled={m.user_id === currentUserId}
+                    title={m.user_id === currentUserId ? "Nie możesz zmienić własnej roli — poproś innego Admina." : undefined}
+                    className="text-xs font-semibold px-2 py-1 rounded-full bg-tealsoft text-teal border-none disabled:opacity-60"
+                  >
+                    {!m.role && <option value="">— brak roli —</option>}
+                    {ROLES.map((r) => (
+                      <option key={r} value={r}>{r}</option>
+                    ))}
+                  </select>
+                </td>
+                <td className="p-3 text-xs text-inksoft">
+                  {(ROLE_ACCESS[m.role] ?? []).map((k) => TABS.find((t) => t.key === k)?.label).join(", ") || "—"}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

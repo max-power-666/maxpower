@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import TradeInOrdersView from "./TradeInOrdersView";
+import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 
 // Zakładka Trade-in: domyślnie wprowadzanie zamówień przez pracowników (IntakeView),
 // plus podstrona "Raw data" z pełną, zsynchronizowaną listą zamówień BuyBack
@@ -66,7 +67,7 @@ function fmtMoney(n: number | null, currency: string | null) {
   return n.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " " + (currency || "");
 }
 
-export default function TradeInHub({ session }: { session: Session }) {
+export default function TradeInHub({ session, members }: { session: Session; members: MemberLite[] }) {
   const [sub, setSub] = useState<"intake" | "raw">("intake");
   const [openOrderId, setOpenOrderId] = useState<string | null>(null);
 
@@ -77,17 +78,27 @@ export default function TradeInHub({ session }: { session: Session }) {
         <button onClick={() => setSub("raw")} className={pill(sub === "raw")}>Raw data</button>
       </div>
 
-      {sub === "intake" && <IntakeView session={session} onOpenOrder={setOpenOrderId} />}
+      {sub === "intake" && <IntakeView session={session} members={members} onOpenOrder={setOpenOrderId} />}
       {sub === "raw" && <TradeInOrdersView session={session} onOpenOrder={setOpenOrderId} />}
 
-      {openOrderId && <OrderCardDrawer orderPublicId={openOrderId} session={session} onClose={() => setOpenOrderId(null)} />}
+      {openOrderId && (
+        <OrderCardDrawer orderPublicId={openOrderId} session={session} members={members} onClose={() => setOpenOrderId(null)} />
+      )}
     </div>
   );
 }
 
 /* ---------------- wprowadzanie danych przez pracowników ---------------- */
 
-function IntakeView({ session, onOpenOrder }: { session: Session; onOpenOrder: (id: string) => void }) {
+function IntakeView({
+  session,
+  members,
+  onOpenOrder,
+}: {
+  session: Session;
+  members: MemberLite[];
+  onOpenOrder: (id: string) => void;
+}) {
   const [entries, setEntries] = useState<IntakeEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -234,7 +245,7 @@ function IntakeView({ session, onOpenOrder }: { session: Session; onOpenOrder: (
                     {e.order_public_id}
                   </button>
                 </td>
-                <td className="p-3">{e.entered_by_email || "—"}</td>
+                <td className="p-3">{displayNameForEmail(e.entered_by_email, members)}</td>
                 <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDateTime(e.entered_at)}</td>
                 <td className="p-3 font-mono">{e.serial_number}</td>
                 <td className="p-3 font-mono">{e.sku}</td>
@@ -252,7 +263,17 @@ function IntakeView({ session, onOpenOrder }: { session: Session; onOpenOrder: (
 
 const ACTION_LABEL: Record<HistoryEntry["action"], string> = { created: "Utworzono", edited: "Edytowano" };
 
-function OrderCardDrawer({ orderPublicId, session, onClose }: { orderPublicId: string; session: Session; onClose: () => void }) {
+function OrderCardDrawer({
+  orderPublicId,
+  session,
+  members,
+  onClose,
+}: {
+  orderPublicId: string;
+  session: Session;
+  members: MemberLite[];
+  onClose: () => void;
+}) {
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [intake, setIntake] = useState<IntakeEntry | null>(null);
   const [error, setError] = useState("");
@@ -449,7 +470,7 @@ function OrderCardDrawer({ orderPublicId, session, onClose }: { orderPublicId: s
                 <div key={i} className="mb-2">
                   <div>
                     <span className="font-mono text-inksoft mr-1">{i + 1}.</span>
-                    {ACTION_LABEL[h.action] || h.action} przez <span className="font-semibold">{h.by_email || "—"}</span>, {fmtDateTime(h.at)}
+                    {ACTION_LABEL[h.action] || h.action} przez <span className="font-semibold">{displayNameForEmail(h.by_email, members)}</span>, {fmtDateTime(h.at)}
                   </div>
                   {!!h.changes?.length && (
                     <ul className="ml-6 list-disc text-xs text-inksoft">

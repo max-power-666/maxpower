@@ -9,6 +9,7 @@ create table if not exists members (
   user_id uuid references auth.users(id) not null unique,
   role text not null,
   email text default '',                -- zapisywany przy wyborze roli, żeby zakładka Zespół mogła pokazać kto jest kim
+  name text default '',                 -- imię i nazwisko, ustawiane przez Admina w Zespole; skrócone (np. "Maksymilian J.") w logach
   created_at timestamptz default now()
 );
 
