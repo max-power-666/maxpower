@@ -3,6 +3,10 @@
     {
       "path": "/api/fakturownia/sync",
       "schedule": "0 23 * * *"
+    },
+    {
+      "path": "/api/tradein/bidder",
+      "schedule": "* * * * *"
     }
   ]
 }
