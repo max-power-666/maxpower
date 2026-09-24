@@ -5,6 +5,7 @@ Wewnętrzny system firmy do obsługi magazynu, napraw i skupu elektroniki. Modu�
 - **Magazyn** — sztuki sprzętu ze statusami + podsumowanie stanu z Fakturowni (liczba, wartość, wykres per kategoria)
 - **Zespół** — użytkownicy, role i dostęp do zakładek (rolę nadaje Admin)
 - **Serwis** — rejestr napraw z punktacją wg regulaminu premiowania
+- **Testy** — rejestr testów urządzeń z punktacją wg regulaminu
 - **Bidder** — automat cen skupu na Back Market
 - **Trade-in** — zamówienia BuyBack z Back Marketu i obsługa paczek przez pracowników
 
@@ -24,6 +25,7 @@ token API Fakturowni i dane dostępowe do API Back Market.
    2. `tradein.sql` — bidder
    3. `buyback-orders.sql` — zamówienia BuyBack i obsługa paczek
    4. `service.sql` — rejestr napraw
+   5. `tests.sql` — rejestr testów
 
    Pliki są idempotentne — po zmianach w repo można je uruchomić ponownie, nic nie zepsują.
    Po każdej aktualizacji kodu, która zmienia schemat, uruchom odpowiedni plik.

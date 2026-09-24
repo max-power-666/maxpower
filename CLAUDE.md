@@ -24,7 +24,7 @@ numerach seryjnych, wielokanałowa synchronizacja stanów, naprawy, auto-wycena)
 
 - `app/page.tsx` — jeden duży client component: logowanie, nawigacja, role, zakładki
   Przegląd / Magazyn / Zespół. Większe moduły są osobno w `app/_components/`:
-  `ServiceView.tsx` (Serwis), `TradeInHub.tsx` + `TradeInOrdersView.tsx` (Trade-in),
+  `ServiceView.tsx` (Serwis), `TestsView.tsx` (Testy), `TradeInHub.tsx` + `TradeInOrdersView.tsx` (Trade-in),
   `TradeInView.tsx` (Bidder).
 - `app/api/*/route.ts` — endpointy serwerowe (sekrety tylko tu, nigdy w przeglądarce):
   `fakturownia/sync`, `tradein/bidder`, `tradein/competitors`, `tradein/orders-sync`.
@@ -33,12 +33,12 @@ numerach seryjnych, wielokanałowa synchronizacja stanów, naprawy, auto-wycena)
   i liczenie czasu — wspólne dla Serwisu i Trade-in).
 - `supabase/*.sql` — schemat, każdy plik idempotentny: `schema.sql` (units, members,
   cache Fakturowni), `tradein.sql` (bidder), `buyback-orders.sql` (zamówienia + obsługa
-  paczek), `service.sql` (rejestr napraw).
+  paczek), `service.sql` (rejestr napraw), `tests.sql` (rejestr testów).
 - `scripts/import-buyback.mjs` — jednorazowy import ze starego programu Buyback Bidder.
 
 ## Zakładki i role
 
-Role: **Admin, Magazyn, Serwis, Bidder**. Rolę nadaje Admin w zakładce Zespół (tam też
+Role: **Admin, Magazyn, Serwis, Testy, Bidder**. Rolę nadaje Admin w zakładce Zespół (tam też
 imię i nazwisko — `members.name`). Nowa osoba po pierwszym logowaniu dostaje pusty wiersz
 w `members` i ekran "poproś administratora o rolę" (`NoRoleScreen`); sama roli nie wybiera.
 Przegląd jest wspólną stroną startową. Mapa dostępu: `ROLE_ACCESS` w `app/page.tsx`.
@@ -49,6 +49,7 @@ Przegląd jest wspólną stroną startową. Mapa dostępu: `ROLE_ACCESS` w `app/
 | Magazyn | `inventory` | Admin, Magazyn |
 | Zespół | `team` | Admin |
 | Serwis | `service` | Admin, Serwis |
+| Testy | `tests` | Admin, Testy |
 | Bidder | `tradein` | Admin, Bidder |
 | Trade-in | `orders` | tylko Admin (nie ma jeszcze roli "Trade-in") |
 
@@ -95,6 +96,13 @@ Jeden wiersz = jedna naprawa: `started_at`, status (w_naprawie / naprawiony / us
 `finished_at`. Pracownik = zawsze zalogowana osoba (nie do wyboru). Wpisów nie da się
 usuwać z UI. Podsumowanie punktacji u góry (Dziś/7/30 dni) liczy tylko "naprawiony".
 
+**Testy** (`TestsView.tsx`, `test_log`). Rejestr testów urządzeń: pole numer seryjny +
+"Rozpocznij test". Jeden wiersz = jeden test: status (w_trakcie / przetestowane / przerwany),
+czas, punkty 200/13 (= 100/6,5) po "przetestowane", bez zaokrąglania. To samo urządzenie nie
+może mieć dwóch aktywnych wpisów naraz (indeks częściowy na `serial_number`); test
+"przerwany" nie blokuje ponownego podejścia. Punkty są niezależne od wyniku testu (sprawny /
+wadliwy) — do potwierdzenia z właścicielem.
+
 ## Regulamin premiowania (12.10.2026) — co z niego wynika dla kodu
 
 Zasady, które kształtują Serwis i Trade-in (pełny PDF ma właściciel):
@@ -110,7 +118,7 @@ Zasady, które kształtują Serwis i Trade-in (pełny PDF ma właściciel):
 
 Świadomie **nie zrobione**: kwota premii w zł, wydajność pkt/h, wskaźnik kwalifikacyjny 90%
 (§4-§7) — wymagają ewidencji godzin pracy, urlopów i nieobecności, której apka nie ma.
-Nie zrobione też: punkty testerów. Punkty z różnych obszarów mają się sumować w jeden wynik
+Punkty z różnych obszarów mają się sumować w jeden wynik
 miesięczny (§2 ust. 6) — dziś każdy obszar ma osobną tabelę i podsumowanie.
 
 ## Wzorce w kodzie (używaj ich przy nowych modułach)
@@ -170,7 +178,7 @@ Configuration) musi być aktualny adres produkcyjny, inaczej magic link nie zadz
 4. ✅ Bidder skupu Back Market (na produkcji)
 5. ✅ Trade-in: zamówienia BuyBack + obsługa paczek z punktacją · ⬜ rola "Trade-in"
 6. ⬜ Karta towaru z magazynu (dane + log zmian, jak karta zamówienia)
-7. ⬜ Punkty testerów i łączne podsumowanie miesięczne ze wszystkich obszarów
+7. ✅ Testy: rejestr i punktacja · ⬜ łączne podsumowanie miesięczne ze wszystkich obszarów
 8. ⬜ Ewidencja czasu pracy → wydajność pkt/h i premia z regulaminu
 9. ⬜ Integracje z kanałami sprzedaży (Allegro, eBay) — osobny etap, wymaga kluczy API
 10. ⬜ Twarde uprawnienia per rola (RLS)

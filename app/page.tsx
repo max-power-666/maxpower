@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabaseClient";
 import TradeInView from "./_components/TradeInView";
 import TradeInHub from "./_components/TradeInHub";
 import ServiceView from "./_components/ServiceView";
+import TestsView from "./_components/TestsView";
 
 /* ---------------- model danych (ten sam co w prototypie) ---------------- */
 
@@ -56,15 +57,16 @@ const CATEGORIES: Record<string, { label: string; fields: FieldDef[] }> = {
 };
 
 const STATUSES = ["Przyjęte", "Kontrola jakości", "Gotowe do sprzedaży", "Sprzedane", "W naprawie", "Złom"];
-const ROLES = ["Admin", "Magazyn", "Serwis", "Bidder"];
+const ROLES = ["Admin", "Magazyn", "Serwis", "Testy", "Bidder"];
 
-type ViewKey = "overview" | "inventory" | "team" | "service" | "tradein" | "orders";
+type ViewKey = "overview" | "inventory" | "team" | "service" | "tests" | "tradein" | "orders";
 
 const TABS: { key: ViewKey; label: string }[] = [
   { key: "overview", label: "Przegląd" },
   { key: "inventory", label: "Magazyn" },
   { key: "team", label: "Zespół" },
   { key: "service", label: "Serwis" },
+  { key: "tests", label: "Testy" },
   { key: "tradein", label: "Bidder" },
   { key: "orders", label: "Trade-in" },
 ];
@@ -77,9 +79,10 @@ const TABS: { key: ViewKey; label: string }[] = [
 // "orders" (zakładka Trade-in — podgląd zamówień BuyBack) na razie tylko dla Admina,
 // dopóki nie ustalimy docelowej roli dla osoby przetwarzającej zamówienia.
 const ROLE_ACCESS: Record<string, ViewKey[]> = {
-  Admin: ["overview", "inventory", "team", "service", "tradein", "orders"],
+  Admin: ["overview", "inventory", "team", "service", "tests", "tradein", "orders"],
   Magazyn: ["overview", "inventory"],
   Serwis: ["overview", "service"],
+  Testy: ["overview", "tests"],
   Bidder: ["overview", "tradein"],
 };
 
@@ -464,6 +467,8 @@ export default function Home() {
           )}
 
           {view === "service" && <ServiceView session={session} members={members} />}
+
+          {view === "tests" && <TestsView session={session} members={members} />}
 
           {view === "tradein" && <TradeInView session={session} />}
 
