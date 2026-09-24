@@ -68,8 +68,12 @@ create policy "authenticated read members" on members
 create policy "user upserts own member row" on members
   for insert with check (auth.uid() = user_id);
 
-create policy "user updates own member row" on members
-  for update using (auth.uid() = user_id);
+-- Każdy zalogowany może zmienić rolę każdemu (nie tylko swoją) — potrzebne, żeby
+-- Admin mógł przypisywać role innym z zakładki Zespół. Tak samo jak przy units:
+-- to nie jest twarde zabezpieczenie, tylko UI (zakładka Zespół) chowa tę możliwość
+-- przed osobami bez roli Admin.
+create policy "authenticated update members" on members
+  for update using (auth.role() = 'authenticated');
 
 create policy "authenticated read units" on units
   for select using (auth.role() = 'authenticated');

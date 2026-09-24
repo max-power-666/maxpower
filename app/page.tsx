@@ -160,21 +160,17 @@ function LoginScreen() {
   );
 }
 
-/* ---------------- onboarding roli ---------------- */
+/* ---------------- brak przypisanej roli ---------------- */
 
-function RolePicker({ onPick }: { onPick: (r: string) => void }) {
+// Rolę nadaje administrator z zakładki Zespół — nowy użytkownik nie wybiera jej sam.
+function NoRoleScreen({ email }: { email: string }) {
   return (
     <div className="min-h-screen flex items-center justify-center bg-paper px-4">
       <div className="max-w-sm w-full text-center">
         <h2 className="text-lg font-semibold mb-1">Witaj w Magazynie</h2>
-        <p className="text-inksoft text-sm mb-6">Wybierz swoją rolę w zespole.</p>
-        <div className="grid grid-cols-2 gap-2">
-          {ROLES.map((r) => (
-            <button key={r} onClick={() => onPick(r)} className="border border-line bg-white rounded py-4 font-semibold text-sm hover:border-ink">
-              {r}
-            </button>
-          ))}
-        </div>
+        <p className="text-inksoft text-sm">
+          Twoje konto (<b>{email}</b>) nie ma jeszcze przypisanej roli. Poproś administratora, żeby nadał Ci ją w zakładce Zespół.
+        </p>
       </div>
     </div>
   );
@@ -231,11 +227,18 @@ export default function Home() {
 
   async function loadRole() {
     const { data } = await supabase.from("members").select("role").eq("user_id", session!.user.id).maybeSingle();
-    setRole(data?.role ?? "");
+    if (data) {
+      setRole(data.role ?? "");
+    } else {
+      // Pierwsze logowanie: zakładamy wiersz z pustą rolą, żeby admin zobaczył
+      // to konto w Zespole i mógł mu przypisać rolę. Sam użytkownik już jej nie wybiera.
+      await supabase.from("members").insert({ user_id: session!.user.id, role: "", email: session!.user.email });
+      setRole("");
+    }
   }
-  async function saveRole(r: string) {
-    await supabase.from("members").upsert({ user_id: session!.user.id, role: r, email: session!.user.email });
-    setRole(r);
+  // Zmiana roli innego użytkownika — wywoływane z Zespołu (tylko Admin widzi tę zakładkę).
+  async function changeMemberRole(userId: string, r: string) {
+    await supabase.from("members").update({ role: r }).eq("user_id", userId);
   }
   async function loadUnits() {
     const { data } = await supabase.from("units").select("*").order("created_at", { ascending: false });
@@ -347,7 +350,7 @@ export default function Home() {
   if (session === undefined) return <div className="min-h-screen flex items-center justify-center text-inksoft text-sm">Ładowanie…</div>;
   if (!session) return <LoginScreen />;
   if (role === undefined) return <div className="min-h-screen flex items-center justify-center text-inksoft text-sm">Ładowanie…</div>;
-  if (role === "") return <RolePicker onPick={saveRole} />;
+  if (role === "") return <NoRoleScreen email={session.user.email ?? ""} />;
 
   return (
     <div className="min-h-screen flex">
@@ -434,7 +437,9 @@ export default function Home() {
             </div>
           )}
 
-          {view === "team" && <TeamView members={members} />}
+          {view === "team" && (
+            <TeamView members={members} currentUserId={session.user.id} onChangeRole={changeMemberRole} />
+          )}
 
           {view === "service" && (
             <PlaceholderView title="Serwis" description="Moduł napraw jest w budowie — pojawi się tutaj wkrótce." />
@@ -642,7 +647,15 @@ function FakturowniaSummaryView({ summary }: { summary: FakturowniaSummary }) {
 
 /* ---------------- zespół ---------------- */
 
-function TeamView({ members }: { members: Member[] }) {
+function TeamView({
+  members,
+  currentUserId,
+  onChangeRole,
+}: {
+  members: Member[];
+  currentUserId: string;
+  onChangeRole: (userId: string, role: string) => void;
+}) {
   return (
     <div className="border border-line bg-white">
       <table className="w-full text-sm">
@@ -661,7 +674,18 @@ function TeamView({ members }: { members: Member[] }) {
             <tr key={m.user_id} className="border-b border-line last:border-b-0">
               <td className="p-3 font-semibold">{m.email || "—"}</td>
               <td className="p-3">
-                <span className="text-xs font-semibold px-2 py-1 rounded-full bg-tealsoft text-teal">{m.role}</span>
+                <select
+                  value={m.role}
+                  onChange={(e) => onChangeRole(m.user_id, e.target.value)}
+                  disabled={m.user_id === currentUserId}
+                  title={m.user_id === currentUserId ? "Nie możesz zmienić własnej roli — poproś innego Admina." : undefined}
+                  className="text-xs font-semibold px-2 py-1 rounded-full bg-tealsoft text-teal border-none disabled:opacity-60"
+                >
+                  {!m.role && <option value="">— brak roli —</option>}
+                  {ROLES.map((r) => (
+                    <option key={r} value={r}>{r}</option>
+                  ))}
+                </select>
               </td>
               <td className="p-3 text-xs text-inksoft">
                 {(ROLE_ACCESS[m.role] ?? []).map((k) => TABS.find((t) => t.key === k)?.label).join(", ") || "—"}
