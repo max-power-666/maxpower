@@ -13,7 +13,8 @@ const pill = (active: boolean) =>
   `px-3 py-1.5 rounded-full text-sm font-semibold border ${active ? "bg-ink text-paper border-ink" : "bg-white border-line"}`;
 const btnPrimary = "bg-ink text-paper px-4 py-2 rounded text-sm font-semibold disabled:opacity-50";
 
-type HistoryEntry = { action: "created" | "edited"; by_email: string | null; at: string };
+type FieldChange = { field: string; from: string | null; to: string | null };
+type HistoryEntry = { action: "created" | "edited"; by_email: string | null; at: string; changes?: FieldChange[] };
 
 type IntakeEntry = {
   id: number;
@@ -294,18 +295,27 @@ function OrderCardDrawer({ orderPublicId, session, onClose }: { orderPublicId: s
       setError("Numer seryjny i SKU są obowiązkowe.");
       return;
     }
+    const next = { serial_number: serialDraft.trim(), sku: skuDraft.trim(), notes: notesDraft.trim() || null };
+    const changes: FieldChange[] = [];
+    const diff = (field: string, from: string | null, to: string | null) => {
+      if ((from ?? "") !== (to ?? "")) changes.push({ field, from, to });
+    };
+    diff("Numer seryjny", intake.serial_number, next.serial_number);
+    diff("SKU", intake.sku, next.sku);
+    diff("Uwagi", intake.notes, next.notes);
+
+    if (changes.length === 0) {
+      setEditing(false);
+      return;
+    }
+
     setSaving(true);
     setError("");
     try {
-      const entry: HistoryEntry = { action: "edited", by_email: session.user.email ?? null, at: new Date().toISOString() };
+      const entry: HistoryEntry = { action: "edited", by_email: session.user.email ?? null, at: new Date().toISOString(), changes };
       const { error: err } = await supabase
         .from("buyback_order_intake")
-        .update({
-          serial_number: serialDraft.trim(),
-          sku: skuDraft.trim(),
-          notes: notesDraft.trim() || null,
-          history: [...(intake.history || []), entry],
-        })
+        .update({ ...next, history: [...(intake.history || []), entry] })
         .eq("id", intake.id);
       if (err) throw err;
       setEditing(false);
@@ -436,9 +446,18 @@ function OrderCardDrawer({ orderPublicId, session, onClose }: { orderPublicId: s
             <div className="border border-line bg-white mb-6 p-3 text-sm">
               {!intake?.history?.length && <div className="text-inksoft">Brak jeszcze wpisów.</div>}
               {intake?.history?.map((h, i) => (
-                <div key={i} className="mb-1">
-                  <span className="font-mono text-inksoft mr-1">{i + 1}.</span>
-                  {ACTION_LABEL[h.action] || h.action} przez <span className="font-semibold">{h.by_email || "—"}</span>, {fmtDateTime(h.at)}
+                <div key={i} className="mb-2">
+                  <div>
+                    <span className="font-mono text-inksoft mr-1">{i + 1}.</span>
+                    {ACTION_LABEL[h.action] || h.action} przez <span className="font-semibold">{h.by_email || "—"}</span>, {fmtDateTime(h.at)}
+                  </div>
+                  {!!h.changes?.length && (
+                    <ul className="ml-6 list-disc text-xs text-inksoft">
+                      {h.changes.map((c, j) => (
+                        <li key={j}>{c.field}: „{c.from || "—"}” → „{c.to || "—"}”</li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               ))}
             </div>
