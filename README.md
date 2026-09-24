@@ -2,7 +2,7 @@
 
 Wewnętrzny system firmy do obsługi magazynu, napraw i skupu elektroniki. Moduły:
 
-- **Magazyn** — sztuki sprzętu ze statusami + podsumowanie stanu z Fakturowni (liczba, wartość, wykres per kategoria)
+- **Magazyn** — stan z Fakturowni: podsumowanie (liczba, wartość, wykres per kategoria) i lista sztuk z wyszukiwaniem po numerze seryjnym
 - **Zespół** — użytkownicy, role i dostęp do zakładek (rolę nadaje Admin)
 - **Serwis** — rejestr napraw z punktacją wg regulaminu premiowania
 - **Testy** — rejestr testów urządzeń z punktacją wg regulaminu

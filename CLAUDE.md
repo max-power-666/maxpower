@@ -71,11 +71,12 @@ kolumny `name`, `description`, `product_created_at`, kategoria, cena zakupu) +
 "Odśwież" robi jednorazowy pełny skan i uzupełnia braki. Zapis tylko serwer (service_role);
 zespół ma tylko odczyt.
 
-Tabela `units` (sztuki z kategoriami i `history`) oraz jej UI zostały **wycofane z Magazynu**
-na prośbę właściciela: nie ma listy `units`, przycisku dodawania ani panelu szczegółów.
-Kod (`AddModal`, `addUnit`, `UnitDrawer`, `updateStatus`) nadal jest w `page.tsx`, ale nic go
-nie wywołuje; zakładka Przegląd wciąż liczy statystyki z `units` (dziś zera). Planowana karta
-towaru z magazynu ma ten kod zastąpić.
+Ręczna ewidencja sztuk w tabeli `units` została **wycofana z Magazynu** na prośbę właściciela
+i jej kod usunięto z `page.tsx` (lista, dodawanie, panel szczegółów, `CATEGORIES` z polami per
+kategoria). Sama tabela `units` zostaje w `schema.sql`, a zakładka Przegląd wciąż liczy z niej
+cztery kafelki (dziś same zera, bo nic do niej nie zapisuje). Planowana karta towaru z magazynu
+ma ją zastąpić (wzorzec: karta zamówienia Trade-in) — wtedy kafelki Przeglądu trzeba przełączyć
+na nowe źródło.
 
 **Bidder** (zakładka Bidder, `TradeInView.tsx`). Automat cen skupu Back Market (DE/ES/FR/IT):
 dla każdego SKU ustawia chwilowo 10 €, czyta `price_to_win` i ustawia `min(price_to_win, cena max)`.

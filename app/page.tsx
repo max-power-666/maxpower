@@ -9,55 +9,6 @@ import ServiceView from "./_components/ServiceView";
 import TestsView from "./_components/TestsView";
 import InventoryRawView from "./_components/InventoryRawView";
 
-/* ---------------- model danych (ten sam co w prototypie) ---------------- */
-
-type FieldDef = { k: string; label: string; type: "text" | "number" | "select"; options?: string[]; required?: boolean };
-
-const CATEGORIES: Record<string, { label: string; fields: FieldDef[] }> = {
-  smartfon: {
-    label: "Smartfon",
-    fields: [
-      { k: "imei", label: "IMEI", type: "text", required: true },
-      { k: "storage", label: "Pojemność", type: "select", options: ["32 GB", "64 GB", "128 GB", "256 GB", "512 GB"] },
-      { k: "battery", label: "Stan baterii (%)", type: "number" },
-      { k: "grade", label: "Ocena wizualna", type: "select", options: ["A+", "A", "B", "C"] },
-    ],
-  },
-  tablet: {
-    label: "Tablet",
-    fields: [
-      { k: "imei", label: "Nr seryjny / IMEI", type: "text", required: true },
-      { k: "storage", label: "Pojemność", type: "select", options: ["32 GB", "64 GB", "128 GB", "256 GB"] },
-      { k: "grade", label: "Ocena wizualna", type: "select", options: ["A+", "A", "B", "C"] },
-    ],
-  },
-  laptop: {
-    label: "Laptop",
-    fields: [
-      { k: "imei", label: "Nr seryjny", type: "text", required: true },
-      { k: "cpu", label: "Procesor", type: "text" },
-      { k: "ram", label: "RAM", type: "text" },
-      { k: "grade", label: "Ocena wizualna", type: "select", options: ["A+", "A", "B", "C"] },
-    ],
-  },
-  konsola: {
-    label: "Konsola",
-    fields: [
-      { k: "imei", label: "Nr seryjny", type: "text", required: true },
-      { k: "storage", label: "Pojemność", type: "select", options: ["256 GB", "512 GB", "1 TB"] },
-      { k: "grade", label: "Ocena wizualna", type: "select", options: ["A+", "A", "B", "C"] },
-    ],
-  },
-  inne: {
-    label: "Inne",
-    fields: [
-      { k: "imei", label: "Nr seryjny (opcjonalnie)", type: "text" },
-      { k: "grade", label: "Ocena wizualna", type: "select", options: ["A+", "A", "B", "C"] },
-    ],
-  },
-};
-
-const STATUSES = ["Przyjęte", "Kontrola jakości", "Gotowe do sprzedaży", "Sprzedane", "W naprawie", "Złom"];
 const ROLES = ["Admin", "Magazyn", "Serwis", "Testy", "Bidder"];
 
 type ViewKey = "overview" | "inventory" | "team" | "service" | "tests" | "tradein" | "orders";
@@ -88,13 +39,6 @@ const ROLE_ACCESS: Record<string, ViewKey[]> = {
 };
 
 type Member = { user_id: string; role: string; email: string; name: string };
-
-type FakturowniaCacheRow = {
-  id: number;
-  category_id: number | null;
-  category_name: string;
-  purchase_price_gross: number;
-};
 
 type FakturowniaCategorySummary = { name: string; count: number; value: number };
 type FakturowniaSummary = { totalCount: number; totalValue: number; categories: FakturowniaCategorySummary[] };
@@ -194,9 +138,6 @@ export default function Home() {
   const [members, setMembers] = useState<Member[]>([]);
   const [view, setView] = useState<ViewKey>("overview");
   const [invSub, setInvSub] = useState<"summary" | "raw">("summary");
-  const [addOpen, setAddOpen] = useState(false);
-  const [category, setCategory] = useState("smartfon");
-  const [openUnit, setOpenUnit] = useState<Unit | null>(null);
   const [fakturowniaSummary, setFakturowniaSummary] = useState<FakturowniaSummary | null>(null);
   const [fakturowniaLastSynced, setFakturowniaLastSynced] = useState<string | null>(null);
   const [fakturowniaLoading, setFakturowniaLoading] = useState(false);
@@ -269,25 +210,6 @@ export default function Home() {
   async function loadMembers() {
     const { data } = await supabase.from("members").select("user_id, role, email, name").order("email");
     setMembers((data as Member[]) || []);
-  }
-  async function addUnit(draft: any) {
-    await supabase.from("units").insert({
-      category,
-      name: draft.name,
-      location: draft.location || "",
-      price_cost: Number(draft.priceCost) || 0,
-      price_sell: Number(draft.priceSell) || 0,
-      notes: draft.notes || "",
-      fields: draft.fields || {},
-      status: "Przyjęte",
-      history: [{ status: "Przyjęte", user_id: session!.user.id, at: new Date().toISOString() }],
-      created_by: session!.user.id,
-    });
-    setAddOpen(false);
-  }
-  async function updateStatus(unit: Unit, status: string) {
-    const entry = { status, user_id: session!.user.id, at: new Date().toISOString() };
-    await supabase.from("units").update({ status, history: [...(unit.history || []), entry] }).eq("id", unit.id);
   }
   // Supabase (PostgREST) domyślnie zwraca max 1000 wierszy na zapytanie — przy > 1000
   // sztukach trzeba dociągać kolejne strony przez .range(), inaczej wynik się urywa.
@@ -472,80 +394,6 @@ export default function Home() {
         </div>
       </main>
 
-      {addOpen && (
-        <AddModal
-          category={category}
-          setCategory={setCategory}
-          onCancel={() => setAddOpen(false)}
-          onSave={addUnit}
-        />
-      )}
-
-      {openUnit && (
-        <UnitDrawer unit={openUnit} onClose={() => setOpenUnit(null)} onStatus={(s) => updateStatus(openUnit, s)} />
-      )}
-    </div>
-  );
-}
-
-/* ---------------- modal dodawania ---------------- */
-
-function AddModal({ category, setCategory, onCancel, onSave }: { category: string; setCategory: (c: string) => void; onCancel: () => void; onSave: (d: any) => void }) {
-  const [draft, setDraft] = useState<any>({ fields: {} });
-  const cat = CATEGORIES[category];
-
-  return (
-    <div className="fixed inset-0 bg-black/30 flex items-start justify-center p-10 overflow-y-auto z-50">
-      <div className="bg-paper border border-line w-full max-w-xl p-6">
-        <h2 className="text-lg font-semibold mb-4">Dodaj urządzenie</h2>
-        <div className="flex gap-2 flex-wrap mb-4">
-          {Object.keys(CATEGORIES).map((c) => (
-            <button key={c} onClick={() => setCategory(c)} className={`px-3 py-1.5 rounded-full text-sm font-semibold border ${category === c ? "bg-ink text-paper border-ink" : "bg-white border-line"}`}>
-              {CATEGORIES[c].label}
-            </button>
-          ))}
-        </div>
-        <div className="grid grid-cols-2 gap-3 mb-4">
-          <div>
-            <label className="text-xs font-semibold text-inksoft block mb-1">Nazwa / model *</label>
-            <input className="w-full border border-line bg-white px-2 py-2 rounded" onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
-          </div>
-          <div>
-            <label className="text-xs font-semibold text-inksoft block mb-1">Lokalizacja</label>
-            <input className="w-full border border-line bg-white px-2 py-2 rounded" onChange={(e) => setDraft({ ...draft, location: e.target.value })} />
-          </div>
-          {cat.fields.map((f) => (
-            <div key={f.k}>
-              <label className="text-xs font-semibold text-inksoft block mb-1">{f.label}</label>
-              {f.type === "select" ? (
-                <select className="w-full border border-line bg-white px-2 py-2 rounded" onChange={(e) => setDraft({ ...draft, fields: { ...draft.fields, [f.k]: e.target.value } })}>
-                  <option value="">—</option>
-                  {f.options!.map((o) => <option key={o} value={o}>{o}</option>)}
-                </select>
-              ) : (
-                <input type={f.type} className="w-full border border-line bg-white px-2 py-2 rounded" onChange={(e) => setDraft({ ...draft, fields: { ...draft.fields, [f.k]: e.target.value } })} />
-              )}
-            </div>
-          ))}
-          <div>
-            <label className="text-xs font-semibold text-inksoft block mb-1">Cena zakupu</label>
-            <input type="number" className="w-full border border-line bg-white px-2 py-2 rounded" onChange={(e) => setDraft({ ...draft, priceCost: e.target.value })} />
-          </div>
-          <div>
-            <label className="text-xs font-semibold text-inksoft block mb-1">Cena sprzedaży</label>
-            <input type="number" className="w-full border border-line bg-white px-2 py-2 rounded" onChange={(e) => setDraft({ ...draft, priceSell: e.target.value })} />
-          </div>
-        </div>
-        <div className="flex justify-end gap-2">
-          <button onClick={onCancel} className="px-4 py-2 border border-line rounded text-sm font-semibold">Anuluj</button>
-          <button
-            onClick={() => (draft.name ? onSave(draft) : alert("Podaj nazwę urządzenia."))}
-            className="px-4 py-2 bg-ink text-paper rounded text-sm font-semibold"
-          >
-            Zapisz urządzenie
-          </button>
-        </div>
-      </div>
     </div>
   );
 }
@@ -740,39 +588,6 @@ function TeamView({
           })}
         </tbody>
       </table>
-    </div>
-  );
-}
-
-/* ---------------- panel boczny jednostki ---------------- */
-
-function UnitDrawer({ unit, onClose, onStatus }: { unit: Unit; onClose: () => void; onStatus: (s: string) => void }) {
-  const cat = CATEGORIES[unit.category];
-  return (
-    <div className="fixed inset-0 bg-black/30 flex justify-end z-50" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="w-full max-w-md bg-paper h-full overflow-y-auto p-6 border-l border-line">
-        <div className="flex justify-between items-start mb-4">
-          <h2 className="text-lg font-semibold">{unit.name}</h2>
-          <button onClick={onClose} className="text-inksoft text-lg">✕</button>
-        </div>
-        <h3 className="text-xs font-semibold text-inksoft mb-2">ZMIEŃ STATUS</h3>
-        <div className="flex flex-wrap gap-1 mb-6">
-          {STATUSES.map((s) => (
-            <button key={s} onClick={() => onStatus(s)} className={`text-xs font-semibold px-3 py-1.5 rounded-full border ${unit.status === s ? "bg-ink text-paper border-ink" : "bg-white border-line"}`}>
-              {s}
-            </button>
-          ))}
-        </div>
-        <h3 className="text-xs font-semibold text-inksoft mb-2">DANE URZĄDZENIA</h3>
-        <div className="border border-line bg-white mb-6">
-          {cat.fields.map((f) => (
-            <div key={f.k} className="flex justify-between px-3 py-2 border-b border-line text-sm last:border-b-0">
-              <span className="text-inksoft">{f.label}</span>
-              <span className="font-mono font-semibold">{unit.fields?.[f.k] || "—"}</span>
-            </div>
-          ))}
-        </div>
-      </div>
     </div>
   );
 }
