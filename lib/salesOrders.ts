@@ -45,7 +45,7 @@ export const REFURBED_ORDER_STATES: Record<string, string> = {
 export const ERLI_ORDER_STATES: Record<string, string> = {
   pending: "Oczekuje na płatność",
   purchased: "Opłacone",
-  purchased_cod: "Za pobraniem (płatność przy odbiorze)",
+  purchased_cod: "Za pobraniem",
   cancelled: "Anulowane",
   returned: "Zwrócone",
 };
