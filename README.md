@@ -91,8 +91,8 @@ zalogowały się choć raz.
   refurbed jest pomijany, a Back Market działa normalnie. Erli — analogicznie, klucz API sklepu (panel Erli → Metoda integracji →
   Własna integracja po API) jako `ERLI_API_KEY`. Allegro wymaga jednorazowego połączenia konta (OAuth): 1) zarejestruj aplikację na
   apps.developer.allegro.pl (konto z 2FA; typ z dostępem do przeglądarki), jako adres przekierowania wpisz
-  `https://<twoja-domena>/api/orders/allegro-callback` (aplikacja pokazuje go w zakładce Zamówienia), 2) `ALLEGRO_CLIENT_ID` i
-  `ALLEGRO_CLIENT_SECRET` dopisz w `.env.local` i w Vercelu (potem nowy deploy), 3) Admin klika w Zamówieniach **Połącz z Allegro** i zgadza się
+  `https://<twoja-domena>/api/orders/allegro-callback` (aplikacja pokazuje go w zakładce Zamówienia), 2) `ALLEGRO_CLIENT_ID`,
+  `ALLEGRO_CLIENT_SECRET` i `ALLEGRO_UA` (User-Agent z generatora w panelu aplikacji Allegro — bez prawidłowego Allegro blokuje klucz) dopisz w `.env.local` i w Vercelu (potem nowy deploy), 3) Admin klika w Zamówieniach **Połącz z Allegro** i zgadza się
   na odczyt zamówień. Zgoda działa do 3 miesięcy bez użycia — cron odnawia ją sam; po jej utracie kliknij „Połącz ponownie”.
 - **Bidder** — `node scripts/import-buyback.mjs` przenosi SKU, ceny max i ostatnie ceny ze
   starego programu (`~/Documents/Buyback Bidder 2`). Włącznik jest domyślnie wyłączony:

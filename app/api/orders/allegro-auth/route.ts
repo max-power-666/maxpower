@@ -26,7 +26,7 @@ export async function POST(request: Request) {
   const admin = serviceClient();
   if (!(await requireAdmin(request, admin))) return NextResponse.json({ error: "Tylko Admin." }, { status: 403 });
   const app = allegroApp();
-  if (!app) return NextResponse.json({ error: "Brak ALLEGRO_CLIENT_ID / ALLEGRO_CLIENT_SECRET w zmiennych środowiskowych." }, { status: 400 });
+  if (!app) return NextResponse.json({ error: "Brak ALLEGRO_CLIENT_ID / ALLEGRO_CLIENT_SECRET / ALLEGRO_UA w zmiennych środowiskowych." }, { status: 400 });
 
   // Losowy znacznik (state) chroni callback przed podstawionym żądaniem: przyjmiemy tylko ten, który sami wydaliśmy.
   const state = crypto.randomUUID();

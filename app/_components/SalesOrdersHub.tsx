@@ -187,7 +187,7 @@ export default function SalesOrdersHub({ session, members, isAdmin }: { session:
 
       {isAdmin && allegro && (
         <div className="text-xs text-inksoft mb-3 flex flex-wrap items-center gap-x-3 gap-y-1">
-          {!allegro.configured && <span>Allegro: brak ALLEGRO_CLIENT_ID / ALLEGRO_CLIENT_SECRET w zmiennych środowiskowych.</span>}
+          {!allegro.configured && <span>Allegro: brak ALLEGRO_CLIENT_ID / ALLEGRO_CLIENT_SECRET / ALLEGRO_UA w zmiennych środowiskowych.</span>}
           {allegro.configured && allegro.connected && (
             <>
               <span>Allegro: połączone ✓</span>

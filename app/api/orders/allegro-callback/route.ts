@@ -21,7 +21,7 @@ export async function GET(request: Request) {
   if (!code || !state) return back(request, "error", "Brak kodu autoryzacji w odpowiedzi Allegro.");
 
   const app = allegroApp();
-  if (!app) return back(request, "error", "Brak ALLEGRO_CLIENT_ID / ALLEGRO_CLIENT_SECRET.");
+  if (!app) return back(request, "error", "Brak ALLEGRO_CLIENT_ID / ALLEGRO_CLIENT_SECRET / ALLEGRO_UA.");
   const admin = serviceClient();
 
   const { data: row } = await admin.from("oauth_tokens").select("pending_state, pending_state_expires").eq("marketplace", "allegro").maybeSingle();

@@ -3,10 +3,13 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { AllegroApp, AllegroTokens, TokenStore } from "./allegro";
 
+// Zwraca null, dopóki nie ma kompletu: Client_ID, Client_Secret i ALLEGRO_UA. User-Agent nie ma wartości domyślnej celowo —
+// zapytania z nieprawidłowym User-Agentem kończą się zablokowaniem klucza API przez Allegro.
 export function allegroApp(): AllegroApp | null {
   const clientId = process.env.ALLEGRO_CLIENT_ID;
   const clientSecret = process.env.ALLEGRO_CLIENT_SECRET;
-  return clientId && clientSecret ? { clientId, clientSecret } : null;
+  const userAgent = process.env.ALLEGRO_UA?.trim();
+  return clientId && clientSecret && userAgent ? { clientId, clientSecret, userAgent } : null;
 }
 
 export function serviceClient(): SupabaseClient<any, any, any> {

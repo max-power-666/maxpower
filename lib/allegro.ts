@@ -14,7 +14,9 @@ const REFRESH_MARGIN_MS = 120_000; // odświeżamy token, gdy zostało mniej ni�
 
 export class AllegroReauthError extends Error {}
 
-export type AllegroApp = { clientId: string; clientSecret: string; fetchImpl?: typeof fetch };
+// userAgent: Allegro BLOKUJE klucz API przy zapytaniach bez prawidłowego User-Agenta wygenerowanego w panelu aplikacji
+// (apps.developer.allegro.pl -> generator User-Agent), dlatego jest wymagany także przy zapytaniach o tokeny.
+export type AllegroApp = { clientId: string; clientSecret: string; userAgent: string; fetchImpl?: typeof fetch };
 export type AllegroTokens = { refresh_token: string; access_token: string | null; access_expires_at: string | null };
 export type TokenStore = {
   load(): Promise<AllegroTokens | null>;
@@ -28,7 +30,7 @@ const basic = (a: AllegroApp) => "Basic " + Buffer.from(`${a.clientId}:${a.clien
 async function tokenRequest(a: AllegroApp, body: Record<string, string>) {
   const res = await (a.fetchImpl ?? fetch)(`${ALLEGRO_AUTH_URL}/token`, {
     method: "POST",
-    headers: { Authorization: basic(a), "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+    headers: { Authorization: basic(a), "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json", "User-Agent": a.userAgent },
     body: new URLSearchParams(body).toString(),
     cache: "no-store",
     signal: AbortSignal.timeout(30_000),

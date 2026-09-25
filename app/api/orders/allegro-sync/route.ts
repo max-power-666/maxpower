@@ -42,7 +42,7 @@ export async function GET(request: Request) {
   }
   const app = allegroApp();
   if (!app) {
-    return NextResponse.json({ ok: true, skipped: "Allegro nie jest skonfigurowane (brak ALLEGRO_CLIENT_ID / ALLEGRO_CLIENT_SECRET) — pominięto." });
+    return NextResponse.json({ ok: true, skipped: "Allegro nie jest skonfigurowane (brak ALLEGRO_CLIENT_ID / ALLEGRO_CLIENT_SECRET / ALLEGRO_UA) — pominięto." });
   }
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return NextResponse.json({ error: "Brak SUPABASE_SERVICE_ROLE_KEY w zmiennych środowiskowych." }, { status: 500 });
@@ -55,7 +55,7 @@ export async function GET(request: Request) {
     if (!(await store.load())) {
       return NextResponse.json({ ok: true, skipped: "Allegro nie jest połączone — Admin musi kliknąć „Połącz z Allegro”." });
     }
-    const client: AllegroClient = { accessToken: await getAccessToken(app, store), userAgent: process.env.ALLEGRO_UA || "recoo-erp" };
+    const client: AllegroClient = { accessToken: await getAccessToken(app, store), userAgent: app.userAgent };
 
     const { data: meta, error: metaError } = await admin
       .from("sales_orders_sync_meta")
