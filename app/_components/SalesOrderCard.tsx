@@ -188,6 +188,35 @@ const grosze = (v: number | null | undefined, currency: string | null | undefine
 const erliAddress = (a?: NonNullable<ErliOrder["raw"]["user"]>["deliveryAddress"]) =>
   a ? [[a.street, [a.buildingNumber, a.flatNumber].filter(Boolean).join("/")].filter(Boolean).join(" "), [a.zip, a.city].filter(Boolean).join(" "), a.country].filter(Boolean).join(", ") : null;
 
+// Zamówienie Allegro (checkout form, patrz swagger CheckoutForm) — czytamy z kolumny raw tabeli allegro_orders.
+type AllegroOrder = {
+  id: string;
+  status: string;
+  fulfillment_status: string | null;
+  payment_type: string | null;
+  marketplace_id: string | null;
+  buyer_login: string | null;
+  total_to_pay: number | null;
+  currency: string | null;
+  updated_at: string | null;
+  raw: {
+    messageToSeller?: string;
+    buyer?: { email?: string; login?: string; firstName?: string; lastName?: string; companyName?: string; phoneNumber?: string };
+    payment?: { type?: string; provider?: string; finishedAt?: string; paidAmount?: { amount?: string; currency?: string } };
+    delivery?: {
+      method?: { name?: string };
+      cost?: { amount?: string; currency?: string };
+      address?: { firstName?: string; lastName?: string; companyName?: string; street?: string; zipCode?: string; city?: string; countryCode?: string; phoneNumber?: string };
+      pickupPoint?: { name?: string; description?: string; address?: { street?: string; zipCode?: string; city?: string } };
+    };
+    invoice?: { required?: boolean };
+    lineItems?: { id?: string; boughtAt?: string; quantity?: number; offer?: { id?: string; name?: string; external?: { id?: string } }; price?: { amount?: string; currency?: string } }[];
+    _shipments?: { waybill?: string; carrierId?: string }[];
+  };
+};
+const allegroAddress = (a?: NonNullable<AllegroOrder["raw"]["delivery"]>["address"]) =>
+  a ? [a.street, [a.zipCode, a.city].filter(Boolean).join(" "), a.countryCode].filter(Boolean).join(", ") : null;
+
 function fmtDateTime(iso: string | null) {
   if (!iso) return null;
   return new Date(iso).toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -227,6 +256,7 @@ export default function SalesOrderCard({
   const [bm, setBm] = useState<BmOrder | null>(null);
   const [rf, setRf] = useState<RefurbedOrder | null>(null);
   const [er, setEr] = useState<ErliOrder | null>(null);
+  const [al, setAl] = useState<AllegroOrder | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
 
@@ -240,7 +270,7 @@ export default function SalesOrderCard({
   }, [marketplace, externalId]);
 
   async function load() {
-    const [{ data: w, error: wErr }, itemsRes, bmRes, rfRes, erRes] = await Promise.all([
+    const [{ data: w, error: wErr }, itemsRes, bmRes, rfRes, erRes, alRes] = await Promise.all([
       supabase.from("sales_orders").select("*").eq("marketplace", marketplace).eq("external_id", externalId).maybeSingle(),
       supabase
         .from("sales_order_items")
@@ -257,14 +287,18 @@ export default function SalesOrderCard({
       marketplace === "erli"
         ? supabase.from("erli_orders").select("*").eq("id", externalId).maybeSingle()
         : Promise.resolve({ data: null, error: null }),
+      marketplace === "allegro"
+        ? supabase.from("allegro_orders").select("*").eq("id", externalId).maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
     ]);
-    const firstError = wErr || itemsRes.error || bmRes.error || rfRes.error || erRes.error;
+    const firstError = wErr || itemsRes.error || bmRes.error || rfRes.error || erRes.error || alRes.error;
     if (firstError) setError(firstError.message);
     setWorker((w as WorkerData) ?? null);
     setItems((itemsRes.data as SalesItem[]) || []);
     setBm((bmRes.data as BmOrder) ?? null);
     setRf((rfRes.data as RefurbedOrder) ?? null);
     setEr((erRes.data as ErliOrder) ?? null);
+    setAl((alRes.data as AllegroOrder) ?? null);
     setLoaded(true);
   }
 
@@ -449,6 +483,19 @@ export default function SalesOrderCard({
                   <Row label="Podatki" value={fmtMoney(bm?.sales_taxes, bm?.currency)} />
                 </>
               )}
+              {marketplace === "allegro" && (
+                <>
+                  <Row label="Rynek" value={al?.marketplace_id} />
+                  <Row label="Status realizacji (Allegro)" value={al?.fulfillment_status} />
+                  <Row
+                    label="Płatność"
+                    value={!al ? null : al.payment_type === "CASH_ON_DELIVERY" ? "za pobraniem" : al.payment_type === "ONLINE" ? "online" : al.payment_type}
+                  />
+                  <Row label="Suma (z dostawą)" value={fmtMoney(al?.total_to_pay, al?.currency)} />
+                  <Row label="Kupujący (login)" value={al?.buyer_login} />
+                  <Row label="Faktura" value={al?.raw.invoice?.required === undefined ? null : al.raw.invoice.required ? "wymagana" : "nie"} />
+                </>
+              )}
               {marketplace === "erli" && (
                 <>
                   <Row label="Rynek" value={er?.market?.toUpperCase()} />
@@ -474,8 +521,58 @@ export default function SalesOrderCard({
               )}
             </div>
 
-            {((marketplace === "backmarket" && !bm) || (marketplace === "refurbed" && !rf) || (marketplace === "erli" && !er)) && (
+            {((marketplace === "backmarket" && !bm) || (marketplace === "refurbed" && !rf) || (marketplace === "erli" && !er) || (marketplace === "allegro" && !al)) && (
               <p className="text-inksoft text-xs mb-6">Brak surowych danych z API dla tego zamówienia.</p>
+            )}
+
+            {al && (
+              <>
+                {!!al.raw.lineItems?.length && (
+                  <>
+                    <h3 className="text-xs font-semibold text-inksoft mb-2">POZYCJE</h3>
+                    {al.raw.lineItems.map((l, i) => (
+                      <div key={l.id ?? i} className="border border-line bg-white mb-2">
+                        <Row label="Oferta" value={l.offer?.name} />
+                        <Row label="SKU (id w naszym systemie)" value={l.offer?.external?.id} mono />
+                        <Row label="Id oferty Allegro" value={l.offer?.id} mono />
+                        <Row label="Ilość" value={l.quantity === undefined ? null : String(l.quantity)} />
+                        <Row label="Cena" value={fmtMoney(l.price?.amount, l.price?.currency)} />
+                      </div>
+                    ))}
+                    <div className="mb-4" />
+                  </>
+                )}
+
+                <h3 className="text-xs font-semibold text-inksoft mb-2">DATY</h3>
+                <div className="border border-line bg-white mb-6">
+                  <Row label="Kupiono" value={fmtDateTime(al.raw.lineItems?.[0]?.boughtAt ?? null)} />
+                  <Row label="Opłacono" value={fmtDateTime(al.raw.payment?.finishedAt ?? null)} />
+                  <Row label="Zmieniono" value={fmtDateTime(al.updated_at)} />
+                </div>
+
+                <h3 className="text-xs font-semibold text-inksoft mb-2">DOSTAWA</h3>
+                <div className="border border-line bg-white mb-6">
+                  <Row label="Sposób dostawy" value={al.raw.delivery?.method?.name} />
+                  <Row label="Koszt dostawy" value={fmtMoney(al.raw.delivery?.cost?.amount, al.raw.delivery?.cost?.currency)} />
+                  <Row
+                    label="Punkt odbioru"
+                    value={al.raw.delivery?.pickupPoint ? [al.raw.delivery.pickupPoint.name, al.raw.delivery.pickupPoint.address?.street, al.raw.delivery.pickupPoint.address?.city].filter(Boolean).join(", ") : null}
+                  />
+                  <Row label="Numer przesyłki" value={(al.raw._shipments || []).map((x) => x.waybill).filter(Boolean).join(", ")} mono />
+                </div>
+
+                <h3 className="text-xs font-semibold text-inksoft mb-2">KLIENT (ADRES DOSTAWY)</h3>
+                <div className="border border-line bg-white mb-6">
+                  <Row
+                    label="Imię i nazwisko"
+                    value={[al.raw.delivery?.address?.firstName, al.raw.delivery?.address?.lastName].filter(Boolean).join(" ") || al.raw.delivery?.address?.companyName}
+                  />
+                  <Row label="Telefon" value={al.raw.delivery?.address?.phoneNumber || al.raw.buyer?.phoneNumber} />
+                  <Row label="Adres" value={allegroAddress(al.raw.delivery?.address)} />
+                  <Row label="E-mail" value={al.raw.buyer?.email} />
+                  <Row label="Wiadomość do sprzedawcy" value={al.raw.messageToSeller} />
+                </div>
+              </>
             )}
 
             {er && (

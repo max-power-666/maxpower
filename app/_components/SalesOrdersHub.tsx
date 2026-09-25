@@ -67,7 +67,7 @@ function Pager({
   );
 }
 
-export default function SalesOrdersHub({ session, members }: { session: Session; members: MemberLite[] }) {
+export default function SalesOrdersHub({ session, members, isAdmin }: { session: Session; members: MemberLite[]; isAdmin: boolean }) {
   const [sub, setSub] = useState<"orders" | "bm">("orders");
   const [reloadKey, setReloadKey] = useState(0);
   const [lastSynced, setLastSynced] = useState<string | null>(null);
@@ -75,8 +75,20 @@ export default function SalesOrdersHub({ session, members }: { session: Session;
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
   const [openOrder, setOpenOrder] = useState<{ marketplace: string; externalId: string } | null>(null);
+  // Połączenie z Allegro (OAuth) — widoczne i obsługiwane tylko przez Admina.
+  const [allegro, setAllegro] = useState<{ configured: boolean; connected: boolean; redirectUri: string } | null>(null);
+  const [connecting, setConnecting] = useState(false);
 
   useEffect(() => {
+    // Powrót z Allegro po autoryzacji (allegro-callback przekierowuje na /?allegro=connected|error&msg=...).
+    const params = new URLSearchParams(window.location.search);
+    const result = params.get("allegro");
+    if (result) {
+      if (result === "connected") setNote("Allegro połączone — kliknij Odśwież, żeby pobrać zamówienia.");
+      else setError(params.get("msg") || "Nie udało się połączyć z Allegro.");
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+    if (isAdmin) loadAllegro();
     loadMeta();
     const channel = supabase
       .channel("sales-orders-meta")
@@ -86,6 +98,30 @@ export default function SalesOrdersHub({ session, members }: { session: Session;
       supabase.removeChannel(channel);
     };
   }, []);
+
+  async function loadAllegro() {
+    try {
+      const res = await fetch("/api/orders/allegro-auth", { headers: { Authorization: `Bearer ${session.access_token}` } });
+      if (res.ok) setAllegro(await res.json());
+    } catch {
+      /* brak połączenia — panel Allegro po prostu się nie pokaże */
+    }
+  }
+
+  // Zaczyna autoryzację: serwer wydaje adres strony Allegro, na którą przechodzimy, żeby wyrazić zgodę (odczyt zamówień).
+  async function connectAllegro() {
+    setConnecting(true);
+    setError("");
+    try {
+      const res = await fetch("/api/orders/allegro-auth", { method: "POST", headers: { Authorization: `Bearer ${session.access_token}` } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Nie udało się rozpocząć łączenia z Allegro.");
+      window.location.href = data.url;
+    } catch (e: any) {
+      setError(e.message || "Nie udało się rozpocząć łączenia z Allegro.");
+      setConnecting(false);
+    }
+  }
 
   async function loadMeta() {
     // Pokazujemy najświeższą synchronizację spośród wszystkich kanałów.
@@ -103,6 +139,7 @@ export default function SalesOrdersHub({ session, members }: { session: Session;
       { label: "Back Market", url: "/api/orders/bm-sync" },
       { label: "Refurbed", url: "/api/orders/refurbed-sync" },
       { label: "Erli", url: "/api/orders/erli-sync" },
+      { label: "Allegro", url: "/api/orders/allegro-sync" },
     ];
     const errors: string[] = [];
     const notes: string[] = [];
@@ -147,6 +184,26 @@ export default function SalesOrdersHub({ session, members }: { session: Session;
           </span>
         </div>
       </div>
+
+      {isAdmin && allegro && (
+        <div className="text-xs text-inksoft mb-3 flex flex-wrap items-center gap-x-3 gap-y-1">
+          {!allegro.configured && <span>Allegro: brak ALLEGRO_CLIENT_ID / ALLEGRO_CLIENT_SECRET w zmiennych środowiskowych.</span>}
+          {allegro.configured && allegro.connected && (
+            <>
+              <span>Allegro: połączone ✓</span>
+              <button onClick={connectAllegro} disabled={connecting} className="text-teal hover:underline disabled:opacity-50">Połącz ponownie</button>
+            </>
+          )}
+          {allegro.configured && !allegro.connected && (
+            <>
+              <button onClick={connectAllegro} disabled={connecting} className="bg-white border border-line px-3 py-1.5 rounded text-xs font-semibold disabled:opacity-50">
+                {connecting ? "Przekierowanie…" : "Połącz z Allegro"}
+              </button>
+              <span>Adres przekierowania do wpisania w aplikacji Allegro: <span className="font-mono">{allegro.redirectUri}</span></span>
+            </>
+          )}
+        </div>
+      )}
 
       {error && <p className="text-rust text-xs mb-3">{error}</p>}
       {note && <p className="text-inksoft text-xs mb-3">{note}</p>}
@@ -201,6 +258,7 @@ const MARKETPLACE_STYLE: Record<string, string> = {
   backmarket: "bg-[#e3ecf9] text-[#2a6bb5]",
   refurbed: "bg-[#efe6f8] text-[#7a3fb0]",
   erli: "bg-[#fbe4ef] text-[#b0296b]",
+  allegro: "bg-[#fde3d3] text-[#c2410c]",
 };
 
 const OUR_STATUS_STYLE: Record<OurStatus, string> = {
@@ -218,6 +276,10 @@ function statusStyle(marketplace: string, status: string) {
   if (marketplace === "refurbed") {
     if (status === "SHIPPED" || status === "FULFILLED") return "bg-tealsoft text-teal";
     if (status === "NEW" || status === "ACCEPTED") return "bg-ambersoft text-amber";
+  }
+  if (marketplace === "allegro") {
+    if (status === "READY_FOR_PROCESSING") return "bg-ambersoft text-amber"; // opłacone — do obsłużenia
+    if (status === "READY_FOR_PROCESSING_COD") return "bg-rustsoft text-rust font-bold"; // za pobraniem — nie mylić z opłaconym
   }
   if (marketplace === "erli") {
     if (status === "purchased") return "bg-ambersoft text-amber"; // opłacone — do obsłużenia

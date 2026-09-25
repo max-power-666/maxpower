@@ -7,7 +7,8 @@
 --                   To zamówienia SPRZEDAŻY (klient kupuje u nas), nie skupu — skup to buyback_orders.
 --  * refurbed_orders — surowe zamówienia refurbed (OrderService/ListOrders); pełna odpowiedź w kolumnie raw.
 --  * erli_orders — surowe zamówienia Erli (POST /orders/_search); pełna odpowiedź w kolumnie raw.
---  * sales_orders — wspólna lista zamówień ze wszystkich marketplace'ów (dziś Back Market, refurbed i Erli;
+--  * allegro_orders — surowe zamówienia Allegro (GET /order/checkout-forms); oauth_tokens — tokeny OAuth (tylko serwer).
+--  * sales_orders — wspólna lista zamówień ze wszystkich marketplace'ów (dziś Back Market, refurbed, Erli i Allegro;
 --                   Allegro/eBay dojdą jako kolejne wartości `marketplace`). Zapisuje ją ten sam
 --                   serwer, który wypełnia surową tabelę danego kanału.
 -- Dane z API zapisuje wyłącznie serwer (service_role, poza RLS); zespół czyta wszystko, a edytuje tylko
@@ -73,6 +74,37 @@ create table if not exists erli_orders (
   synced_at timestamptz not null default now()
 );
 create index if not exists erli_orders_created_idx on erli_orders (created desc);
+
+-- Surowe zamówienia Allegro (GET /order/checkout-forms). Pozycje, płatność, dostawa itd. są w `raw`.
+create table if not exists allegro_orders (
+  id text primary key,                       -- checkout form id (UUID)
+  status text not null,                      -- BOUGHT | FILLED_IN | READY_FOR_PROCESSING | CANCELLED
+  fulfillment_status text,                   -- status realizacji po stronie sprzedawcy (NEW, PROCESSING, SENT, ...)
+  payment_type text,                         -- ONLINE | CASH_ON_DELIVERY | WIRE_TRANSFER | SPLIT_PAYMENT | EXTENDED_TERM
+  marketplace_id text,                       -- np. allegro-pl
+  buyer_login text,
+  total_to_pay numeric,
+  currency text,
+  updated_at timestamptz,
+  raw jsonb not null,                        -- pełna odpowiedź API (+ _shipments: numery przesyłek z osobnego zapytania)
+  synced_at timestamptz not null default now()
+);
+create index if not exists allegro_orders_updated_idx on allegro_orders (updated_at desc);
+
+-- Tokeny OAuth marketplace'ów (dziś Allegro). Refresh token jest jednorazowy i za każdym użyciem wymieniany na nowy,
+-- więc musi leżeć w bazie. Tabela ma włączone RLS BEZ ŻADNEJ polityki — czyta i zapisuje ją wyłącznie serwer
+-- (service_role); przeglądarka (nawet zalogowana) nie ma do niej dostępu.
+create table if not exists oauth_tokens (
+  marketplace text primary key,
+  refresh_token text,
+  access_token text,
+  access_expires_at timestamptz,
+  pending_state text,                        -- losowy znacznik trwającej autoryzacji (ochrona przed CSRF)
+  pending_state_expires timestamptz,
+  connected_at timestamptz,
+  updated_at timestamptz not null default now()
+);
+alter table oauth_tokens enable row level security;
 
 create table if not exists sales_orders (
   marketplace text not null,                 -- 'backmarket' (kolejne kanały później)
@@ -165,7 +197,7 @@ create table if not exists sales_orders_sync_meta (
   full_scan_done boolean not null default false,
   scan_page int not null default 1,
   scan_started_at timestamptz,
-  scan_cursor text                           -- refurbed: id ostatniego pobranego zamówienia; Erli: pole `cursor` ostatniego zamówienia (paginacja kursorem zamiast numeru strony)
+  scan_cursor text                           -- refurbed: id ostatniego pobranego zamówienia; Erli: pole `cursor` ostatniego zamówienia; Allegro: updatedAt ostatniego zamówienia (paginacja kursorem zamiast numeru strony)
 );
 alter table sales_orders_sync_meta add column if not exists scan_cursor text;
 -- Erli: zamówienie za pobraniem (COD) ma w API status "purchased", tak samo jak opłacone. Rozróżniamy je własnym statusem
@@ -176,11 +208,12 @@ update sales_orders s set status = 'purchased_cod'
    and e.status = 'purchased' and e.raw->'delivery'->>'cod' = 'true'
    and s.status <> 'purchased_cod';
 
-insert into sales_orders_sync_meta (marketplace) values ('backmarket'), ('refurbed'), ('erli') on conflict (marketplace) do nothing;
+insert into sales_orders_sync_meta (marketplace) values ('backmarket'), ('refurbed'), ('erli'), ('allegro') on conflict (marketplace) do nothing;
 
 alter table bm_orders enable row level security;
 alter table refurbed_orders enable row level security;
 alter table erli_orders enable row level security;
+alter table allegro_orders enable row level security;
 alter table sales_orders enable row level security;
 alter table sales_order_items enable row level security;
 alter table sales_orders_sync_meta enable row level security;
@@ -193,6 +226,9 @@ create policy "authenticated read refurbed_orders" on refurbed_orders
   for select using (auth.role() = 'authenticated');
 drop policy if exists "authenticated read erli_orders" on erli_orders;
 create policy "authenticated read erli_orders" on erli_orders
+  for select using (auth.role() = 'authenticated');
+drop policy if exists "authenticated read allegro_orders" on allegro_orders;
+create policy "authenticated read allegro_orders" on allegro_orders
   for select using (auth.role() = 'authenticated');
 drop policy if exists "authenticated read sales_orders" on sales_orders;
 create policy "authenticated read sales_orders" on sales_orders
@@ -285,4 +321,5 @@ begin
   begin alter publication supabase_realtime add table bm_orders; exception when duplicate_object then null; end;
   begin alter publication supabase_realtime add table refurbed_orders; exception when duplicate_object then null; end;
   begin alter publication supabase_realtime add table erli_orders; exception when duplicate_object then null; end;
+  begin alter publication supabase_realtime add table allegro_orders; exception when duplicate_object then null; end;
 end $$;

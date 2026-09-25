@@ -6,6 +6,7 @@ export const MARKETPLACES = [
   { key: "backmarket", label: "Back Market" },
   { key: "refurbed", label: "Refurbed" },
   { key: "erli", label: "Erli" },
+  { key: "allegro", label: "Allegro" },
 ] as const;
 
 // Nasz wewnętrzny status realizacji zamówienia (niezależny od statusu kanału) — kolumna sales_orders.our_status.
@@ -50,10 +51,21 @@ export const ERLI_ORDER_STATES: Record<string, string> = {
   returned: "Zwrócone",
 };
 
+// Stany zamówienia Allegro (checkout form). UWAGA jak przy Erli: zamówienie za pobraniem (payment.type = CASH_ON_DELIVERY)
+// ma ten sam status READY_FOR_PROCESSING co opłacone, więc zapisujemy je jako "READY_FOR_PROCESSING_COD" (nasz znacznik).
+export const ALLEGRO_ORDER_STATES: Record<string, string> = {
+  BOUGHT: "Kupione (bez formularza)",
+  FILLED_IN: "Oczekuje na płatność",
+  READY_FOR_PROCESSING: "Opłacone",
+  READY_FOR_PROCESSING_COD: "Za pobraniem",
+  CANCELLED: "Anulowane",
+};
+
 export function salesStatusLabel(marketplace: string, status: string): string {
   if (marketplace === "backmarket") return BM_ORDER_STATES[status] ?? `Stan ${status}`;
   if (marketplace === "refurbed") return REFURBED_ORDER_STATES[status] ?? status;
   if (marketplace === "erli") return ERLI_ORDER_STATES[status] ?? status;
+  if (marketplace === "allegro") return ALLEGRO_ORDER_STATES[status] ?? status;
   return status;
 }
 
@@ -235,6 +247,71 @@ export function mapErliItems(o: any) {
         item_key: k > 1 ? `${base}-${k}` : base,
         position: items.length + 1,
         sku: erliItemSku(it),
+      });
+    }
+  });
+  return items;
+}
+
+/* ---------------- Allegro ---------------- */
+
+// Zamówienie Allegro (checkout form) -> wiersz surowej tabeli allegro_orders.
+export function mapAllegroOrder(o: any) {
+  return {
+    id: String(o.id),
+    status: o.status ?? "BOUGHT",
+    fulfillment_status: o.fulfillment?.status ?? null,
+    payment_type: o.payment?.type ?? null,
+    marketplace_id: o.marketplace?.id ?? null,
+    buyer_login: o.buyer?.login ?? null,
+    total_to_pay: num(o.summary?.totalToPay?.amount),
+    currency: o.summary?.totalToPay?.currency ?? null,
+    updated_at: o.updatedAt ?? null,
+    raw: o,
+    synced_at: new Date().toISOString(),
+  };
+}
+
+// SKU pozycji Allegro: id oferty w systemie sprzedawcy (offer.external.id), a gdy go brak — id oferty Allegro.
+const allegroItemSku = (li: any): string | null => {
+  const v = (typeof li?.offer?.external?.id === "string" && li.offer.external.id.trim()) || (li?.offer?.id != null ? String(li.offer.id) : "");
+  return v || null;
+};
+
+// Data zamówienia = najwcześniejszy zakup pozycji (boughtAt); gdy jej brak, data ostatniej zmiany.
+const allegroOrderDate = (o: any): string | null => {
+  const dates = ((o.lineItems as any[]) || []).map((li) => li?.boughtAt).filter((d): d is string => typeof d === "string" && !!d).sort();
+  return dates[0] ?? o.updatedAt ?? null;
+};
+
+export function mapAllegroToSales(o: any) {
+  const skus = Array.from(new Set(((o.lineItems as any[]) || []).map(allegroItemSku).filter((x): x is string => !!x)));
+  // Numer przesyłki (waybill) nie jest na liście zamówień — dociągamy go osobnym zapytaniem do /shipments (pole _shipments).
+  const waybill = ((o._shipments as any[]) || []).map((s) => (typeof s?.waybill === "string" ? s.waybill.trim() : "")).find(Boolean);
+  return {
+    marketplace: "allegro",
+    external_id: String(o.id),
+    order_date: allegroOrderDate(o),
+    status: o.status === "READY_FOR_PROCESSING" && o.payment?.type === "CASH_ON_DELIVERY" ? "READY_FOR_PROCESSING_COD" : String(o.status ?? "BOUGHT"),
+    sku: skus.length > 0 ? skus.join(", ") : null,
+    tracking_number: waybill || null,
+    synced_at: new Date().toISOString(),
+  };
+}
+
+// Pozycja z ilością > 1 jest rozbijana na osobne sztuki: klucz "id", "id-2", "id-3"...
+export function mapAllegroItems(o: any) {
+  const items: { marketplace: string; external_id: string; item_key: string; position: number; sku: string | null }[] = [];
+  ((o.lineItems as any[]) || []).forEach((li, i) => {
+    const qty = Math.max(Number.isFinite(Number(li?.quantity)) ? Math.trunc(Number(li.quantity)) : 1, 1);
+    const base = String(li?.id ?? i + 1);
+    for (let k = 1; k <= qty; k++) {
+      items.push({
+        marketplace: "allegro",
+        external_id: String(o.id),
+        item_key: k > 1 ? `${base}-${k}` : base,
+        position: items.length + 1,
+        sku: allegroItemSku(li),
       });
     }
   });

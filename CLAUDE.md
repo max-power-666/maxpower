@@ -18,7 +18,7 @@ numerach seryjnych, wielokanałowa synchronizacja stanów, naprawy, auto-wycena)
   tylko raz dziennie). Deploy automatyczny po `git push` na `main`.
 - Repo: `github.com/max-power-666/maxpower`
 - Cron w `vercel.json` (Vercel liczy w UTC): sync Fakturowni `0 23 * * *`, bidder `* * * * *`,
-  sync zamówień BuyBack `*/15 * * * *`, sync zamówień sprzedaży Back Market, refurbed i Erli `*/15 * * * *` (osobne route'y). Autoryzacja crona: nagłówek `Bearer CRON_SECRET`.
+  sync zamówień BuyBack `*/15 * * * *`, sync zamówień sprzedaży Back Market, refurbed, Erli i Allegro `*/15 * * * *` (osobne route'y). Autoryzacja crona: nagłówek `Bearer CRON_SECRET`.
 
 ## Struktura kodu
 
@@ -27,7 +27,7 @@ numerach seryjnych, wielokanałowa synchronizacja stanów, naprawy, auto-wycena)
   `ServiceView.tsx` (Serwis), `TestsView.tsx` (Testy), `ProductCardDrawer.tsx` (karta produktu), `TradeInHub.tsx` + `TradeInOrdersView.tsx` (Trade-in),
   `TradeInView.tsx` (Bidder), `SalesOrdersHub.tsx` (Zamówienia).
 - `app/api/*/route.ts` — endpointy serwerowe (sekrety tylko tu, nigdy w przeglądarce):
-  `fakturownia/sync`, `tradein/bidder`, `tradein/competitors`, `tradein/orders-sync`, `tradein/validate`, `orders/bm-sync`, `orders/refurbed-sync`, `orders/erli-sync`.
+  `fakturownia/sync`, `tradein/bidder`, `tradein/competitors`, `tradein/orders-sync`, `tradein/validate`, `orders/bm-sync`, `orders/refurbed-sync`, `orders/erli-sync`, `orders/allegro-sync`, `orders/allegro-auth`, `orders/allegro-callback`.
 - `lib/` — `supabaseClient.ts`, `buyback.ts` (logika biddera + `isAuthorized`),
   `displayName.ts` (skrócone imię: "Maksymilian J."), `workLog.ts` (interwały Dziś/7/30 dni,
   liczenie czasu i **etykiety typów czynności/statusów** — jedno źródło dla list i karty produktu),
@@ -35,7 +35,7 @@ numerach seryjnych, wielokanałowa synchronizacja stanów, naprawy, auto-wycena)
   zamówień Back Market z budżetem czasu i kursorem).
 - `supabase/*.sql` — schemat, każdy plik idempotentny: `schema.sql` (units, members,
   cache Fakturowni), `tradein.sql` (bidder), `buyback-orders.sql` (zamówienia + obsługa
-  paczek), `sales-orders.sql` (zamówienia sprzedaży Back Market, refurbed i Erli), `service.sql` (rejestr napraw), `tests.sql` (rejestr testów).
+  paczek), `sales-orders.sql` (zamówienia sprzedaży Back Market, refurbed, Erli i Allegro; tokeny OAuth), `service.sql` (rejestr napraw), `tests.sql` (rejestr testów).
 - `scripts/import-buyback.mjs` — jednorazowy import ze starego programu Buyback Bidder.
 
 ## Zakładki i role
@@ -151,6 +151,21 @@ Numer przesyłki = `deliveryTracking.trackingNumber` (dla przesyłek Erli uzupe�
 **Uwaga: zamówienie za pobraniem (COD) ma w API ten sam status `purchased` co opłacone** — dlatego w `sales_orders` zapisujemy je jako
 własny status `purchased_cod` ("Za pobraniem", czerwona plakietka), a SQL poprawia stare wiersze. Kwoty w API są w groszach (dzielimy przez 100 przy wyświetlaniu). Nie testowane na żywym API (brak klucza w środowisku asystenta) —
 zweryfikowane na atrapie `fetch` wg swaggera (erli.pl/svc/shop-api/doc/swagger.json).
+**Allegro** (`marketplace = 'allegro'`, `lib/allegro.ts`, `lib/allegroServer.ts`, route'y `orders/allegro-*`, surowe dane w `allegro_orders`):
+zamówienia to *checkout forms* (`GET https://api.allegro.pl/order/checkout-forms`, `Accept: application/vnd.allegro.public.v1+json`, sortowanie
+po `updatedAt`). **Autoryzacja to OAuth2 Authorization Code, nie stały klucz:** aplikacja ma Client_ID/Secret, a Admin raz klika w Zamówieniach
+"Połącz z Allegro" (`allegro-auth` POST -> strona zgody Allegro -> `allegro-callback` wymienia kod na tokeny; scope tylko `allegro:api:orders:read`;
+`state` jednorazowy, ważny 10 min). Access token żyje 12 h, **refresh token jest jednorazowy i ważny 3 miesiące** (każde odświeżenie zwraca nową
+parę) — dlatego leży w tabeli `oauth_tokens` (RLS bez żadnej polityki: czyta i zapisuje tylko serwer/service_role), a `getAccessToken` zapisuje
+nową parę z porównaniem starego refresh tokena (bezpieczne przy równoległych przebiegach). Gdy zgoda wygaśnie (3 miesiące bez użycia, zmiana
+hasła, odpięcie aplikacji), sync zwraca prośbę o ponowne "Połącz z Allegro". Adres przekierowania to `https://<domena>/api/orders/allegro-callback`
+i musi być identyczny w ustawieniach aplikacji Allegro (panel pokazuje go Adminowi). Synchronizacja: kursor `updatedAt.gte` (offset tylko gdy
+cała strona ma ten sam updatedAt), kursor w `sales_orders_sync_meta.scan_cursor`, start od 1 stycznia. Numer zamówienia = id checkout form (UUID),
+data = najwcześniejsze `lineItems.boughtAt`, SKU = `offer.external.id` (a gdy brak — id oferty), pozycje z ilością > 1 rozbijane na sztuki.
+Numer przesyłki (waybill) nie jest na liście — dociągamy `GET /order/checkout-forms/{id}/shipments` dla zamówień, w których cokolwiek wysłano
+(zapisane w `raw._shipments`). **Jak przy Erli: COD (`payment.type = CASH_ON_DELIVERY`) ma ten sam status `READY_FOR_PROCESSING` co opłacone**, więc zapisujemy
+je jako `READY_FOR_PROCESSING_COD` ("Za pobraniem"). Nie testowane na żywym API (brak konta/aplikacji w środowisku asystenta) — zweryfikowane na atrapie
+`fetch` wg swaggera (developer.allegro.pl/swagger.yaml).
 Nowy marketplace = nowa wartość `marketplace`, własna tabela surowa, własny mapper i sync; lista pozostaje wspólna.
 
 **Serwis** (`ServiceView.tsx`, `service_log`). Rejestr napraw wg tabeli z regulaminu:
@@ -232,7 +247,7 @@ Ważne przy Bidderze: zmienia ceny na żywym Back Markecie, więc to pierwszy ka
 
 `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`,
 `CRON_SECRET`, `FAKTUROWNIA_DOMAIN` (sama subdomena, np. `recoo`), `FAKTUROWNIA_API_TOKEN`,
-`BACKMARKET_AUTH`, `BACKMARKET_LANG`, `BACKMARKET_UA`, `BACKMARKET_BASE_URL`, `REFURBED_API_TOKEN` (z supplier.refurbed.com; bez niego sync refurbed jest pomijany; nieużywany wygasa po 2 miesiącach), `REFURBED_UA`, `ERLI_API_KEY` (panel Erli: Metoda integracji > Własna integracja po API; bez niego sync Erli jest pomijany), `ERLI_UA`.
+`BACKMARKET_AUTH`, `BACKMARKET_LANG`, `BACKMARKET_UA`, `BACKMARKET_BASE_URL`, `REFURBED_API_TOKEN` (z supplier.refurbed.com; bez niego sync refurbed jest pomijany; nieużywany wygasa po 2 miesiącach), `REFURBED_UA`, `ERLI_API_KEY` (panel Erli: Metoda integracji > Własna integracja po API; bez niego sync Erli jest pomijany), `ERLI_UA`, `ALLEGRO_CLIENT_ID`, `ALLEGRO_CLIENT_SECRET` (aplikacja z apps.developer.allegro.pl), `ALLEGRO_UA`.
 Zmiana zmiennej na Vercelu wymaga nowego deployu. W Supabase (Authentication → URL
 Configuration) musi być aktualny adres produkcyjny, inaczej magic link nie zadziała.
 
