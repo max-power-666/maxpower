@@ -162,6 +162,32 @@ type RefurbedOrder = {
 const refurbedAddress = (a?: RefurbedAddress) =>
   a ? [[a.street_name, a.house_no].filter(Boolean).join(" "), a.supplement, [a.post_code, a.town].filter(Boolean).join(" "), a.country_code].filter(Boolean).join(", ") : null;
 
+// Zamówienie Erli (pola z API, patrz swagger Order) — czytamy z kolumny raw tabeli erli_orders. Kwoty w API są w groszach.
+type ErliOrder = {
+  id: string;
+  status: string;
+  seller_status: string | null;
+  market: string | null;
+  currency: string | null;
+  total_price: number | null;
+  created: string | null;
+  updated: string | null;
+  purchased_at: string | null;
+  raw: {
+    user?: {
+      email?: string;
+      deliveryAddress?: { firstName?: string; lastName?: string; companyName?: string; street?: string; buildingNumber?: string; flatNumber?: string; zip?: string; city?: string; country?: string; phone?: string };
+    };
+    items?: { id?: number; name?: string; sku?: string; externalId?: string; ean?: string; quantity?: number; unitPrice?: number }[];
+    delivery?: { name?: string; price?: number; cod?: boolean; pickupPlace?: { name?: string; address?: string; city?: string; zip?: string } };
+    deliveryTracking?: { status?: string; trackingUrl?: string; vendor?: string; trackingNumber?: string };
+    comment?: string;
+  };
+};
+const grosze = (v: number | null | undefined, currency: string | null | undefined) => (v === null || v === undefined ? null : fmtMoney(v / 100, currency));
+const erliAddress = (a?: NonNullable<ErliOrder["raw"]["user"]>["deliveryAddress"]) =>
+  a ? [[a.street, [a.buildingNumber, a.flatNumber].filter(Boolean).join("/")].filter(Boolean).join(" "), [a.zip, a.city].filter(Boolean).join(" "), a.country].filter(Boolean).join(", ") : null;
+
 function fmtDateTime(iso: string | null) {
   if (!iso) return null;
   return new Date(iso).toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -200,6 +226,7 @@ export default function SalesOrderCard({
   const [items, setItems] = useState<SalesItem[]>([]);
   const [bm, setBm] = useState<BmOrder | null>(null);
   const [rf, setRf] = useState<RefurbedOrder | null>(null);
+  const [er, setEr] = useState<ErliOrder | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
 
@@ -213,7 +240,7 @@ export default function SalesOrderCard({
   }, [marketplace, externalId]);
 
   async function load() {
-    const [{ data: w, error: wErr }, itemsRes, bmRes, rfRes] = await Promise.all([
+    const [{ data: w, error: wErr }, itemsRes, bmRes, rfRes, erRes] = await Promise.all([
       supabase.from("sales_orders").select("*").eq("marketplace", marketplace).eq("external_id", externalId).maybeSingle(),
       supabase
         .from("sales_order_items")
@@ -227,12 +254,17 @@ export default function SalesOrderCard({
       marketplace === "refurbed"
         ? supabase.from("refurbed_orders").select("*").eq("id", externalId).maybeSingle()
         : Promise.resolve({ data: null, error: null }),
+      marketplace === "erli"
+        ? supabase.from("erli_orders").select("*").eq("id", externalId).maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
     ]);
-    if (wErr || itemsRes.error || bmRes.error || rfRes.error) setError((wErr || itemsRes.error || bmRes.error || rfRes.error)!.message);
+    const firstError = wErr || itemsRes.error || bmRes.error || rfRes.error || erRes.error;
+    if (firstError) setError(firstError.message);
     setWorker((w as WorkerData) ?? null);
     setItems((itemsRes.data as SalesItem[]) || []);
     setBm((bmRes.data as BmOrder) ?? null);
     setRf((rfRes.data as RefurbedOrder) ?? null);
+    setEr((erRes.data as ErliOrder) ?? null);
     setLoaded(true);
   }
 
@@ -417,6 +449,18 @@ export default function SalesOrderCard({
                   <Row label="Podatki" value={fmtMoney(bm?.sales_taxes, bm?.currency)} />
                 </>
               )}
+              {marketplace === "erli" && (
+                <>
+                  <Row label="Rynek" value={er?.market?.toUpperCase()} />
+                  <Row label="Status zamówienia w systemie sprzedawcy" value={er?.seller_status} />
+                  <Row
+                    label="Płatność"
+                    value={!er ? null : er.raw.delivery?.cod ? "za pobraniem" : er.status === "pending" ? "oczekuje na płatność" : er.status === "purchased" ? "opłacone" : null}
+                  />
+                  <Row label="Suma (z dostawą)" value={grosze(er?.total_price, er?.currency)} />
+                  <Row label="E-mail klienta" value={er?.raw.user?.email} />
+                </>
+              )}
               {marketplace === "refurbed" && (
                 <>
                   <Row label="Kraj" value={rf?.raw.shipping_address?.country_code} />
@@ -430,8 +474,65 @@ export default function SalesOrderCard({
               )}
             </div>
 
-            {((marketplace === "backmarket" && !bm) || (marketplace === "refurbed" && !rf)) && (
+            {((marketplace === "backmarket" && !bm) || (marketplace === "refurbed" && !rf) || (marketplace === "erli" && !er)) && (
               <p className="text-inksoft text-xs mb-6">Brak surowych danych z API dla tego zamówienia.</p>
+            )}
+
+            {er && (
+              <>
+                {!!er.raw.items?.length && (
+                  <>
+                    <h3 className="text-xs font-semibold text-inksoft mb-2">POZYCJE</h3>
+                    {er.raw.items.map((l, i) => (
+                      <div key={l.id ?? i} className="border border-line bg-white mb-2">
+                        <Row label="Produkt" value={l.name} />
+                        <Row label="SKU" value={l.sku || l.externalId} mono />
+                        <Row label="EAN" value={l.ean} mono />
+                        <Row label="Ilość" value={l.quantity === undefined ? null : String(l.quantity)} />
+                        <Row label="Cena jednostkowa" value={grosze(l.unitPrice, er.currency)} />
+                      </div>
+                    ))}
+                    <div className="mb-4" />
+                  </>
+                )}
+
+                <h3 className="text-xs font-semibold text-inksoft mb-2">DATY</h3>
+                <div className="border border-line bg-white mb-6">
+                  <Row label="Utworzono" value={fmtDateTime(er.created)} />
+                  <Row label="Opłacono" value={fmtDateTime(er.purchased_at)} />
+                  <Row label="Zmieniono" value={fmtDateTime(er.updated)} />
+                </div>
+
+                <h3 className="text-xs font-semibold text-inksoft mb-2">DOSTAWA</h3>
+                <div className="border border-line bg-white mb-6">
+                  <Row label="Sposób dostawy" value={er.raw.delivery?.name} />
+                  <Row label="Koszt dostawy" value={grosze(er.raw.delivery?.price, er.currency)} />
+                  <Row
+                    label="Punkt odbioru"
+                    value={er.raw.delivery?.pickupPlace ? [er.raw.delivery.pickupPlace.name, er.raw.delivery.pickupPlace.address, er.raw.delivery.pickupPlace.city].filter(Boolean).join(", ") : null}
+                  />
+                  <Row label="Przewoźnik" value={er.raw.deliveryTracking?.vendor} />
+                  <Row label="Status przesyłki" value={er.raw.deliveryTracking?.status} />
+                  <Row label="Numer przesyłki" value={er.raw.deliveryTracking?.trackingNumber} mono />
+                  {er.raw.deliveryTracking?.trackingUrl && (
+                    <div className="flex justify-between px-3 py-2 text-sm border-t border-line">
+                      <span className="text-inksoft">Śledzenie</span>
+                      <a href={er.raw.deliveryTracking.trackingUrl} target="_blank" rel="noreferrer" className="text-teal hover:underline">otwórz</a>
+                    </div>
+                  )}
+                </div>
+
+                <h3 className="text-xs font-semibold text-inksoft mb-2">KLIENT (ADRES DOSTAWY)</h3>
+                <div className="border border-line bg-white mb-6">
+                  <Row
+                    label="Imię i nazwisko"
+                    value={[er.raw.user?.deliveryAddress?.firstName, er.raw.user?.deliveryAddress?.lastName].filter(Boolean).join(" ") || er.raw.user?.deliveryAddress?.companyName}
+                  />
+                  <Row label="Telefon" value={er.raw.user?.deliveryAddress?.phone} />
+                  <Row label="Adres" value={erliAddress(er.raw.user?.deliveryAddress)} />
+                  <Row label="Uwaga kupującego" value={er.raw.comment} />
+                </div>
+              </>
             )}
 
             {rf && (

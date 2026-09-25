@@ -18,7 +18,7 @@ numerach seryjnych, wielokanałowa synchronizacja stanów, naprawy, auto-wycena)
   tylko raz dziennie). Deploy automatyczny po `git push` na `main`.
 - Repo: `github.com/max-power-666/maxpower`
 - Cron w `vercel.json` (Vercel liczy w UTC): sync Fakturowni `0 23 * * *`, bidder `* * * * *`,
-  sync zamówień BuyBack `*/15 * * * *`, sync zamówień sprzedaży Back Market i refurbed `*/15 * * * *` (osobne route'y). Autoryzacja crona: nagłówek `Bearer CRON_SECRET`.
+  sync zamówień BuyBack `*/15 * * * *`, sync zamówień sprzedaży Back Market, refurbed i Erli `*/15 * * * *` (osobne route'y). Autoryzacja crona: nagłówek `Bearer CRON_SECRET`.
 
 ## Struktura kodu
 
@@ -27,7 +27,7 @@ numerach seryjnych, wielokanałowa synchronizacja stanów, naprawy, auto-wycena)
   `ServiceView.tsx` (Serwis), `TestsView.tsx` (Testy), `ProductCardDrawer.tsx` (karta produktu), `TradeInHub.tsx` + `TradeInOrdersView.tsx` (Trade-in),
   `TradeInView.tsx` (Bidder), `SalesOrdersHub.tsx` (Zamówienia).
 - `app/api/*/route.ts` — endpointy serwerowe (sekrety tylko tu, nigdy w przeglądarce):
-  `fakturownia/sync`, `tradein/bidder`, `tradein/competitors`, `tradein/orders-sync`, `tradein/validate`, `orders/bm-sync`, `orders/refurbed-sync`.
+  `fakturownia/sync`, `tradein/bidder`, `tradein/competitors`, `tradein/orders-sync`, `tradein/validate`, `orders/bm-sync`, `orders/refurbed-sync`, `orders/erli-sync`.
 - `lib/` — `supabaseClient.ts`, `buyback.ts` (logika biddera + `isAuthorized`),
   `displayName.ts` (skrócone imię: "Maksymilian J."), `workLog.ts` (interwały Dziś/7/30 dni,
   liczenie czasu i **etykiety typów czynności/statusów** — jedno źródło dla list i karty produktu),
@@ -35,7 +35,7 @@ numerach seryjnych, wielokanałowa synchronizacja stanów, naprawy, auto-wycena)
   zamówień Back Market z budżetem czasu i kursorem).
 - `supabase/*.sql` — schemat, każdy plik idempotentny: `schema.sql` (units, members,
   cache Fakturowni), `tradein.sql` (bidder), `buyback-orders.sql` (zamówienia + obsługa
-  paczek), `sales-orders.sql` (zamówienia sprzedaży Back Market i refurbed), `service.sql` (rejestr napraw), `tests.sql` (rejestr testów).
+  paczek), `sales-orders.sql` (zamówienia sprzedaży Back Market, refurbed i Erli), `service.sql` (rejestr napraw), `tests.sql` (rejestr testów).
 - `scripts/import-buyback.mjs` — jednorazowy import ze starego programu Buyback Bidder.
 
 ## Zakładki i role
@@ -141,6 +141,15 @@ pokazuje go jako "śledzenie". **refurbed nie ma filtra po dacie modyfikacji**, 
 (z zapasem 10 min) i (B) ponownie zamówienia w stanach NEW/ACCEPTED/SHIPPED z ostatnich 60 dni; pełny skan od 1 stycznia idzie
 z kursorem `sales_orders_sync_meta.scan_cursor`. Nie testowane na żywym API (brak tokena w środowisku asystenta) — zweryfikowane
 na atrapie `fetch` wg swaggera (gitlab.com/refurbed-community/public-apis).
+**Erli** (`marketplace = 'erli'`, `lib/erli.ts`, `app/api/orders/erli-sync`, surowe dane w `erli_orders`): `POST https://erli.pl/svc/shop-api/orders/_search`,
+`Authorization: Bearer <klucz>`, odpowiedź to zwykła tablica zamówień (bez has_more — koniec listy = strona krótsza niż limit 200).
+**Sortujemy po `updated` rosnąco i idziemy kursorem** (`pagination.after` = pole `cursor` ostatniego zamówienia), a kursor trzymamy w
+`sales_orders_sync_meta.scan_cursor` — jeden mechanizm łapie i nowe zamówienia, i zmiany statusu w starych (bez osobnego "sprawdzania
+otwartych"). Numer zamówienia = `Order.id`, data = `created`, status = `status` (pending/purchased/cancelled/returned, etykiety w
+`ERLI_ORDER_STATES`), SKU = `items[].sku`, a gdy brak — `items[].externalId`; pozycja z ilością > 1 rozbijana na sztuki jak w Back Market.
+Numer przesyłki = `deliveryTracking.trackingNumber` (dla przesyłek Erli uzupełnia go system po wygenerowaniu etykiety), a gdy brak — link.
+Kwoty w API są w groszach (dzielimy przez 100 przy wyświetlaniu). Nie testowane na żywym API (brak klucza w środowisku asystenta) —
+zweryfikowane na atrapie `fetch` wg swaggera (erli.pl/svc/shop-api/doc/swagger.json).
 Nowy marketplace = nowa wartość `marketplace`, własna tabela surowa, własny mapper i sync; lista pozostaje wspólna.
 
 **Serwis** (`ServiceView.tsx`, `service_log`). Rejestr napraw wg tabeli z regulaminu:
@@ -222,7 +231,7 @@ Ważne przy Bidderze: zmienia ceny na żywym Back Markecie, więc to pierwszy ka
 
 `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`,
 `CRON_SECRET`, `FAKTUROWNIA_DOMAIN` (sama subdomena, np. `recoo`), `FAKTUROWNIA_API_TOKEN`,
-`BACKMARKET_AUTH`, `BACKMARKET_LANG`, `BACKMARKET_UA`, `BACKMARKET_BASE_URL`, `REFURBED_API_TOKEN` (z supplier.refurbed.com; bez niego sync refurbed jest pomijany; nieużywany wygasa po 2 miesiącach), `REFURBED_UA`.
+`BACKMARKET_AUTH`, `BACKMARKET_LANG`, `BACKMARKET_UA`, `BACKMARKET_BASE_URL`, `REFURBED_API_TOKEN` (z supplier.refurbed.com; bez niego sync refurbed jest pomijany; nieużywany wygasa po 2 miesiącach), `REFURBED_UA`, `ERLI_API_KEY` (panel Erli: Metoda integracji > Własna integracja po API; bez niego sync Erli jest pomijany), `ERLI_UA`.
 Zmiana zmiennej na Vercelu wymaga nowego deployu. W Supabase (Authentication → URL
 Configuration) musi być aktualny adres produkcyjny, inaczej magic link nie zadziała.
 

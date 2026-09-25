@@ -5,6 +5,7 @@
 export const MARKETPLACES = [
   { key: "backmarket", label: "Back Market" },
   { key: "refurbed", label: "Refurbed" },
+  { key: "erli", label: "Erli" },
 ] as const;
 
 // Nasz wewnętrzny status realizacji zamówienia (niezależny od statusu kanału) — kolumna sales_orders.our_status.
@@ -38,9 +39,18 @@ export const REFURBED_ORDER_STATES: Record<string, string> = {
   RETURNED: "Zwrócone",
 };
 
+// Stany zamówienia Erli (pole status): pending = czeka na płatność, purchased = opłacone (także pobranie).
+export const ERLI_ORDER_STATES: Record<string, string> = {
+  pending: "Oczekuje na płatność",
+  purchased: "Opłacone",
+  cancelled: "Anulowane",
+  returned: "Zwrócone",
+};
+
 export function salesStatusLabel(marketplace: string, status: string): string {
   if (marketplace === "backmarket") return BM_ORDER_STATES[status] ?? `Stan ${status}`;
   if (marketplace === "refurbed") return REFURBED_ORDER_STATES[status] ?? status;
+  if (marketplace === "erli") return ERLI_ORDER_STATES[status] ?? status;
   return status;
 }
 
@@ -167,4 +177,62 @@ export function mapRefurbedItems(o: any) {
     position: i + 1,
     sku: typeof it?.sku === "string" && it.sku.trim() ? it.sku.trim() : null,
   }));
+}
+
+/* ---------------- Erli ---------------- */
+
+// Zamówienie Erli (Order z API) -> wiersz surowej tabeli erli_orders. Kwoty w API są w groszach (całkowite).
+export function mapErliOrder(o: any) {
+  return {
+    id: String(o.id),
+    status: o.status ?? "pending",
+    seller_status: o.sellerStatus ?? null,
+    market: o.market ?? null,
+    currency: o.currency ?? null,
+    total_price: Number.isFinite(Number(o.totalPrice)) ? Math.trunc(Number(o.totalPrice)) : null,
+    created: o.created ?? null,
+    updated: o.updated ?? null,
+    purchased_at: o.purchasedAt ?? null,
+    raw: o,
+    synced_at: new Date().toISOString(),
+  };
+}
+
+// SKU pozycji Erli: pole sku jest opcjonalne, wtedy bierzemy externalId (id produktu w systemie sprzedawcy).
+const erliItemSku = (it: any): string | null => {
+  const v = typeof it?.sku === "string" && it.sku.trim() ? it.sku.trim() : typeof it?.externalId === "string" ? it.externalId.trim() : "";
+  return v || null;
+};
+
+export function mapErliToSales(o: any) {
+  const skus = Array.from(new Set(((o.items as any[]) || []).map(erliItemSku).filter((x): x is string => !!x)));
+  const tr = o.deliveryTracking;
+  return {
+    marketplace: "erli",
+    external_id: String(o.id),
+    order_date: o.created ?? null,
+    status: String(o.status ?? "pending"),
+    sku: skus.length > 0 ? skus.join(", ") : null,
+    tracking_number: (tr?.trackingNumber && String(tr.trackingNumber).trim()) || (tr?.trackingUrl && String(tr.trackingUrl).trim()) || null,
+    synced_at: new Date().toISOString(),
+  };
+}
+
+// Pozycja Erli z ilością > 1 jest rozbijana na osobne sztuki (jak w Back Market): klucz "id", "id-2", "id-3"...
+export function mapErliItems(o: any) {
+  const items: { marketplace: string; external_id: string; item_key: string; position: number; sku: string | null }[] = [];
+  ((o.items as any[]) || []).forEach((it, i) => {
+    const qty = Math.max(Number.isFinite(Number(it?.quantity)) ? Math.trunc(Number(it.quantity)) : 1, 1);
+    const base = String(it?.id ?? i + 1);
+    for (let k = 1; k <= qty; k++) {
+      items.push({
+        marketplace: "erli",
+        external_id: String(o.id),
+        item_key: k > 1 ? `${base}-${k}` : base,
+        position: items.length + 1,
+        sku: erliItemSku(it),
+      });
+    }
+  });
+  return items;
 }

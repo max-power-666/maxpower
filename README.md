@@ -3,7 +3,7 @@
 Wewnętrzny system firmy do obsługi magazynu, napraw i skupu elektroniki. Moduły:
 
 - **Magazyn** — stan z Fakturowni: podsumowanie (liczba, wartość, wykres per kategoria) i lista sztuk z wyszukiwaniem po numerze seryjnym
-- **Zamówienia** — sprzedaż z marketplace'ów (Back Market, refurbed): lista i podgląd surowych danych z API
+- **Zamówienia** — sprzedaż z marketplace'ów (Back Market, refurbed, Erli): lista i podgląd surowych danych z API
 - **Zespół** — użytkownicy, role i dostęp do zakładek (rolę nadaje Admin)
 - **Serwis** — rejestr napraw z punktacją wg regulaminu premiowania
 - **Testy** — rejestr testów urządzeń z punktacją wg regulaminu
@@ -84,11 +84,12 @@ zalogowały się choć raz.
   się samo co 15 minut, a przycisk mówi, ile zostało. Potem synchronizacja jest przyrostowa. Back Market najpewniej
   filtruje po adresie IP, więc to działa z Vercela lub z komputera właściciela, nie z każdego
   środowiska.
-- **Zamówienia sprzedaży (Back Market i refurbed)** — zakładka Zamówienia → **Odśwież**. Działa jak synchronizacja zamówień
+- **Zamówienia sprzedaży (Back Market, refurbed i Erli)** — zakładka Zamówienia → **Odśwież**. Działa jak synchronizacja zamówień
   BuyBack: pierwszy raz pobiera zamówienia od 1 stycznia bieżącego roku w porcjach, potem przyrostowo (cron co
   15 minut). Back Market wymaga `BACKMARKET_AUTH` (ten sam klucz co bidder), refurbed — `REFURBED_API_TOKEN` (token API
   z supplier.refurbed.com; dopisz go w `.env.local` i w Vercel → Settings → Environment Variables, potem nowy deploy). Bez tokena
-  refurbed jest pomijany, a Back Market działa normalnie.
+  refurbed jest pomijany, a Back Market działa normalnie. Erli — analogicznie, klucz API sklepu (panel Erli → Metoda integracji →
+  Własna integracja po API) jako `ERLI_API_KEY`.
 - **Bidder** — `node scripts/import-buyback.mjs` przenosi SKU, ceny max i ostatnie ceny ze
   starego programu (`~/Documents/Buyback Bidder 2`). Włącznik jest domyślnie wyłączony:
   wyłącz stary program, potem w zakładce Bidder kliknij "włącz". Dwa biddery naraz

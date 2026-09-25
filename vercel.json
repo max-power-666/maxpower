@@ -19,6 +19,10 @@
     {
       "path": "/api/orders/refurbed-sync",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/orders/erli-sync",
+      "schedule": "*/15 * * * *"
     }
   ]
 }

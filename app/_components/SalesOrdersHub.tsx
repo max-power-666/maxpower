@@ -102,6 +102,7 @@ export default function SalesOrdersHub({ session, members }: { session: Session;
     const channels = [
       { label: "Back Market", url: "/api/orders/bm-sync" },
       { label: "Refurbed", url: "/api/orders/refurbed-sync" },
+      { label: "Erli", url: "/api/orders/erli-sync" },
     ];
     const errors: string[] = [];
     const notes: string[] = [];
@@ -199,6 +200,7 @@ function TrackingCell({ value }: { value: string | null }) {
 const MARKETPLACE_STYLE: Record<string, string> = {
   backmarket: "bg-[#e3ecf9] text-[#2a6bb5]",
   refurbed: "bg-[#efe6f8] text-[#7a3fb0]",
+  erli: "bg-[#fbe4ef] text-[#b0296b]",
 };
 
 const OUR_STATUS_STYLE: Record<OurStatus, string> = {
@@ -216,6 +218,9 @@ function statusStyle(marketplace: string, status: string) {
   if (marketplace === "refurbed") {
     if (status === "SHIPPED" || status === "FULFILLED") return "bg-tealsoft text-teal";
     if (status === "NEW" || status === "ACCEPTED") return "bg-ambersoft text-amber";
+  }
+  if (marketplace === "erli") {
+    if (status === "purchased") return "bg-ambersoft text-amber"; // opłacone — do obsłużenia
   }
   return "bg-paper text-inksoft border border-line";
 }
