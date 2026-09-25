@@ -38,6 +38,7 @@ type IntakeEntry = {
   sku: string | null;
   pads: number | null;
   pad_serials: string[] | null;
+  docs: boolean;
   notes: string | null;
   entered_by_email: string | null;
   entered_at: string;
@@ -47,7 +48,10 @@ type IntakeEntry = {
   history: HistoryEntry[];
 };
 
-const INTAKE_COLUMNS = "id, order_public_id, serial_number, sku, pads, pad_serials, notes, entered_by_email, entered_at, finished_at, status, points, history";
+const INTAKE_COLUMNS = "id, order_public_id, serial_number, sku, pads, pad_serials, docs, notes, entered_by_email, entered_at, finished_at, status, points, history";
+
+// Statusy Back Market po walidacji — takiego zamówienia nie walidujemy drugi raz.
+const BM_ALREADY_VALIDATED = ["VALIDATED", "PAID", "MONEY_TRANSFERED"];
 
 const MAX_PADS = 20; // tyle pól na numery seryjne padów pokazujemy maksymalnie
 
@@ -153,6 +157,7 @@ function IntakeView({
   const entriesRef = useRef<IntakeEntry[]>([]);
   entriesRef.current = entries;
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
+  const validating = useRef(new Set<number>()); // paczki, dla których trwa zmiana statusu z walidacją (blokada podwójnego kliknięcia)
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -325,6 +330,13 @@ function IntakeView({
     });
   }
 
+  function saveDocs(row: IntakeEntry, checked: boolean) {
+    setError("");
+    enqueueUpdate(row.id, "Dok.", (cur) =>
+      cur.docs === checked ? null : { patch: { docs: checked }, changes: [{ field: "Dok.", from: cur.docs ? "tak" : "nie", to: checked ? "tak" : "nie" }] }
+    );
+  }
+
   // Skaner kończy numer Enterem: pole się zapisuje, a fokus przechodzi na kolejny pad.
   function focusNextOnEnter(ev: React.KeyboardEvent<HTMLDivElement>) {
     if (ev.key !== "Enter") return;
@@ -351,32 +363,87 @@ function IntakeView({
     return missing;
   }
 
+  // Walidacja zamówienia w Back Market przy statusie "Obsłużona". Zwraca null, gdy użytkownik anulował
+  // albo Back Market odmówił (wtedy status paczki się NIE zmienia); błąd jest już pokazany w `error`.
+  async function validateAtBackMarket(row: IntakeEntry): Promise<{ already: boolean } | null> {
+    const { data: order, error: orderErr } = await supabase
+      .from("buyback_orders")
+      .select("status, original_price, original_price_currency, counter_offer_price, counter_offer_price_currency")
+      .eq("order_public_id", row.order_public_id)
+      .maybeSingle();
+    if (orderErr || !order) {
+      setError(`Nie udało się odczytać zamówienia ${row.order_public_id}: ${orderErr?.message || "brak w zsynchronizowanych"}.`);
+      return null;
+    }
+    if (BM_ALREADY_VALIDATED.includes(order.status)) return { already: true };
+
+    const price = order.counter_offer_price ?? order.original_price;
+    const currency = order.counter_offer_price != null ? order.counter_offer_price_currency : order.original_price_currency;
+    const ok = confirm(
+      `UWAGA — walidacja zamówienia w Back Market\n\n` +
+        `Zmiana statusu na „Obsłużona” automatycznie ZWALIDUJE zamówienie ${row.order_public_id} w Back Market ` +
+        `i uruchomi wypłatę dla klienta${price != null ? ` (${fmtMoney(price, currency)})` : ""}.\n` +
+        `Tej operacji nie można cofnąć.\n\n` +
+        `Status w Back Market (ostatnia synchronizacja): ${order.status}` +
+        (order.status !== "RECEIVED" ? "\nZwykle walidować można dopiero zamówienie w statusie RECEIVED — Back Market może odmówić." : "") +
+        `\n\nSprawdź numer seryjny, SKU i pady. Zwalidować i oznaczyć jako Obsłużona?`
+    );
+    if (!ok) return null;
+
+    const res = await fetch("/api/tradein/validate", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ orderPublicId: row.order_public_id }),
+    }).catch(() => null);
+    const data = await res?.json().catch(() => null);
+    if (!res || !res.ok) {
+      setError(data?.error || "Nie udało się połączyć z serwerem walidacji. Zamówienie NIE zostało zwalidowane.");
+      return null;
+    }
+    return { already: !!data?.alreadyValidated };
+  }
+
   async function changeStatus(row: IntakeEntry, status: IntakeStatus) {
     if (status === row.status) return;
     setError("");
-    if (status === "obsluzona") {
-      const missing = missingForDone(row);
-      if (missing.length > 0) {
-        setError(`Paczki ${row.order_public_id} nie można oznaczyć jako Obsłużona — uzupełnij: ${missing.join(", ")}.`);
-        return;
+    if (validating.current.has(row.id)) return;
+    validating.current.add(row.id);
+    try {
+      const changes: FieldChange[] = [{ field: "Status", from: INTAKE_STATUS_LABEL[row.status], to: INTAKE_STATUS_LABEL[status] }];
+      let validatedNow = false;
+      if (status === "obsluzona") {
+        const missing = missingForDone(row);
+        if (missing.length > 0) {
+          setError(`Paczki ${row.order_public_id} nie można oznaczyć jako Obsłużona — uzupełnij: ${missing.join(", ")}.`);
+          return;
+        }
+        const validation = await validateAtBackMarket(row);
+        if (!validation) return;
+        if (!validation.already) {
+          validatedNow = true;
+          changes.push({ field: "Walidacja Back Market", from: null, to: "zwalidowano" });
+        }
       }
+      const now = new Date().toISOString();
+      const entry: HistoryEntry = { action: "edited", by_email: session.user.email ?? null, at: now, changes };
+      const { error: err } = await supabase
+        .from("buyback_order_intake")
+        .update({
+          status,
+          finished_at: status === "w_trakcie" ? null : now,
+          history: [...((entriesRef.current.find((r) => r.id === row.id) ?? row).history || []), entry],
+        })
+        .eq("id", row.id);
+      if (err) {
+        setError(
+          validatedNow
+            ? `Zamówienie ${row.order_public_id} ZOSTAŁO zwalidowane w Back Market, ale status paczki się nie zapisał (${err.message}). Ustaw „Obsłużona” ponownie — walidacja nie powtórzy się.`
+            : `Nie udało się zmienić statusu: ${err.message}`
+        );
+      }
+    } finally {
+      validating.current.delete(row.id);
     }
-    const now = new Date().toISOString();
-    const entry: HistoryEntry = {
-      action: "edited",
-      by_email: session.user.email ?? null,
-      at: now,
-      changes: [{ field: "Status", from: INTAKE_STATUS_LABEL[row.status], to: INTAKE_STATUS_LABEL[status] }],
-    };
-    const { error: err } = await supabase
-      .from("buyback_order_intake")
-      .update({
-        status,
-        finished_at: status === "w_trakcie" ? null : now,
-        history: [...(row.history || []), entry],
-      })
-      .eq("id", row.id);
-    if (err) setError(`Nie udało się zmienić statusu: ${err.message}`);
   }
 
   return (
@@ -447,6 +514,7 @@ function IntakeView({
               <th className="p-3">SKU</th>
               <th className="p-3">Pady</th>
               <th className="p-3">Nr seryjny padów</th>
+              <th className="p-3">Dok.</th>
               <th className="p-3">Status</th>
               <th className="p-3">Uwagi</th>
               <th className="p-3">Czas</th>
@@ -456,7 +524,7 @@ function IntakeView({
           </thead>
           <tbody>
             {!loading && entries.length === 0 && (
-              <tr><td colSpan={isAdmin ? 12 : 11} className="p-6 text-center text-inksoft text-sm">Brak paczek — rozpocznij pierwszą powyżej.</td></tr>
+              <tr><td colSpan={isAdmin ? 13 : 12} className="p-6 text-center text-inksoft text-sm">Brak paczek — rozpocznij pierwszą powyżej.</td></tr>
             )}
             {entries.map((e) => (
               <tr key={e.id} className="border-b border-line last:border-b-0 hover:bg-paper">
@@ -519,6 +587,15 @@ function IntakeView({
                     <span className="text-inksoft px-2">—</span>
                   )}
                 </td>
+                <td className="p-3 text-center">
+                  <input
+                    type="checkbox"
+                    checked={e.docs}
+                    onChange={(ev) => saveDocs(e, ev.target.checked)}
+                    className="w-4 h-4 accent-teal"
+                    aria-label="Dok."
+                  />
+                </td>
                 <td className="p-3">
                   <select
                     value={e.status}
@@ -573,6 +650,7 @@ function OrderCardDrawer({
   const [skuDraft, setSkuDraft] = useState("");
   const [padsDraft, setPadsDraft] = useState("");
   const [padSerialsDraft, setPadSerialsDraft] = useState<string[]>([]);
+  const [docsDraft, setDocsDraft] = useState(false);
   const [notesDraft, setNotesDraft] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -600,6 +678,7 @@ function OrderCardDrawer({
     setSkuDraft(intake?.sku || "");
     setPadsDraft(intake?.pads === null || intake?.pads === undefined ? "" : String(intake.pads));
     setPadSerialsDraft(intake?.pad_serials ?? []);
+    setDocsDraft(!!intake?.docs);
     setNotesDraft(intake?.notes || "");
     setEditing(true);
   }
@@ -619,6 +698,7 @@ function OrderCardDrawer({
       sku: skuDraft.trim() || null,
       pads: padsText ? Number(padsText) : null,
       pad_serials: padSerialsNext,
+      docs: docsDraft,
       notes: notesDraft.trim() || null,
     };
     const changes: FieldChange[] = [];
@@ -631,6 +711,7 @@ function OrderCardDrawer({
     for (let i = 0; i < Math.max(intake.pad_serials?.length ?? 0, next.pad_serials?.length ?? 0); i++) {
       diff(`Nr seryjny pada ${i + 1}`, intake.pad_serials?.[i] || null, next.pad_serials?.[i] || null);
     }
+    diff("Dok.", intake.docs ? "tak" : "nie", next.docs ? "tak" : "nie");
     diff("Uwagi", intake.notes, next.notes);
 
     if (changes.length === 0) {
@@ -704,6 +785,7 @@ function OrderCardDrawer({
                   {Array.from({ length: intake.pads ?? 0 }, (_, i) => (
                     <Row key={i} label={`Nr seryjny pada ${i + 1}`} value={intake.pad_serials?.[i]} mono />
                   ))}
+                  <Row label="Dok." value={intake.docs ? "tak" : "nie"} />
                   <Row label="Uwagi" value={intake.notes} />
                 </>
               )}
@@ -736,6 +818,10 @@ function OrderCardDrawer({
                       />
                     </div>
                   ))}
+                  <label className="flex items-center gap-2 text-sm font-semibold">
+                    <input type="checkbox" checked={docsDraft} onChange={(e) => setDocsDraft(e.target.checked)} className="w-4 h-4 accent-teal" />
+                    Dok.
+                  </label>
                   <div>
                     <label className="text-xs font-semibold text-inksoft block mb-1">Uwagi</label>
                     <input value={notesDraft} onChange={(e) => setNotesDraft(e.target.value)} className="w-full border border-line bg-white px-2 py-1.5 rounded text-sm" />

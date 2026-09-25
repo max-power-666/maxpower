@@ -89,6 +89,7 @@ create table if not exists buyback_order_intake (
   sku text,                                  -- wymagane do statusu "obsluzona" (trigger poniżej)
   pads int check (pads is null or pads >= 0), -- liczba padów w zestawie (konsole); wymagane do "obsluzona", 0 jest dozwolone
   pad_serials text[],                        -- numery seryjne padów: element i = pad i+1 (osobne pole na każdy pad, skanery)
+  docs boolean not null default false,       -- kolumna "dok." (checkbox)
   notes text default '',
   entered_by_user_id uuid references auth.users(id),
   entered_by_email text,
@@ -111,6 +112,7 @@ alter table buyback_order_intake add column if not exists finished_at timestampt
 alter table buyback_order_intake add column if not exists points numeric not null default (100.0 / 6.0);
 alter table buyback_order_intake add column if not exists pads int;
 alter table buyback_order_intake add column if not exists pad_serials text[];
+alter table buyback_order_intake add column if not exists docs boolean not null default false;
 -- Wcześniejsza wersja trzymała numery padów w jednym polu tekstowym (po przecinku) — zamień na tablicę.
 do $$
 begin

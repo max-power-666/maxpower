@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { isAuthorized } from "@/lib/buyback";
 import { scanOrders } from "@/lib/scanOrders";
+import { mapOrder } from "@/lib/buybackOrders";
 
 // Synchronizuje zamówienia BuyBack z Back Marketu do tabeli buyback_orders w Supabase.
 // GET /ws/buyback/v1/orders — dokumentacja: https://api.backmarket.dev (sekcja BuyBack).
@@ -35,40 +36,6 @@ function bmHeaders() {
     "Accept-Language": process.env.BACKMARKET_LANG || "fr-fr",
     Authorization: process.env.BACKMARKET_AUTH!,
     "User-Agent": process.env.BACKMARKET_UA || "backmarket@recoo.io",
-  };
-}
-
-function mapOrder(o: any) {
-  return {
-    order_public_id: o.orderPublicId,
-    status: o.status,
-    market: o.market ?? null,
-    creation_date: o.creationDate,
-    modification_date: o.modificationDate,
-    shipping_date: o.shippingDate ?? null,
-    suspension_date: o.suspensionDate ?? null,
-    receival_date: o.receivalDate ?? null,
-    payment_date: o.paymentDate ?? null,
-    counter_proposal_date: o.counterProposalDate ?? null,
-    sku: o.listing?.sku ?? null,
-    product_id: o.listing?.productId ?? null,
-    product_title: o.listing?.title ?? null,
-    grade: o.listing?.grade ?? null,
-    customer_first_name: o.customer?.firstName ?? null,
-    customer_last_name: o.customer?.lastName ?? null,
-    customer_phone: o.customer?.phone ?? null,
-    return_address: o.returnAddress ?? null,
-    original_price: o.originalPrice?.value ?? null,
-    original_price_currency: o.originalPrice?.currency ?? null,
-    counter_offer_price: o.counterOfferPrice?.value ?? null,
-    counter_offer_price_currency: o.counterOfferPrice?.currency ?? null,
-    tracking_number: o.trackingNumber ?? null,
-    shipper: o.shipper ?? null,
-    transfer_certificate_link: o.transferCertificateLink ?? null,
-    suspend_reasons: o.suspendReasons ?? null,
-    counter_offer_reasons: o.counterOfferReasons ?? null,
-    raw: o,
-    synced_at: new Date().toISOString(),
   };
 }
 

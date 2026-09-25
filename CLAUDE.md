@@ -106,6 +106,14 @@ Macu jest wyłączony; bidder działa na produkcji, włącznik: `buyback_setting
   pilnuje tego UI (`changeStatus`, komunikat co brakuje) i trigger `buyback_order_intake_require_complete`
   w bazie (sprawdza przy przejściu na "Obsłużona" i przy czyszczeniu pola w już obsłużonej paczce,
   więc stare obsłużone wiersze bez danych można uzupełniać po jednym polu).
+- Kolumna **Dok.** = checkbox `docs` (boolean, domyślnie false; nie jest wymagana do "Obsłużona"; zmiany w logu jako "tak"/"nie").
+- **Walidacja w Back Market przy "Obsłużona"** (`app/api/tradein/validate/route.ts`, `PUT /ws/buyback/v1/orders/{id}/validate`,
+  bez body): najpierw ostrzeżenie (`confirm`: nieodwracalne, uruchamia wypłatę dla klienta, kwota, status BM), potem serwer
+  waliduje w BM i dopiero po sukcesie zapisuje status paczki. Odmowa BM (np. status inny niż RECEIVED) = status się nie
+  zmienia, błąd widać nad listą. Serwer nie ufa przeglądarce: wymaga zalogowanego użytkownika (sekret crona nie wystarcza)
+  oraz kompletu numer seryjny/SKU/pady w bazie; zamówienie już VALIDATED/PAID/MONEY_TRANSFERED nie jest walidowane drugi raz
+  (ponowna próba po błędzie zapisu statusu jest bezpieczna). Wynik ląduje w logu ("Walidacja Back Market: zwalidowano").
+  Cofnięcie statusu paczki NIE cofa walidacji w BM. Mapper zamówienia jest wspólny: `lib/buybackOrders.ts`.
 - Numer zamówienia jest linkiem do **karty zamówienia** (panel boczny): dane z API + dane
   pracownika (numer seryjny, SKU, pady, uwagi — edytowalne) + numerowany log zmian.
   Na górze karty link "Otwórz w Back Market" → `https://www.backmarket.fr/bo-seller/buyback/orders/{numer}`
