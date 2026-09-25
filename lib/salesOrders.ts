@@ -4,6 +4,14 @@
 
 export const MARKETPLACES = [{ key: "backmarket", label: "Back Market" }] as const;
 
+// Nasz wewnętrzny status realizacji zamówienia (niezależny od statusu kanału) — kolumna sales_orders.our_status.
+export const OUR_STATUSES = [
+  { key: "nowe", label: "Nowe" },
+  { key: "w_realizacji", label: "W realizacji" },
+  { key: "wyslane", label: "Wysłane" },
+] as const;
+export type OurStatus = (typeof OUR_STATUSES)[number]["key"];
+
 // Stany zamówienia Back Market (dokumentacja API, tabela "Order State").
 export const BM_ORDER_STATES: Record<string, string> = {
   "0": "Nowe (weryfikacja płatności)",
@@ -68,6 +76,7 @@ export function mapBmToSales(o: any) {
     order_date: o.date_creation ?? null,
     status: String(o.state),
     sku: skus.length > 0 ? skus.join(", ") : null,
+    tracking_number: o.tracking_number || null,
     synced_at: new Date().toISOString(),
   };
 }

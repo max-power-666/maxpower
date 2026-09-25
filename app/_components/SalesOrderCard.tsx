@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
-import { MARKETPLACES, salesStatusLabel } from "@/lib/salesOrders";
+import { MARKETPLACES, OUR_STATUSES, salesStatusLabel } from "@/lib/salesOrders";
 import { MAX_PADS } from "./PadSerialsCell";
 
 // Karta zamówienia sprzedaży (panel boczny po kliknięciu numeru zamówienia): dane z API marketplace'u,
@@ -31,6 +31,7 @@ type WorkerData = {
   order_date: string | null;
   status: string;
   sku: string | null;
+  our_status: string;
   history: SalesHistoryEntry[];
 };
 
@@ -339,6 +340,7 @@ export default function SalesOrderCard({
 
             <h3 className="text-xs font-semibold text-inksoft mb-2">ZAMÓWIENIE</h3>
             <div className="border border-line bg-white mb-6">
+              <Row label="Nasz status" value={OUR_STATUSES.find((o) => o.key === worker.our_status)?.label ?? worker.our_status} />
               <Row label="Data zamówienia" value={fmtDateTime(worker.order_date)} />
               <Row label="SKU" value={worker.sku} mono />
               <Row label="Kraj" value={bm?.country_code} />

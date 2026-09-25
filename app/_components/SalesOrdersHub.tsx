@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
-import { MARKETPLACES, salesStatusLabel } from "@/lib/salesOrders";
+import { MARKETPLACES, OUR_STATUSES, salesStatusLabel, type OurStatus } from "@/lib/salesOrders";
 import { escapeLike } from "@/lib/search";
 import { type MemberLite } from "@/lib/displayName";
 import InlineEditCell from "./InlineEditCell";
@@ -165,11 +165,19 @@ type SalesRow = {
   order_date: string | null;
   status: string;
   sku: string | null;
+  tracking_number: string | null;
+  our_status: OurStatus;
   sales_order_items: SalesItem[];
 };
 const SALES_COLUMNS =
-  "marketplace, external_id, order_date, status, sku, sales_order_items(item_key, position, sku, serial_number, pads, pad_serials)";
+  "marketplace, external_id, order_date, status, sku, tracking_number, our_status, sales_order_items(item_key, position, sku, serial_number, pads, pad_serials)";
 const rowKey = (r: { marketplace: string; external_id: string }) => `${r.marketplace}:${r.external_id}`;
+
+const OUR_STATUS_STYLE: Record<OurStatus, string> = {
+  nowe: "bg-rustsoft text-rust",
+  w_realizacji: "bg-ambersoft text-amber",
+  wyslane: "bg-tealsoft text-teal",
+};
 
 // Kolor plakietki statusu Back Market: w toku (do zrobienia) bursztyn, wysłane zielone, reszta neutralnie.
 function statusStyle(marketplace: string, status: string) {
@@ -284,6 +292,37 @@ function OrdersList({
     });
   }
 
+  // Nasz status realizacji (poziom zamówienia): zmiana + wpis do logu w jednej transakcji (funkcja bazy).
+  function changeOurStatus(order: SalesRow, status: OurStatus) {
+    setError("");
+    const key = rowKey(order);
+    saveQueue.current = saveQueue.current.then(async () => {
+      const cur = rowsRef.current.find((r) => rowKey(r) === key);
+      if (!cur || cur.our_status === status) return;
+      const label = (k: string) => OUR_STATUSES.find((o) => o.key === k)?.label ?? k;
+      const entry: SalesHistoryEntry = {
+        action: "edited",
+        by_email: session.user.email ?? null,
+        at: new Date().toISOString(),
+        changes: [{ field: "Nasz status", from: label(cur.our_status), to: label(status) }],
+      };
+      const { error: err } = await supabase.rpc("sales_order_set_status", {
+        p_marketplace: cur.marketplace,
+        p_external_id: cur.external_id,
+        p_status: status,
+        p_entry: entry,
+      });
+      if (err) {
+        setError(`Nie udało się zmienić statusu: ${err.message}`);
+        await load(); // select jest kontrolowany przez React — przywróć stan z bazy
+        return;
+      }
+      const next = rowsRef.current.map((r) => (rowKey(r) === key ? { ...r, our_status: status } : r));
+      rowsRef.current = next;
+      setRows(next);
+    });
+  }
+
   function saveSerial(order: SalesRow, item: SalesItem, value: string | null) {
     enqueueItemUpdate(rowKey(order), item.item_key, "Numer seryjny", (cur) =>
       cur.serial_number === value ? null : { next: { serial_number: value, pads: cur.pads, pad_serials: cur.pad_serials }, from: cur.serial_number, to: value }
@@ -341,6 +380,8 @@ function OrdersList({
               <th className="p-3">Nr zamówienia</th>
               <th className="p-3">Data zamówienia</th>
               <th className="p-3">Status</th>
+              <th className="p-3">Nr przesyłki</th>
+              <th className="p-3">Nasz status</th>
               <th className="p-3">SKU</th>
               <th className="p-3">Numer seryjny</th>
               <th className="p-3">Pady</th>
@@ -349,7 +390,7 @@ function OrdersList({
           </thead>
           <tbody>
             {!loading && rows.length === 0 && (
-              <tr><td colSpan={7} className="p-6 text-center text-inksoft text-sm">{search ? "Nic nie znaleziono dla tego numeru." : "Brak zamówień — kliknij Odśwież, żeby pobrać je z Back Market."}</td></tr>
+              <tr><td colSpan={9} className="p-6 text-center text-inksoft text-sm">{search ? "Nic nie znaleziono dla tego numeru." : "Brak zamówień — kliknij Odśwież, żeby pobrać je z Back Market."}</td></tr>
             )}
             {rows.map((r) => {
               // Zamówienie bez pozycji (jeszcze nie zsynchronizowane) pokazujemy jednym wierszem z samym SKU.
@@ -375,6 +416,18 @@ function OrdersList({
                         <span className={`text-xs font-semibold px-2 py-1 rounded-full ${statusStyle(r.marketplace, r.status)}`}>
                           {salesStatusLabel(r.marketplace, r.status)}
                         </span>
+                      </td>
+                      <td rowSpan={items.length} className="p-3 font-mono whitespace-nowrap">{r.tracking_number || "—"}</td>
+                      <td rowSpan={items.length} className="p-3">
+                        <select
+                          value={r.our_status}
+                          onChange={(ev) => changeOurStatus(r, ev.target.value as OurStatus)}
+                          className={`text-xs font-semibold px-2 py-1 rounded-full border-none ${OUR_STATUS_STYLE[r.our_status]}`}
+                        >
+                          {OUR_STATUSES.map((o) => (
+                            <option key={o.key} value={o.key}>{o.label}</option>
+                          ))}
+                        </select>
                       </td>
                     </>
                   )}

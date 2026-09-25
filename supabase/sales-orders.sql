@@ -48,11 +48,27 @@ create table if not exists sales_orders (
   order_date timestamptz,
   status text not null,                      -- surowy status kanału (Back Market: kod stanu "1", "3", "9"...)
   sku text,                                  -- SKU-i wszystkich pozycji po przecinku (podsumowanie; szczegóły w sales_order_items)
+  tracking_number text,                      -- numer przesyłki z API (Back Market: tracking_number zamówienia)
   synced_at timestamptz not null default now(),
+  -- Nasz wewnętrzny status realizacji (niezależny od statusu kanału): nowe | w_realizacji | wyslane
+  our_status text not null default 'nowe' check (our_status in ('nowe', 'w_realizacji', 'wyslane')),
   history jsonb not null default '[]'::jsonb,  -- log zmian danych pracowniczych: [{action:"edited", by_email, at, changes:[{field,from,to}]}]
   primary key (marketplace, external_id)
 );
 alter table sales_orders add column if not exists history jsonb not null default '[]'::jsonb;
+alter table sales_orders add column if not exists tracking_number text;
+alter table sales_orders add column if not exists our_status text not null default 'nowe';
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'sales_orders_our_status_check') then
+    alter table sales_orders add constraint sales_orders_our_status_check check (our_status in ('nowe', 'w_realizacji', 'wyslane'));
+  end if;
+end $$;
+-- Uzupełnienie numeru przesyłki dla zamówień pobranych wcześniej (z surowych danych).
+update sales_orders s set tracking_number = o.tracking_number
+  from bm_orders o
+ where s.marketplace = 'backmarket' and o.order_id::text = s.external_id
+   and s.tracking_number is distinct from o.tracking_number;
 create index if not exists sales_orders_date_idx on sales_orders (order_date desc);
 
 -- Pozycje zamówienia: jedna sztuka = jeden wiersz. Zamówienie może mieć kilka pozycji (i pozycję z ilością > 1
@@ -154,8 +170,9 @@ begin
   if auth.role() = 'authenticated' and (
        new.marketplace is distinct from old.marketplace or new.external_id is distinct from old.external_id
        or new.order_date is distinct from old.order_date or new.status is distinct from old.status
-       or new.sku is distinct from old.sku or new.synced_at is distinct from old.synced_at) then
-    raise exception 'Pola pochodzące z marketplace (numer, data, status, SKU) zmienia tylko synchronizacja.' using errcode = '42501';
+       or new.sku is distinct from old.sku or new.tracking_number is distinct from old.tracking_number
+       or new.synced_at is distinct from old.synced_at) then
+    raise exception 'Pola pochodzące z marketplace (numer, data, status, SKU, przesyłka) zmienia tylko synchronizacja.' using errcode = '42501';
   end if;
   return new;
 end $$;
@@ -181,6 +198,19 @@ create trigger sales_order_items_protect_api_fields before update on sales_order
 -- Zapis danych pozycji razem z wpisem do logu w JEDNEJ transakcji (i dopisanie do historii po stronie bazy,
 -- więc równoczesne edycje dwóch osób nie nadpisują sobie nawzajem logu). Wywołuje ją aplikacja (supabase.rpc);
 -- działa z uprawnieniami wywołującego, czyli obowiązują polityki i triggery powyżej.
+-- Zmiana naszego statusu realizacji zamówienia razem z wpisem do logu (jedna transakcja).
+create or replace function sales_order_set_status(p_marketplace text, p_external_id text, p_status text, p_entry jsonb)
+returns void
+language plpgsql as $$
+begin
+  update sales_orders
+     set our_status = p_status, history = history || jsonb_build_array(p_entry)
+   where marketplace = p_marketplace and external_id = p_external_id;
+  if not found then
+    raise exception 'Nie ma takiego zamówienia.';
+  end if;
+end $$;
+
 create or replace function sales_item_update(
   p_marketplace text, p_external_id text, p_item_key text,
   p_serial text, p_pads int, p_pad_serials text[], p_entry jsonb
