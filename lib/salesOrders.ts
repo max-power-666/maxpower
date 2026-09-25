@@ -40,9 +40,12 @@ export const REFURBED_ORDER_STATES: Record<string, string> = {
 };
 
 // Stany zamówienia Erli (pole status): pending = czeka na płatność, purchased = opłacone (także pobranie).
+// UWAGA: w API zamówienie za pobraniem (COD) też ma status "purchased" (tak samo jak opłacone), więc żeby ich nie mylić
+// zapisujemy je w sales_orders jako "purchased_cod" (patrz mapErliToSales) — to nasz znacznik, nie wartość z API.
 export const ERLI_ORDER_STATES: Record<string, string> = {
   pending: "Oczekuje na płatność",
   purchased: "Opłacone",
+  purchased_cod: "Za pobraniem (płatność przy odbiorze)",
   cancelled: "Anulowane",
   returned: "Zwrócone",
 };
@@ -211,7 +214,8 @@ export function mapErliToSales(o: any) {
     marketplace: "erli",
     external_id: String(o.id),
     order_date: o.created ?? null,
-    status: String(o.status ?? "pending"),
+    // Za pobraniem = status "purchased" + delivery.cod. Tylko "purchased": anulowane/zwrócone zostają, jak są.
+    status: o.status === "purchased" && o.delivery?.cod === true ? "purchased_cod" : String(o.status ?? "pending"),
     sku: skus.length > 0 ? skus.join(", ") : null,
     tracking_number: (tr?.trackingNumber && String(tr.trackingNumber).trim()) || (tr?.trackingUrl && String(tr.trackingUrl).trim()) || null,
     synced_at: new Date().toISOString(),

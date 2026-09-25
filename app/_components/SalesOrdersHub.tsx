@@ -221,6 +221,7 @@ function statusStyle(marketplace: string, status: string) {
   }
   if (marketplace === "erli") {
     if (status === "purchased") return "bg-ambersoft text-amber"; // opłacone — do obsłużenia
+    if (status === "purchased_cod") return "bg-rustsoft text-rust font-bold"; // za pobraniem — płatność dopiero przy odbiorze, nie mylić z opłaconym
   }
   return "bg-paper text-inksoft border border-line";
 }

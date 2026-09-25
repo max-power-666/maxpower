@@ -148,7 +148,8 @@ na atrapie `fetch` wg swaggera (gitlab.com/refurbed-community/public-apis).
 otwartych"). Numer zamówienia = `Order.id`, data = `created`, status = `status` (pending/purchased/cancelled/returned, etykiety w
 `ERLI_ORDER_STATES`), SKU = `items[].sku`, a gdy brak — `items[].externalId`; pozycja z ilością > 1 rozbijana na sztuki jak w Back Market.
 Numer przesyłki = `deliveryTracking.trackingNumber` (dla przesyłek Erli uzupełnia go system po wygenerowaniu etykiety), a gdy brak — link.
-Kwoty w API są w groszach (dzielimy przez 100 przy wyświetlaniu). Nie testowane na żywym API (brak klucza w środowisku asystenta) —
+**Uwaga: zamówienie za pobraniem (COD) ma w API ten sam status `purchased` co opłacone** — dlatego w `sales_orders` zapisujemy je jako
+własny status `purchased_cod` ("Za pobraniem", czerwona plakietka), a SQL poprawia stare wiersze. Kwoty w API są w groszach (dzielimy przez 100 przy wyświetlaniu). Nie testowane na żywym API (brak klucza w środowisku asystenta) —
 zweryfikowane na atrapie `fetch` wg swaggera (erli.pl/svc/shop-api/doc/swagger.json).
 Nowy marketplace = nowa wartość `marketplace`, własna tabela surowa, własny mapper i sync; lista pozostaje wspólna.
 

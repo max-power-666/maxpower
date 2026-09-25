@@ -168,6 +168,14 @@ create table if not exists sales_orders_sync_meta (
   scan_cursor text                           -- refurbed: id ostatniego pobranego zamówienia; Erli: pole `cursor` ostatniego zamówienia (paginacja kursorem zamiast numeru strony)
 );
 alter table sales_orders_sync_meta add column if not exists scan_cursor text;
+-- Erli: zamówienie za pobraniem (COD) ma w API status "purchased", tak samo jak opłacone. Rozróżniamy je własnym statusem
+-- "purchased_cod" (ustawia to synchronizacja, patrz mapErliToSales). Tu poprawiamy zamówienia pobrane wcześniej.
+update sales_orders s set status = 'purchased_cod'
+  from erli_orders e
+ where s.marketplace = 'erli' and s.external_id = e.id
+   and e.status = 'purchased' and e.raw->'delivery'->>'cod' = 'true'
+   and s.status <> 'purchased_cod';
+
 insert into sales_orders_sync_meta (marketplace) values ('backmarket'), ('refurbed'), ('erli') on conflict (marketplace) do nothing;
 
 alter table bm_orders enable row level security;
