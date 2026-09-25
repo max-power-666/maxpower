@@ -12,6 +12,9 @@ import { mapBmOrder, mapBmToSales } from "@/lib/salesOrders";
 //  - pełny skan (full_scan_done = false): zamówienia od 1 stycznia bieżącego roku (date_creation), w porcjach
 //    z kursorem scan_page (limit czasu funkcji); ukończony tylko gdy API samo zakończy listę;
 //  - przyrostowy: tylko zamówienia zmienione po last_synced_at (date_modification), z zapasem 10 minut.
+// Dodatkowo, po ukończonej synchronizacji, każdy przebieg odświeża pojedynczo (GET /ws/orders/{id}) do
+// RECHECK_LIMIT zamówień, które nie są jeszcze w stanie końcowym (0, 10, 1, 3) i od godziny nie były
+// odświeżone — siatka bezpieczeństwa na wypadek, gdyby filtr date_modification pominął zmianę statusu.
 // Wywoływane przez Vercel Cron (vercel.json) i przycisk "Odśwież" w zakładce Zamówienia.
 
 export const maxDuration = 300;
@@ -22,12 +25,17 @@ const MAX_PAGES = 5000; // bezpiecznik; jego trafienie NIE kończy skanu
 const BUDGET_MS = 200_000;
 const REQUEST_TIMEOUT_MS = 30_000;
 const OVERLAP_MS = 10 * 60 * 1000;
+const OPEN_STATES = [0, 10, 1, 3]; // stan 9 (wysłane) i 8 (nieopłacone) są końcowe
+const RECHECK_LIMIT = 25;
+const RECHECK_MIN_AGE_MS = 60 * 60 * 1000;
+const RECHECK_DEADLINE_MS = 250_000; // po tym czasie od startu funkcji nie zaczynamy kolejnego zapytania
 
 function rfc3339(d: Date) {
   return d.toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
 export async function GET(request: Request) {
+  const startedAt = Date.now();
   if (!(await isAuthorized(request))) {
     return NextResponse.json({ error: "Brak autoryzacji." }, { status: 401 });
   }
@@ -105,8 +113,43 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: `Błąd zapisu do Supabase: ${metaWriteError.message}` }, { status: 500 });
   }
 
+  let rechecked = 0;
+  if (result.finished) {
+    const { data: stale } = await admin
+      .from("bm_orders")
+      .select("order_id")
+      .in("state", OPEN_STATES)
+      .lt("synced_at", new Date(Date.now() - RECHECK_MIN_AGE_MS).toISOString())
+      .order("synced_at", { ascending: true })
+      .limit(RECHECK_LIMIT);
+    for (const { order_id } of stale || []) {
+      if (Date.now() - startedAt > RECHECK_DEADLINE_MS) break;
+      try {
+        const res = await fetch(`${baseUrl}/ws/orders/${order_id}`, {
+          headers: {
+            Accept: "application/json",
+            "Accept-Language": process.env.BACKMARKET_LANG || "fr-fr",
+            Authorization: process.env.BACKMARKET_AUTH!,
+            "User-Agent": process.env.BACKMARKET_UA || "backmarket@recoo.io",
+          },
+          cache: "no-store",
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        });
+        if (!res.ok) continue; // np. zamówienie zniknęło z API — spróbujemy przy następnym przebiegu
+        const order = await res.json();
+        if (!order?.order_id) continue;
+        await admin.from("bm_orders").upsert(mapBmOrder(order));
+        await admin.from("sales_orders").upsert(mapBmToSales(order));
+        rechecked += 1;
+      } catch {
+        /* pojedyncza porażka nie psuje przebiegu */
+      }
+    }
+  }
+
   return NextResponse.json({
     ok: true,
+    rechecked,
     mode: fullScan ? "full" : "incremental",
     finished: result.finished,
     processed: result.processed,
