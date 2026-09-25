@@ -5,7 +5,9 @@ import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { MARKETPLACES, salesStatusLabel } from "@/lib/salesOrders";
 import { escapeLike } from "@/lib/search";
+import { type MemberLite } from "@/lib/displayName";
 import InlineEditCell from "./InlineEditCell";
+import SalesOrderCard, { type FieldChange, type SalesHistoryEntry } from "./SalesOrderCard";
 import PadSerialsCell, { MAX_PADS } from "./PadSerialsCell";
 
 // Zakładka Zamówienia: sprzedaż z marketplace'ów. Podstrona "Zamówienia" to wspólna lista ze wszystkich
@@ -65,13 +67,14 @@ function Pager({
   );
 }
 
-export default function SalesOrdersHub({ session }: { session: Session }) {
+export default function SalesOrdersHub({ session, members }: { session: Session; members: MemberLite[] }) {
   const [sub, setSub] = useState<"orders" | "bm">("orders");
   const [reloadKey, setReloadKey] = useState(0);
   const [lastSynced, setLastSynced] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
+  const [openOrder, setOpenOrder] = useState<{ marketplace: string; externalId: string } | null>(null);
 
   useEffect(() => {
     loadMeta();
@@ -134,8 +137,20 @@ export default function SalesOrdersHub({ session }: { session: Session }) {
       {error && <p className="text-rust text-xs mb-3">{error}</p>}
       {note && <p className="text-inksoft text-xs mb-3">{note}</p>}
 
-      {sub === "orders" && <OrdersList reloadKey={reloadKey} />}
+      {sub === "orders" && (
+        <OrdersList reloadKey={reloadKey} session={session} onOpen={(marketplace, externalId) => setOpenOrder({ marketplace, externalId })} />
+      )}
       {sub === "bm" && <BmRawView reloadKey={reloadKey} />}
+
+      {openOrder && (
+        <SalesOrderCard
+          marketplace={openOrder.marketplace}
+          externalId={openOrder.externalId}
+          session={session}
+          members={members}
+          onClose={() => setOpenOrder(null)}
+        />
+      )}
     </div>
   );
 }
@@ -151,8 +166,9 @@ type SalesRow = {
   serial_number: string | null; // od tąd dane wpisywane przez pracowników
   pads: number | null;
   pad_serials: string[] | null;
+  history: SalesHistoryEntry[];
 };
-const SALES_COLUMNS = "marketplace, external_id, order_date, status, sku, serial_number, pads, pad_serials";
+const SALES_COLUMNS = "marketplace, external_id, order_date, status, sku, serial_number, pads, pad_serials, history";
 const rowKey = (r: { marketplace: string; external_id: string }) => `${r.marketplace}:${r.external_id}`;
 
 // Kolor plakietki statusu Back Market: w toku (do zrobienia) bursztyn, wysłane zielone, reszta neutralnie.
@@ -164,7 +180,15 @@ function statusStyle(marketplace: string, status: string) {
   return "bg-paper text-inksoft border border-line";
 }
 
-function OrdersList({ reloadKey }: { reloadKey: number }) {
+function OrdersList({
+  reloadKey,
+  session,
+  onOpen,
+}: {
+  reloadKey: number;
+  session: Session;
+  onOpen: (marketplace: string, externalId: string) => void;
+}) {
   const [rows, setRows] = useState<SalesRow[]>([]);
   const [total, setTotal] = useState<number | null>(null);
   const [page, setPage] = useState(1);
@@ -216,29 +240,34 @@ function OrdersList({ reloadKey }: { reloadKey: number }) {
     setLoading(false);
   }
 
-  function enqueueUpdate(key: string, label: string, build: (cur: SalesRow) => Partial<SalesRow> | null) {
+  // build zwraca zmianę pola (patch) i jej opis do logu; zapis dopisuje wpis do history tak samo jak edycja na karcie.
+  function enqueueUpdate(key: string, label: string, build: (cur: SalesRow) => { patch: Partial<SalesRow>; changes: FieldChange[] } | null) {
     setError("");
     saveQueue.current = saveQueue.current.then(async () => {
       const cur = rowsRef.current.find((r) => rowKey(r) === key);
-      const patch = cur && build(cur);
-      if (!cur || !patch) return;
+      const built = cur && build(cur);
+      if (!cur || !built) return;
+      const entry: SalesHistoryEntry = { action: "edited", by_email: session.user.email ?? null, at: new Date().toISOString(), changes: built.changes };
+      const history = [...(cur.history || []), entry];
       const { error: err } = await supabase
         .from("sales_orders")
-        .update(patch)
+        .update({ ...built.patch, history })
         .eq("marketplace", cur.marketplace)
         .eq("external_id", cur.external_id);
       if (err) {
         setError(`Nie udało się zapisać (${label}): ${err.message}`);
         return;
       }
-      const next = rowsRef.current.map((r) => (rowKey(r) === key ? { ...r, ...patch } : r));
+      const next = rowsRef.current.map((r) => (rowKey(r) === key ? { ...r, ...built.patch, history } : r));
       rowsRef.current = next;
       setRows(next);
     });
   }
 
   function saveSerial(row: SalesRow, value: string | null) {
-    enqueueUpdate(rowKey(row), "Numer seryjny", (cur) => (cur.serial_number === value ? null : { serial_number: value }));
+    enqueueUpdate(rowKey(row), "Numer seryjny", (cur) =>
+      cur.serial_number === value ? null : { patch: { serial_number: value }, changes: [{ field: "Numer seryjny", from: cur.serial_number, to: value }] }
+    );
   }
 
   // Pady to liczba całkowita 0..MAX_PADS (0 = zestaw bez padów).
@@ -248,17 +277,23 @@ function OrdersList({ reloadKey }: { reloadKey: number }) {
       return;
     }
     const value = text === null ? null : Number(text);
-    enqueueUpdate(rowKey(row), "Pady", (cur) => (cur.pads === value ? null : { pads: value }));
+    enqueueUpdate(rowKey(row), "Pady", (cur) =>
+      cur.pads === value
+        ? null
+        : { patch: { pads: value }, changes: [{ field: "Pady", from: cur.pads === null ? null : String(cur.pads), to: value === null ? null : String(value) }] }
+    );
   }
 
   // Element i tablicy pad_serials = numer seryjny pada i+1.
   function savePadSerial(row: SalesRow, index: number, value: string | null) {
-    enqueueUpdate(rowKey(row), `Nr seryjny pada ${index + 1}`, (cur) => {
+    const field = `Nr seryjny pada ${index + 1}`;
+    enqueueUpdate(rowKey(row), field, (cur) => {
       const arr = [...(cur.pad_serials ?? [])];
       while (arr.length <= index) arr.push("");
-      if ((arr[index] || null) === value) return null;
+      const before = arr[index] || null;
+      if (before === value) return null;
       arr[index] = value ?? "";
-      return { pad_serials: arr.every((x) => !x) ? null : arr };
+      return { patch: { pad_serials: arr.every((x) => !x) ? null : arr }, changes: [{ field, from: before, to: value }] };
     });
   }
 
@@ -291,8 +326,14 @@ function OrdersList({ reloadKey }: { reloadKey: number }) {
             )}
             {rows.map((r) => (
               <tr key={rowKey(r)} className="border-b border-line last:border-b-0 hover:bg-paper">
-                <td className="p-3 font-mono font-semibold whitespace-nowrap" title={MARKETPLACES.find((m) => m.key === r.marketplace)?.label}>
-                  {r.external_id}
+                <td className="p-3 whitespace-nowrap">
+                  <button
+                    onClick={() => onOpen(r.marketplace, r.external_id)}
+                    title={MARKETPLACES.find((m) => m.key === r.marketplace)?.label}
+                    className="font-mono font-semibold text-teal hover:underline"
+                  >
+                    {r.external_id}
+                  </button>
                 </td>
                 <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDateTime(r.order_date)}</td>
                 <td className="p-3">

@@ -52,11 +52,13 @@ create table if not exists sales_orders (
   serial_number text,                        -- numer seryjny urządzenia
   pads int check (pads is null or pads >= 0),  -- liczba padów w zestawie (konsole); 0 = bez padów
   pad_serials text[],                        -- numery seryjne padów: element i = pad i+1
+  history jsonb not null default '[]'::jsonb,  -- log zmian danych pracowniczych: [{action:"edited", by_email, at, changes:[{field,from,to}]}]
   primary key (marketplace, external_id)
 );
 alter table sales_orders add column if not exists serial_number text;
 alter table sales_orders add column if not exists pads int;
 alter table sales_orders add column if not exists pad_serials text[];
+alter table sales_orders add column if not exists history jsonb not null default '[]'::jsonb;
 do $$
 begin
   if not exists (select 1 from pg_constraint where conname = 'sales_orders_pads_check') then

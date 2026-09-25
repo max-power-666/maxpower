@@ -381,7 +381,7 @@ export default function Home() {
             </div>
           )}
 
-          {view === "sales" && <SalesOrdersHub session={session} />}
+          {view === "sales" && <SalesOrdersHub session={session} members={members} />}
 
           {view === "team" && (
             <TeamView
