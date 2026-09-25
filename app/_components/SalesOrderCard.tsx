@@ -109,6 +109,14 @@ type BmOrder = {
   billing_address: Address | null;
 };
 
+// Lista zamówień w panelu sprzedawcy Back Market, przefiltrowana do jednego zamówienia. endDate to dzisiejsza data
+// (górna granica zakresu), żeby filtr nie ucinał zamówienia; panel jest na domenie .fr dla wszystkich rynków.
+function backMarketOrderUrl(orderId: string) {
+  const d = new Date();
+  const endDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return `https://www.backmarket.fr/bo-seller/orders/all?page=1&pageSize=10&endDate=${endDate}&orderId=${encodeURIComponent(orderId)}`;
+}
+
 function fmtDateTime(iso: string | null) {
   if (!iso) return null;
   return new Date(iso).toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -270,9 +278,16 @@ export default function SalesOrderCard({
 
         {worker && (
           <>
-            <span className="inline-block text-xs font-semibold px-2 py-1 rounded-full bg-tealsoft text-teal mb-6">
-              {salesStatusLabel(marketplace, worker.status)}
-            </span>
+            <div className="flex items-center gap-3 mb-6">
+              <span className="inline-block text-xs font-semibold px-2 py-1 rounded-full bg-tealsoft text-teal">
+                {salesStatusLabel(marketplace, worker.status)}
+              </span>
+              {marketplace === "backmarket" && (
+                <a href={backMarketOrderUrl(externalId)} target="_blank" rel="noreferrer" className="text-xs font-semibold text-teal hover:underline">
+                  Otwórz w Back Market ↗
+                </a>
+              )}
+            </div>
 
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-xs font-semibold text-inksoft">DANE WPROWADZONE PRZEZ PRACOWNIKA</h3>
