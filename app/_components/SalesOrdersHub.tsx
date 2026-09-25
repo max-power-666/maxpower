@@ -429,11 +429,11 @@ function OrdersList({
               <th className="p-3">Data zamówienia</th>
               <th className="p-3">Status</th>
               <th className="p-3">Nr przesyłki</th>
-              <th className="p-3">Nasz status</th>
               <th className="p-3">SKU</th>
               <th className="p-3">Numer seryjny</th>
               <th className="p-3">Pady</th>
               <th className="p-3">Nr seryjny padów</th>
+              <th className="p-3">Nasz status</th>
             </tr>
           </thead>
           <tbody>
@@ -472,17 +472,6 @@ function OrdersList({
                       <td rowSpan={items.length} className="p-3 font-mono whitespace-nowrap">
                         <TrackingCell value={r.tracking_number} />
                       </td>
-                      <td rowSpan={items.length} className="p-3">
-                        <select
-                          value={r.our_status}
-                          onChange={(ev) => changeOurStatus(r, ev.target.value as OurStatus)}
-                          className={`text-xs font-semibold px-2 py-1 rounded-full border-none ${OUR_STATUS_STYLE[r.our_status]}`}
-                        >
-                          {OUR_STATUSES.map((o) => (
-                            <option key={o.key} value={o.key}>{o.label}</option>
-                          ))}
-                        </select>
-                      </td>
                     </>
                   )}
                   <td className="p-3 font-mono whitespace-nowrap">{it ? it.sku || "—" : r.sku || "—"}</td>
@@ -500,6 +489,19 @@ function OrdersList({
                     </>
                   ) : (
                     <td colSpan={3} className="p-3 text-xs text-inksoft">—</td>
+                  )}
+                  {idx === 0 && (
+                    <td rowSpan={items.length} className="p-3">
+                      <select
+                        value={r.our_status}
+                        onChange={(ev) => changeOurStatus(r, ev.target.value as OurStatus)}
+                        className={`text-xs font-semibold px-2 py-1 rounded-full border-none ${OUR_STATUS_STYLE[r.our_status]}`}
+                      >
+                        {OUR_STATUSES.map((o) => (
+                          <option key={o.key} value={o.key}>{o.label}</option>
+                        ))}
+                      </select>
+                    </td>
                   )}
                 </tr>
               ));
