@@ -37,6 +37,7 @@ type IntakeEntry = {
   serial_number: string | null;
   sku: string | null;
   pads: number | null;
+  pad_serials: string | null;
   notes: string | null;
   entered_by_email: string | null;
   entered_at: string;
@@ -46,7 +47,7 @@ type IntakeEntry = {
   history: HistoryEntry[];
 };
 
-const INTAKE_COLUMNS = "id, order_public_id, serial_number, sku, pads, notes, entered_by_email, entered_at, finished_at, status, points, history";
+const INTAKE_COLUMNS = "id, order_public_id, serial_number, sku, pads, pad_serials, notes, entered_by_email, entered_at, finished_at, status, points, history";
 
 function fmtPoints(n: number | string) {
   return Number(n).toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -271,7 +272,7 @@ function IntakeView({
   }
 
   // Edycje z listy (uwagi, numer seryjny, SKU, pady) trafiają do tego samego logu zmian co edycja na karcie.
-  async function saveField(row: IntakeEntry, column: "notes" | "serial_number" | "sku" | "pads", label: string, value: string | number | null) {
+  async function saveField(row: IntakeEntry, column: "notes" | "serial_number" | "sku" | "pads" | "pad_serials", label: string, value: string | number | null) {
     setError("");
     const entry: HistoryEntry = {
       action: "edited",
@@ -400,6 +401,7 @@ function IntakeView({
               <th className="p-3">Numer seryjny</th>
               <th className="p-3">SKU</th>
               <th className="p-3">Pady</th>
+              <th className="p-3">Nr seryjny padów</th>
               <th className="p-3">Status</th>
               <th className="p-3">Uwagi</th>
               <th className="p-3">Czas</th>
@@ -409,7 +411,7 @@ function IntakeView({
           </thead>
           <tbody>
             {!loading && entries.length === 0 && (
-              <tr><td colSpan={isAdmin ? 11 : 10} className="p-6 text-center text-inksoft text-sm">Brak paczek — rozpocznij pierwszą powyżej.</td></tr>
+              <tr><td colSpan={isAdmin ? 12 : 11} className="p-6 text-center text-inksoft text-sm">Brak paczek — rozpocznij pierwszą powyżej.</td></tr>
             )}
             {entries.map((e) => (
               <tr key={e.id} className="border-b border-line last:border-b-0 hover:bg-paper">
@@ -454,6 +456,18 @@ function IntakeView({
                     className="w-16 font-mono"
                     onSave={(v) => savePads(e, v)}
                   />
+                </td>
+                <td className="p-3">
+                  {(e.pads ?? 0) > 0 ? (
+                    <InlineEditCell
+                      value={e.pad_serials}
+                      placeholder={e.pads === 1 ? "Numer pada" : "Numery padów, po przecinku"}
+                      className="w-56 font-mono"
+                      onSave={(v) => saveField(e, "pad_serials", "Nr seryjny padów", v)}
+                    />
+                  ) : (
+                    <span className="text-inksoft px-2">—</span>
+                  )}
                 </td>
                 <td className="p-3">
                   <select
@@ -508,6 +522,7 @@ function OrderCardDrawer({
   const [serialDraft, setSerialDraft] = useState("");
   const [skuDraft, setSkuDraft] = useState("");
   const [padsDraft, setPadsDraft] = useState("");
+  const [padSerialsDraft, setPadSerialsDraft] = useState("");
   const [notesDraft, setNotesDraft] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -534,6 +549,7 @@ function OrderCardDrawer({
     setSerialDraft(intake?.serial_number || "");
     setSkuDraft(intake?.sku || "");
     setPadsDraft(intake?.pads === null || intake?.pads === undefined ? "" : String(intake.pads));
+    setPadSerialsDraft(intake?.pad_serials || "");
     setNotesDraft(intake?.notes || "");
     setEditing(true);
   }
@@ -549,6 +565,7 @@ function OrderCardDrawer({
       serial_number: serialDraft.trim() || null,
       sku: skuDraft.trim() || null,
       pads: padsText ? Number(padsText) : null,
+      pad_serials: padSerialsDraft.trim() || null,
       notes: notesDraft.trim() || null,
     };
     const changes: FieldChange[] = [];
@@ -558,6 +575,7 @@ function OrderCardDrawer({
     diff("Numer seryjny", intake.serial_number, next.serial_number);
     diff("SKU", intake.sku, next.sku);
     diff("Pady", intake.pads, next.pads);
+    diff("Nr seryjny padów", intake.pad_serials, next.pad_serials);
     diff("Uwagi", intake.notes, next.notes);
 
     if (changes.length === 0) {
@@ -628,6 +646,7 @@ function OrderCardDrawer({
                   <Row label="Numer seryjny" value={intake.serial_number} mono />
                   <Row label="SKU" value={intake.sku} mono />
                   <Row label="Pady" value={intake.pads === null ? null : String(intake.pads)} mono />
+                  {(intake.pads ?? 0) > 0 && <Row label="Nr seryjny padów" value={intake.pad_serials} mono />}
                   <Row label="Uwagi" value={intake.notes} />
                 </>
               )}
@@ -645,6 +664,12 @@ function OrderCardDrawer({
                     <label className="text-xs font-semibold text-inksoft block mb-1">Pady (liczba w zestawie)</label>
                     <input value={padsDraft} onChange={(e) => setPadsDraft(e.target.value)} inputMode="numeric" className="w-full border border-line bg-white px-2 py-1.5 rounded text-sm font-mono" />
                   </div>
+                  {Number(padsDraft) > 0 && (
+                    <div>
+                      <label className="text-xs font-semibold text-inksoft block mb-1">Nr seryjny padów (kilka: po przecinku)</label>
+                      <input value={padSerialsDraft} onChange={(e) => setPadSerialsDraft(e.target.value)} className="w-full border border-line bg-white px-2 py-1.5 rounded text-sm font-mono" />
+                    </div>
+                  )}
                   <div>
                     <label className="text-xs font-semibold text-inksoft block mb-1">Uwagi</label>
                     <input value={notesDraft} onChange={(e) => setNotesDraft(e.target.value)} className="w-full border border-line bg-white px-2 py-1.5 rounded text-sm" />

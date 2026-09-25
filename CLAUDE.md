@@ -102,7 +102,7 @@ Macu jest wyłączony; bidder działa na produkcji, włącznik: `buyback_setting
   "Obsłużona", podsumowanie punktacji Dziś/7/30 dni. Numer przesyłki służy tylko do
   znalezienia zamówienia przy rozpoczynaniu (w liście nie ma kolumny przesyłki; jest na karcie).
 - Kolumny edytowane w wierszu: Numer seryjny, SKU, Pady (liczba padów w zestawie — konsole; int >= 0,
-  0 jest poprawną wartością), Uwagi. **Warunek:** status "Obsłużona" wymaga numeru seryjnego, SKU i padów —
+  0 jest poprawną wartością), Nr seryjny padów (`pad_serials`, jedno pole tekstowe, kilka numerów po przecinku; widoczne tylko gdy Pady > 0; nie jest wymagane do "Obsłużona"), Uwagi. **Warunek:** status "Obsłużona" wymaga numeru seryjnego, SKU i padów —
   pilnuje tego UI (`changeStatus`, komunikat co brakuje) i trigger `buyback_order_intake_require_complete`
   w bazie (sprawdza przy przejściu na "Obsłużona" i przy czyszczeniu pola w już obsłużonej paczce,
   więc stare obsłużone wiersze bez danych można uzupełniać po jednym polu).

@@ -88,6 +88,7 @@ create table if not exists buyback_order_intake (
   serial_number text,                        -- wymagane do statusu "obsluzona" (trigger poniżej)
   sku text,                                  -- wymagane do statusu "obsluzona" (trigger poniżej)
   pads int check (pads is null or pads >= 0), -- liczba padów w zestawie (konsole); wymagane do "obsluzona", 0 jest dozwolone
+  pad_serials text,                          -- numery seryjne padów (kilka: po przecinku); pole pojawia się w UI przy pads > 0
   notes text default '',
   entered_by_user_id uuid references auth.users(id),
   entered_by_email text,
@@ -109,6 +110,7 @@ alter table buyback_order_intake add column if not exists status text not null d
 alter table buyback_order_intake add column if not exists finished_at timestamptz;
 alter table buyback_order_intake add column if not exists points numeric not null default (100.0 / 6.0);
 alter table buyback_order_intake add column if not exists pads int;
+alter table buyback_order_intake add column if not exists pad_serials text;
 do $$
 begin
   if not exists (select 1 from pg_constraint where conname = 'buyback_order_intake_pads_check') then
