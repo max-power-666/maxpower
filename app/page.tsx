@@ -5,6 +5,7 @@ import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import TradeInView from "./_components/TradeInView";
 import TradeInHub from "./_components/TradeInHub";
+import SalesOrdersHub from "./_components/SalesOrdersHub";
 import ServiceView from "./_components/ServiceView";
 import TestsView from "./_components/TestsView";
 import InventoryRawView from "./_components/InventoryRawView";
@@ -12,11 +13,12 @@ import { displayNameForEmail } from "@/lib/displayName";
 
 const ROLES = ["Admin", "Manager", "Magazyn", "Serwis", "Testy", "Bidder"];
 
-type ViewKey = "overview" | "inventory" | "team" | "service" | "tests" | "tradein" | "orders";
+type ViewKey = "overview" | "inventory" | "sales" | "team" | "service" | "tests" | "tradein" | "orders";
 
 const TABS: { key: ViewKey; label: string }[] = [
   { key: "overview", label: "Przegląd" },
   { key: "inventory", label: "Magazyn" },
+  { key: "sales", label: "Zamówienia" },
   { key: "team", label: "Zespół" },
   { key: "service", label: "Serwis" },
   { key: "tests", label: "Testy" },
@@ -32,8 +34,8 @@ const TABS: { key: ViewKey; label: string }[] = [
 // "orders" (zakładka Trade-in — podgląd zamówień BuyBack) na razie tylko dla Admina,
 // dopóki nie ustalimy docelowej roli dla osoby przetwarzającej zamówienia.
 const ROLE_ACCESS: Record<string, ViewKey[]> = {
-  Admin: ["overview", "inventory", "team", "service", "tests", "tradein", "orders"],
-  Manager: ["overview", "inventory", "team", "service", "tests", "tradein", "orders"], // wszystko; Zespół tylko do odczytu, usuwa tylko Admin
+  Admin: ["overview", "inventory", "sales", "team", "service", "tests", "tradein", "orders"],
+  Manager: ["overview", "inventory", "sales", "team", "service", "tests", "tradein", "orders"], // wszystko; Zespół tylko do odczytu, usuwa tylko Admin
   Magazyn: ["overview", "inventory"],
   Serwis: ["overview", "service"],
   Testy: ["overview", "tests"],
@@ -378,6 +380,8 @@ export default function Home() {
               {invSub === "raw" && <InventoryRawView reloadKey={rawReloadKey} members={members} />}
             </div>
           )}
+
+          {view === "sales" && <SalesOrdersHub session={session} />}
 
           {view === "team" && (
             <TeamView

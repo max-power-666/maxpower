@@ -18,16 +18,16 @@ numerach seryjnych, wielokanałowa synchronizacja stanów, naprawy, auto-wycena)
   tylko raz dziennie). Deploy automatyczny po `git push` na `main`.
 - Repo: `github.com/max-power-666/maxpower`
 - Cron w `vercel.json` (Vercel liczy w UTC): sync Fakturowni `0 23 * * *`, bidder `* * * * *`,
-  sync zamówień BuyBack `*/15 * * * *`. Autoryzacja crona: nagłówek `Bearer CRON_SECRET`.
+  sync zamówień BuyBack `*/15 * * * *`, sync zamówień sprzedaży Back Market `*/15 * * * *`. Autoryzacja crona: nagłówek `Bearer CRON_SECRET`.
 
 ## Struktura kodu
 
 - `app/page.tsx` — jeden duży client component: logowanie, nawigacja, role, zakładki
   Przegląd / Magazyn / Zespół. Większe moduły są osobno w `app/_components/`:
   `ServiceView.tsx` (Serwis), `TestsView.tsx` (Testy), `ProductCardDrawer.tsx` (karta produktu), `TradeInHub.tsx` + `TradeInOrdersView.tsx` (Trade-in),
-  `TradeInView.tsx` (Bidder).
+  `TradeInView.tsx` (Bidder), `SalesOrdersHub.tsx` (Zamówienia).
 - `app/api/*/route.ts` — endpointy serwerowe (sekrety tylko tu, nigdy w przeglądarce):
-  `fakturownia/sync`, `tradein/bidder`, `tradein/competitors`, `tradein/orders-sync`.
+  `fakturownia/sync`, `tradein/bidder`, `tradein/competitors`, `tradein/orders-sync`, `tradein/validate`, `orders/bm-sync`.
 - `lib/` — `supabaseClient.ts`, `buyback.ts` (logika biddera + `isAuthorized`),
   `displayName.ts` (skrócone imię: "Maksymilian J."), `workLog.ts` (interwały Dziś/7/30 dni,
   liczenie czasu i **etykiety typów czynności/statusów** — jedno źródło dla list i karty produktu),
@@ -35,7 +35,7 @@ numerach seryjnych, wielokanałowa synchronizacja stanów, naprawy, auto-wycena)
   zamówień Back Market z budżetem czasu i kursorem).
 - `supabase/*.sql` — schemat, każdy plik idempotentny: `schema.sql` (units, members,
   cache Fakturowni), `tradein.sql` (bidder), `buyback-orders.sql` (zamówienia + obsługa
-  paczek), `service.sql` (rejestr napraw), `tests.sql` (rejestr testów).
+  paczek), `sales-orders.sql` (zamówienia sprzedaży), `service.sql` (rejestr napraw), `tests.sql` (rejestr testów).
 - `scripts/import-buyback.mjs` — jednorazowy import ze starego programu Buyback Bidder.
 
 ## Zakładki i role
@@ -51,6 +51,7 @@ Rola jest zwykłym tekstem w `members.role` — dodanie roli nie wymaga SQL.
 |---|---|---|
 | Przegląd | `overview` | wszyscy |
 | Magazyn | `inventory` | Admin, Manager, Magazyn |
+| Zamówienia | `sales` | Admin, Manager |
 | Zespół | `team` | Admin (edycja), Manager (tylko odczyt) |
 | Serwis | `service` | Admin, Manager, Serwis |
 | Testy | `tests` | Admin, Manager, Testy |
@@ -118,6 +119,16 @@ Macu jest wyłączony; bidder działa na produkcji, włącznik: `buyback_setting
   pracownika (numer seryjny, SKU, pady, uwagi — edytowalne) + numerowany log zmian.
   Na górze karty link "Otwórz w Back Market" → `https://www.backmarket.fr/bo-seller/buyback/orders/{numer}`
   (jedna domena .fr dla wszystkich rynków).
+
+**Zamówienia** (zakładka Zamówienia, `SalesOrdersHub.tsx`) — sprzedaż z marketplace'ów (NIE mylić z zakładką Trade-in,
+która obsługuje skup). Dwie podstrony: *Zamówienia* — wspólna lista ze wszystkich kanałów (`sales_orders`, klucz
+`marketplace` + `external_id`; kolumny: nr zamówienia, data, status, SKU; dziś tylko Back Market) i *BM raw data* —
+wszystkie pola z API Back Market (`bm_orders`, kolumny nazwane jak w API + rozwijany JSON z pełną odpowiedzią, także
+adresy). Sync: `app/api/orders/bm-sync` (`GET /ws/orders`, cron co 15 min + "Odśwież"): pełny skan od 1 stycznia
+w porcjach z kursorem (`sales_orders_sync_meta`, wiersz per kanał), potem przyrostowo po `date_modification`; ten sam
+`lib/scanOrders.ts` co przy skupie. Surowy status Back Market to kod stanu ("1", "3", "9"), etykiety w `lib/salesOrders.ts`
+(`BM_ORDER_STATES`); API nie zwraca stanów 0 i 8. SKU = `orderlines[].listing`, kilka pozycji po przecinku.
+Nowy marketplace = nowa wartość `marketplace`, własna tabela surowa, własny mapper i sync; lista pozostaje wspólna.
 
 **Serwis** (`ServiceView.tsx`, `service_log`). Rejestr napraw wg tabeli z regulaminu:
 Joy-Con para 15 pkt, kontroler PS4 25, Xbox One 35, PS5 12, czyszczenie konsoli 45.

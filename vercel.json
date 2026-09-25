@@ -11,6 +11,10 @@
     {
       "path": "/api/tradein/orders-sync",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/orders/bm-sync",
+      "schedule": "*/15 * * * *"
     }
   ]
 }

@@ -3,6 +3,7 @@
 Wewnętrzny system firmy do obsługi magazynu, napraw i skupu elektroniki. Moduły:
 
 - **Magazyn** — stan z Fakturowni: podsumowanie (liczba, wartość, wykres per kategoria) i lista sztuk z wyszukiwaniem po numerze seryjnym
+- **Zamówienia** — sprzedaż z marketplace'ów (na razie Back Market): lista i podgląd surowych danych z API
 - **Zespół** — użytkownicy, role i dostęp do zakładek (rolę nadaje Admin)
 - **Serwis** — rejestr napraw z punktacją wg regulaminu premiowania
 - **Testy** — rejestr testów urządzeń z punktacją wg regulaminu
@@ -24,8 +25,9 @@ token API Fakturowni i dane dostępowe do API Back Market.
    1. `schema.sql` — użytkownicy, cache Fakturowni, uprawnienia Admina i log usunięć (**musi być pierwszy**, reszta z niego korzysta)
    2. `tradein.sql` — bidder
    3. `buyback-orders.sql` — zamówienia BuyBack i obsługa paczek
-   4. `service.sql` — rejestr napraw
-   5. `tests.sql` — rejestr testów
+   4. `sales-orders.sql` — zamówienia sprzedaży (zakładka Zamówienia)
+   5. `service.sql` — rejestr napraw
+   6. `tests.sql` — rejestr testów
 
    Pliki są idempotentne — po zmianach w repo można je uruchomić ponownie, nic nie zepsują.
    Po każdej aktualizacji kodu, która zmienia schemat, uruchom odpowiedni plik.
@@ -82,6 +84,9 @@ zalogowały się choć raz.
   się samo co 15 minut, a przycisk mówi, ile zostało. Potem synchronizacja jest przyrostowa. Back Market najpewniej
   filtruje po adresie IP, więc to działa z Vercela lub z komputera właściciela, nie z każdego
   środowiska.
+- **Zamówienia sprzedaży (Back Market)** — zakładka Zamówienia → **Odśwież**. Działa jak synchronizacja zamówień
+  BuyBack: pierwszy raz pobiera zamówienia od 1 stycznia bieżącego roku w porcjach, potem przyrostowo (cron co
+  15 minut). Wymaga `BACKMARKET_AUTH` (ten sam klucz co bidder).
 - **Bidder** — `node scripts/import-buyback.mjs` przenosi SKU, ceny max i ostatnie ceny ze
   starego programu (`~/Documents/Buyback Bidder 2`). Włącznik jest domyślnie wyłączony:
   wyłącz stary program, potem w zakładce Bidder kliknij "włącz". Dwa biddery naraz
