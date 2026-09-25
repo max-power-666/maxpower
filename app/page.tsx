@@ -8,6 +8,7 @@ import TradeInHub from "./_components/TradeInHub";
 import ServiceView from "./_components/ServiceView";
 import TestsView from "./_components/TestsView";
 import InventoryRawView from "./_components/InventoryRawView";
+import { displayNameForEmail } from "@/lib/displayName";
 
 const ROLES = ["Admin", "Manager", "Magazyn", "Serwis", "Testy", "Bidder"];
 
@@ -301,7 +302,7 @@ export default function Home() {
 
   return (
     <div className="min-h-screen flex">
-      <aside className="w-56 bg-panel border-r border-line p-4 flex flex-col">
+      <aside className="w-44 shrink-0 bg-panel border-r border-line p-4 flex flex-col">
         <div className="font-bold text-lg mb-6">MAGAZYN</div>
         <nav className="flex flex-col gap-1">
           {TABS.filter((t) => (ROLE_ACCESS[role] ?? ["overview", "inventory"]).includes(t.key)).map((t) => (
@@ -311,7 +312,7 @@ export default function Home() {
           ))}
         </nav>
         <div className="mt-auto text-xs text-inksoft">
-          <div className="font-semibold text-ink">{session.user.email}</div>
+          <div className="font-semibold text-ink truncate" title={session.user.email ?? undefined}>{displayNameForEmail(session.user.email, members)}</div>
           <div>{role}</div>
           <button onClick={() => supabase.auth.signOut()} className="mt-2 underline">Wyloguj</button>
         </div>
