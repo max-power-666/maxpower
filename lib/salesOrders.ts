@@ -20,7 +20,7 @@ export type OurStatus = (typeof OUR_STATUSES)[number]["key"];
 export const BM_ORDER_STATES: Record<string, string> = {
   "0": "Nowe (weryfikacja płatności)",
   "10": "Oczekuje na płatność",
-  "1": "Opłacone (do zaakceptowania)",
+  "1": "Do zaakceptowania",
   "3": "Do wysyłki",
   "8": "Nieopłacone",
   "9": "Wysłane",
