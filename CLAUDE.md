@@ -122,7 +122,7 @@ Macu jest wyłączony; bidder działa na produkcji, włącznik: `buyback_setting
 
 **Zamówienia** (zakładka Zamówienia, `SalesOrdersHub.tsx`) — sprzedaż z marketplace'ów (NIE mylić z zakładką Trade-in,
 która obsługuje skup). Dwie podstrony: *Zamówienia* — wspólna lista ze wszystkich kanałów (`sales_orders`, klucz
-`marketplace` + `external_id`; kolumny: nr zamówienia, data, status, SKU; dziś tylko Back Market) i *BM raw data* —
+`marketplace` + `external_id`; kolumny z API: nr zamówienia, data, status, SKU; dziś tylko Back Market; do tego dane pracownicze edytowane w wierszu: numer seryjny, pady i numery seryjne padów — jak w Trade-in, wspólny komponent `PadSerialsCell.tsx`; zmienia je każdy zalogowany, ale pola z API tylko synchronizacja — pilnuje tego trigger `sales_orders_protect_api_fields`, a upsert synchronizacji nie rusza kolumn pracowniczych; bez logu zmian) i *BM raw data* —
 wszystkie pola z API Back Market (`bm_orders`, kolumny nazwane jak w API + rozwijany JSON z pełną odpowiedzią, także
 adresy). Sync: `app/api/orders/bm-sync` (`GET /ws/orders`, cron co 15 min + "Odśwież"): pełny skan od 1 stycznia
 w porcjach z kursorem (`sales_orders_sync_meta`, wiersz per kanał), potem przyrostowo po `date_modification`; ten sam

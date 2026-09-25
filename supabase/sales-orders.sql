@@ -48,8 +48,21 @@ create table if not exists sales_orders (
   status text not null,                      -- surowy status kanału (Back Market: kod stanu "1", "3", "9"...)
   sku text,                                  -- SKU pozycji; kilka pozycji -> po przecinku
   synced_at timestamptz not null default now(),
+  -- Dane wpisywane przez pracowników (nie pochodzą z API; synchronizacja ich nie rusza):
+  serial_number text,                        -- numer seryjny urządzenia
+  pads int check (pads is null or pads >= 0),  -- liczba padów w zestawie (konsole); 0 = bez padów
+  pad_serials text[],                        -- numery seryjne padów: element i = pad i+1
   primary key (marketplace, external_id)
 );
+alter table sales_orders add column if not exists serial_number text;
+alter table sales_orders add column if not exists pads int;
+alter table sales_orders add column if not exists pad_serials text[];
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'sales_orders_pads_check') then
+    alter table sales_orders add constraint sales_orders_pads_check check (pads is null or pads >= 0);
+  end if;
+end $$;
 create index if not exists sales_orders_date_idx on sales_orders (order_date desc);
 
 -- Kursor synchronizacji per kanał: od kiedy liczyć kolejną synchronizację przyrostową,
@@ -73,6 +86,27 @@ create policy "authenticated read bm_orders" on bm_orders
 drop policy if exists "authenticated read sales_orders" on sales_orders;
 create policy "authenticated read sales_orders" on sales_orders
   for select using (auth.role() = 'authenticated');
+-- Zespół może edytować tylko dane własne (numer seryjny, pady); pola z API zmienia wyłącznie serwer.
+-- RLS nie umie ograniczać kolumn, więc pilnuje tego trigger (zapis service_role przechodzi bez zmian).
+drop policy if exists "authenticated update sales_orders" on sales_orders;
+create policy "authenticated update sales_orders" on sales_orders
+  for update using (auth.role() = 'authenticated');
+
+create or replace function sales_orders_protect_api_fields() returns trigger
+language plpgsql as $$
+begin
+  if auth.role() = 'authenticated' and (
+       new.marketplace is distinct from old.marketplace or new.external_id is distinct from old.external_id
+       or new.order_date is distinct from old.order_date or new.status is distinct from old.status
+       or new.sku is distinct from old.sku or new.synced_at is distinct from old.synced_at) then
+    raise exception 'Pola pochodzące z marketplace (numer, data, status, SKU) zmienia tylko synchronizacja.' using errcode = '42501';
+  end if;
+  return new;
+end $$;
+drop trigger if exists sales_orders_protect_api_fields on sales_orders;
+create trigger sales_orders_protect_api_fields before update on sales_orders
+  for each row execute function sales_orders_protect_api_fields();
+
 drop policy if exists "authenticated read sales_orders_sync_meta" on sales_orders_sync_meta;
 create policy "authenticated read sales_orders_sync_meta" on sales_orders_sync_meta
   for select using (auth.role() = 'authenticated');

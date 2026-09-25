@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabaseClient";
 import TradeInOrdersView from "./TradeInOrdersView";
 import InlineEditCell from "./InlineEditCell";
 import ProductCardDrawer from "./ProductCardDrawer";
+import PadSerialsCell, { MAX_PADS } from "./PadSerialsCell";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { INTAKE_STATUSES, INTERVALS, fmtDuration, rangeStart, type Interval } from "@/lib/workLog";
 
@@ -52,8 +53,6 @@ const INTAKE_COLUMNS = "id, order_public_id, serial_number, sku, pads, pad_seria
 
 // Statusy Back Market po walidacji — takiego zamówienia nie walidujemy drugi raz.
 const BM_ALREADY_VALIDATED = ["VALIDATED", "PAID", "MONEY_TRANSFERED"];
-
-const MAX_PADS = 20; // tyle pól na numery seryjne padów pokazujemy maksymalnie
 
 function fmtPoints(n: number | string) {
   return Number(n).toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -337,13 +336,6 @@ function IntakeView({
     );
   }
 
-  // Skaner kończy numer Enterem: pole się zapisuje, a fokus przechodzi na kolejny pad.
-  function focusNextOnEnter(ev: React.KeyboardEvent<HTMLDivElement>) {
-    if (ev.key !== "Enter") return;
-    const inputs = Array.from(ev.currentTarget.querySelectorAll("input"));
-    inputs[inputs.indexOf(ev.target as HTMLInputElement) + 1]?.focus();
-  }
-
   // Pady to liczba całkowita >= 0 (0 = zestaw bez padów, też jest poprawną, uzupełnioną wartością).
   function savePads(row: IntakeEntry, text: string | null) {
     if (text === null) return saveField(row, "pads", "Pady", null);
@@ -571,21 +563,7 @@ function IntakeView({
                   />
                 </td>
                 <td className="p-3">
-                  {(e.pads ?? 0) > 0 ? (
-                    <div className="flex flex-col gap-1" onKeyDown={focusNextOnEnter}>
-                      {Array.from({ length: e.pads as number }, (_, i) => (
-                        <InlineEditCell
-                          key={i}
-                          value={e.pad_serials?.[i] || null}
-                          placeholder={`Pad ${i + 1}`}
-                          className="w-48 font-mono"
-                          onSave={(v) => savePadSerial(e, i, v)}
-                        />
-                      ))}
-                    </div>
-                  ) : (
-                    <span className="text-inksoft px-2">—</span>
-                  )}
+                  <PadSerialsCell count={e.pads} values={e.pad_serials} onSave={(i, v) => savePadSerial(e, i, v)} />
                 </td>
                 <td className="p-3 text-center">
                   <input

@@ -1,9 +1,11 @@
 "use client";
 
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { MARKETPLACES, salesStatusLabel } from "@/lib/salesOrders";
+import InlineEditCell from "./InlineEditCell";
+import PadSerialsCell, { MAX_PADS } from "./PadSerialsCell";
 
 // Zakładka Zamówienia: sprzedaż z marketplace'ów. Podstrona "Zamówienia" to wspólna lista ze wszystkich
 // kanałów (tabela sales_orders; dziś tylko Back Market), "BM raw data" to podgląd wszystkiego, co zwróciło
@@ -139,7 +141,18 @@ export default function SalesOrdersHub({ session }: { session: Session }) {
 
 /* ---------------- wspólna lista zamówień ---------------- */
 
-type SalesRow = { marketplace: string; external_id: string; order_date: string | null; status: string; sku: string | null };
+type SalesRow = {
+  marketplace: string;
+  external_id: string;
+  order_date: string | null;
+  status: string;
+  sku: string | null;
+  serial_number: string | null; // od tąd dane wpisywane przez pracowników
+  pads: number | null;
+  pad_serials: string[] | null;
+};
+const SALES_COLUMNS = "marketplace, external_id, order_date, status, sku, serial_number, pads, pad_serials";
+const rowKey = (r: { marketplace: string; external_id: string }) => `${r.marketplace}:${r.external_id}`;
 
 // Kolor plakietki statusu Back Market: w toku (do zrobienia) bursztyn, wysłane zielone, reszta neutralnie.
 function statusStyle(marketplace: string, status: string) {
@@ -157,6 +170,11 @@ function OrdersList({ reloadKey }: { reloadKey: number }) {
   const [pageSize, setPageSize] = useState(20);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  // Zapisy idą jeden po drugim na najświeższym wierszu, żeby szybkie skanowanie kilku pól pod rząd
+  // nie nadpisywało sobie nawzajem tablicy numerów padów.
+  const rowsRef = useRef<SalesRow[]>([]);
+  rowsRef.current = rows;
+  const saveQueue = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
     load();
@@ -176,7 +194,7 @@ function OrdersList({ reloadKey }: { reloadKey: number }) {
     const from = (page - 1) * pageSize;
     const { data, error: err, count } = await supabase
       .from("sales_orders")
-      .select("marketplace, external_id, order_date, status, sku", { count: "exact" })
+      .select(SALES_COLUMNS, { count: "exact" })
       .order("order_date", { ascending: false, nullsFirst: false })
       .range(from, from + pageSize - 1);
     if (err) setError(`Nie udało się wczytać zamówień: ${err.message}`);
@@ -185,6 +203,52 @@ function OrdersList({ reloadKey }: { reloadKey: number }) {
       setTotal(count ?? null);
     }
     setLoading(false);
+  }
+
+  function enqueueUpdate(key: string, label: string, build: (cur: SalesRow) => Partial<SalesRow> | null) {
+    setError("");
+    saveQueue.current = saveQueue.current.then(async () => {
+      const cur = rowsRef.current.find((r) => rowKey(r) === key);
+      const patch = cur && build(cur);
+      if (!cur || !patch) return;
+      const { error: err } = await supabase
+        .from("sales_orders")
+        .update(patch)
+        .eq("marketplace", cur.marketplace)
+        .eq("external_id", cur.external_id);
+      if (err) {
+        setError(`Nie udało się zapisać (${label}): ${err.message}`);
+        return;
+      }
+      const next = rowsRef.current.map((r) => (rowKey(r) === key ? { ...r, ...patch } : r));
+      rowsRef.current = next;
+      setRows(next);
+    });
+  }
+
+  function saveSerial(row: SalesRow, value: string | null) {
+    enqueueUpdate(rowKey(row), "Numer seryjny", (cur) => (cur.serial_number === value ? null : { serial_number: value }));
+  }
+
+  // Pady to liczba całkowita 0..MAX_PADS (0 = zestaw bez padów).
+  function savePads(row: SalesRow, text: string | null) {
+    if (text !== null && (!/^\d{1,2}$/.test(text) || Number(text) > MAX_PADS)) {
+      setError(`Pady: podaj liczbę całkowitą od 0 do ${MAX_PADS}.`);
+      return;
+    }
+    const value = text === null ? null : Number(text);
+    enqueueUpdate(rowKey(row), "Pady", (cur) => (cur.pads === value ? null : { pads: value }));
+  }
+
+  // Element i tablicy pad_serials = numer seryjny pada i+1.
+  function savePadSerial(row: SalesRow, index: number, value: string | null) {
+    enqueueUpdate(rowKey(row), `Nr seryjny pada ${index + 1}`, (cur) => {
+      const arr = [...(cur.pad_serials ?? [])];
+      while (arr.length <= index) arr.push("");
+      if ((arr[index] || null) === value) return null;
+      arr[index] = value ?? "";
+      return { pad_serials: arr.every((x) => !x) ? null : arr };
+    });
   }
 
   return (
@@ -199,14 +263,17 @@ function OrdersList({ reloadKey }: { reloadKey: number }) {
               <th className="p-3">Data zamówienia</th>
               <th className="p-3">Status</th>
               <th className="p-3">SKU</th>
+              <th className="p-3">Numer seryjny</th>
+              <th className="p-3">Pady</th>
+              <th className="p-3">Nr seryjny padów</th>
             </tr>
           </thead>
           <tbody>
             {!loading && rows.length === 0 && (
-              <tr><td colSpan={4} className="p-6 text-center text-inksoft text-sm">Brak zamówień — kliknij Odśwież, żeby pobrać je z Back Market.</td></tr>
+              <tr><td colSpan={7} className="p-6 text-center text-inksoft text-sm">Brak zamówień — kliknij Odśwież, żeby pobrać je z Back Market.</td></tr>
             )}
             {rows.map((r) => (
-              <tr key={`${r.marketplace}:${r.external_id}`} className="border-b border-line last:border-b-0 hover:bg-paper">
+              <tr key={rowKey(r)} className="border-b border-line last:border-b-0 hover:bg-paper">
                 <td className="p-3 font-mono font-semibold whitespace-nowrap" title={MARKETPLACES.find((m) => m.key === r.marketplace)?.label}>
                   {r.external_id}
                 </td>
@@ -217,6 +284,15 @@ function OrdersList({ reloadKey }: { reloadKey: number }) {
                   </span>
                 </td>
                 <td className="p-3 font-mono">{r.sku || "—"}</td>
+                <td className="p-3">
+                  <InlineEditCell value={r.serial_number} placeholder="Dodaj numer" className="w-44 font-mono" onSave={(v) => saveSerial(r, v)} />
+                </td>
+                <td className="p-3">
+                  <InlineEditCell value={r.pads === null ? null : String(r.pads)} placeholder="np. 2" className="w-16 font-mono" onSave={(v) => savePads(r, v)} />
+                </td>
+                <td className="p-3">
+                  <PadSerialsCell count={r.pads} values={r.pad_serials} onSave={(i, v) => savePadSerial(r, i, v)} />
+                </td>
               </tr>
             ))}
           </tbody>
