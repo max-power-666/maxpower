@@ -598,7 +598,18 @@ function OrderCardDrawer({
 
         {order && (
           <>
-            <span className="inline-block text-xs font-semibold px-2 py-1 rounded-full bg-tealsoft text-teal mb-6">{order.status}</span>
+            <div className="flex items-center gap-3 mb-6">
+              <span className="inline-block text-xs font-semibold px-2 py-1 rounded-full bg-tealsoft text-teal">{order.status}</span>
+              {/* Panel sprzedawcy Back Market: jedna domena (.fr) dla zamówień ze wszystkich rynków */}
+              <a
+                href={`https://www.backmarket.fr/bo-seller/buyback/orders/${encodeURIComponent(order.order_public_id)}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs font-semibold text-teal hover:underline"
+              >
+                Otwórz w Back Market ↗
+              </a>
+            </div>
 
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-xs font-semibold text-inksoft">DANE WPROWADZONE PRZEZ PRACOWNIKA</h3>

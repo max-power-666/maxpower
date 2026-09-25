@@ -108,6 +108,8 @@ Macu jest wyłączony; bidder działa na produkcji, włącznik: `buyback_setting
   więc stare obsłużone wiersze bez danych można uzupełniać po jednym polu).
 - Numer zamówienia jest linkiem do **karty zamówienia** (panel boczny): dane z API + dane
   pracownika (numer seryjny, SKU, pady, uwagi — edytowalne) + numerowany log zmian.
+  Na górze karty link "Otwórz w Back Market" → `https://www.backmarket.fr/bo-seller/buyback/orders/{numer}`
+  (jedna domena .fr dla wszystkich rynków).
 
 **Serwis** (`ServiceView.tsx`, `service_log`). Rejestr napraw wg tabeli z regulaminu:
 Joy-Con para 15 pkt, kontroler PS4 25, Xbox One 35, PS5 12, czyszczenie konsoli 45.
