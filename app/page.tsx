@@ -32,7 +32,7 @@ const TABS: { key: ViewKey; label: string }[] = [
 // dopóki nie ustalimy docelowej roli dla osoby przetwarzającej zamówienia.
 const ROLE_ACCESS: Record<string, ViewKey[]> = {
   Admin: ["overview", "inventory", "team", "service", "tests", "tradein", "orders"],
-  Manager: ["overview", "inventory", "service", "tests", "tradein", "orders"], // wszystko poza Zespołem; usuwa tylko Admin
+  Manager: ["overview", "inventory", "team", "service", "tests", "tradein", "orders"], // wszystko; Zespół tylko do odczytu, usuwa tylko Admin
   Magazyn: ["overview", "inventory"],
   Serwis: ["overview", "service"],
   Testy: ["overview", "tests"],
@@ -382,6 +382,7 @@ export default function Home() {
             <TeamView
               members={members}
               currentUserId={session.user.id}
+              canEdit={role === "Admin"}
               onChangeRole={changeMemberRole}
               onChangeName={changeMemberName}
             />
@@ -524,11 +525,13 @@ function FakturowniaSummaryView({ summary }: { summary: FakturowniaSummary }) {
 function TeamView({
   members,
   currentUserId,
+  canEdit,
   onChangeRole,
   onChangeName,
 }: {
   members: Member[];
   currentUserId: string;
+  canEdit: boolean; // role i imiona zmienia tylko Admin (polityka w bazie); reszta widzi listę tylko do odczytu
   onChangeRole: (userId: string, role: string) => void;
   onChangeName: (userId: string, name: string) => void;
 }) {
@@ -565,6 +568,7 @@ function TeamView({
                     onBlur={(e) => saveName(m.user_id, e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
                     placeholder="Imię i nazwisko"
+                    readOnly={!canEdit}
                     className="w-full border border-line bg-white px-2 py-1.5 rounded text-sm font-semibold"
                   />
                 </td>
@@ -573,8 +577,14 @@ function TeamView({
                   <select
                     value={m.role}
                     onChange={(e) => onChangeRole(m.user_id, e.target.value)}
-                    disabled={m.user_id === currentUserId}
-                    title={m.user_id === currentUserId ? "Nie możesz zmienić własnej roli — poproś innego Admina." : undefined}
+                    disabled={!canEdit || m.user_id === currentUserId}
+                    title={
+                      !canEdit
+                        ? "Role zmienia tylko Admin."
+                        : m.user_id === currentUserId
+                          ? "Nie możesz zmienić własnej roli — poproś innego Admina."
+                          : undefined
+                    }
                     className="text-xs font-semibold px-2 py-1 rounded-full bg-tealsoft text-teal border-none disabled:opacity-60"
                   >
                     {!m.role && <option value="">— brak roli —</option>}

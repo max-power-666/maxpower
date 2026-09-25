@@ -44,14 +44,14 @@ Role: **Admin, Manager, Magazyn, Serwis, Testy, Bidder**. Rolę nadaje Admin w z
 imię i nazwisko — `members.name`). Nowa osoba po pierwszym logowaniu dostaje pusty wiersz
 w `members` i ekran "poproś administratora o rolę" (`NoRoleScreen`); sama roli nie wybiera.
 Przegląd jest wspólną stroną startową. Mapa dostępu: `ROLE_ACCESS` w `app/page.tsx`.
-Manager widzi wszystko poza Zespołem, ale niczego nie usuwa i nie zmienia ról (to tylko Admin, także w bazie).
+Manager widzi wszystkie zakładki (Zespół tylko do odczytu), ale niczego nie usuwa i nie zmienia ról ani imion (to tylko Admin, także w bazie).
 Rola jest zwykłym tekstem w `members.role` — dodanie roli nie wymaga SQL.
 
 | Zakładka | Klucz widoku | Kto widzi |
 |---|---|---|
 | Przegląd | `overview` | wszyscy |
 | Magazyn | `inventory` | Admin, Manager, Magazyn |
-| Zespół | `team` | Admin |
+| Zespół | `team` | Admin (edycja), Manager (tylko odczyt) |
 | Serwis | `service` | Admin, Manager, Serwis |
 | Testy | `tests` | Admin, Manager, Testy |
 | Bidder | `tradein` | Admin, Manager, Bidder |
