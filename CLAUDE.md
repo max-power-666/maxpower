@@ -40,20 +40,22 @@ numerach seryjnych, wielokanałowa synchronizacja stanów, naprawy, auto-wycena)
 
 ## Zakładki i role
 
-Role: **Admin, Magazyn, Serwis, Testy, Bidder**. Rolę nadaje Admin w zakładce Zespół (tam też
+Role: **Admin, Manager, Magazyn, Serwis, Testy, Bidder**. Rolę nadaje Admin w zakładce Zespół (tam też
 imię i nazwisko — `members.name`). Nowa osoba po pierwszym logowaniu dostaje pusty wiersz
 w `members` i ekran "poproś administratora o rolę" (`NoRoleScreen`); sama roli nie wybiera.
 Przegląd jest wspólną stroną startową. Mapa dostępu: `ROLE_ACCESS` w `app/page.tsx`.
+Manager widzi wszystko poza Zespołem, ale niczego nie usuwa i nie zmienia ról (to tylko Admin, także w bazie).
+Rola jest zwykłym tekstem w `members.role` — dodanie roli nie wymaga SQL.
 
 | Zakładka | Klucz widoku | Kto widzi |
 |---|---|---|
 | Przegląd | `overview` | wszyscy |
-| Magazyn | `inventory` | Admin, Magazyn |
+| Magazyn | `inventory` | Admin, Manager, Magazyn |
 | Zespół | `team` | Admin |
-| Serwis | `service` | Admin, Serwis |
-| Testy | `tests` | Admin, Testy |
-| Bidder | `tradein` | Admin, Bidder |
-| Trade-in | `orders` | tylko Admin (nie ma jeszcze roli "Trade-in") |
+| Serwis | `service` | Admin, Manager, Serwis |
+| Testy | `tests` | Admin, Manager, Testy |
+| Bidder | `tradein` | Admin, Manager, Bidder |
+| Trade-in | `orders` | Admin, Manager (nie ma jeszcze roli "Trade-in") |
 
 Uwaga: nazwa zakładki "Bidder" to klucz `tradein`, a zakładka "Trade-in" to klucz `orders` —
 historyczne, nie mylić. Aktywna zakładka jest zapamiętywana w `localStorage`.

@@ -9,7 +9,7 @@ import ServiceView from "./_components/ServiceView";
 import TestsView from "./_components/TestsView";
 import InventoryRawView from "./_components/InventoryRawView";
 
-const ROLES = ["Admin", "Magazyn", "Serwis", "Testy", "Bidder"];
+const ROLES = ["Admin", "Manager", "Magazyn", "Serwis", "Testy", "Bidder"];
 
 type ViewKey = "overview" | "inventory" | "team" | "service" | "tests" | "tradein" | "orders";
 
@@ -32,6 +32,7 @@ const TABS: { key: ViewKey; label: string }[] = [
 // dopóki nie ustalimy docelowej roli dla osoby przetwarzającej zamówienia.
 const ROLE_ACCESS: Record<string, ViewKey[]> = {
   Admin: ["overview", "inventory", "team", "service", "tests", "tradein", "orders"],
+  Manager: ["overview", "inventory", "service", "tests", "tradein", "orders"], // wszystko poza Zespołem; usuwa tylko Admin
   Magazyn: ["overview", "inventory"],
   Serwis: ["overview", "service"],
   Testy: ["overview", "tests"],
