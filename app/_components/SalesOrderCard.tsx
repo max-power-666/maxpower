@@ -117,6 +117,51 @@ function backMarketOrderUrl(orderId: string) {
   return `https://www.backmarket.fr/bo-seller/orders/all?page=1&pageSize=10&endDate=${endDate}&orderId=${encodeURIComponent(orderId)}`;
 }
 
+// Zamówienie refurbed (pola z API, patrz swagger Order/OrderItem) — czytamy z kolumny raw tabeli refurbed_orders.
+type RefurbedAddress = {
+  first_name?: string;
+  family_name?: string;
+  company_name?: string;
+  country_code?: string;
+  post_code?: string;
+  town?: string;
+  street_name?: string;
+  house_no?: string;
+  supplement?: string;
+  phone_number?: string;
+};
+type RefurbedItem = {
+  id?: string;
+  name?: string;
+  sku?: string;
+  state?: string;
+  total_charged?: string;
+  currency_code?: string;
+  parcel_tracking_url?: string;
+  item_identifier?: string;
+  item_identifiers?: { identifier_type?: string; value?: string }[];
+};
+type RefurbedOrder = {
+  id: string;
+  state: string;
+  released_at: string | null;
+  customer_email: string | null;
+  currency_code: string | null;
+  total_charged: number | null;
+  payment_method: string | null;
+  raw: {
+    shipping_address?: RefurbedAddress;
+    invoice_address?: RefurbedAddress;
+    items?: RefurbedItem[];
+    total_refunded?: string;
+    total_vat_charged?: string;
+    settlement_currency_code?: string;
+    settlement_total_commission?: string;
+  };
+};
+const refurbedAddress = (a?: RefurbedAddress) =>
+  a ? [[a.street_name, a.house_no].filter(Boolean).join(" "), a.supplement, [a.post_code, a.town].filter(Boolean).join(" "), a.country_code].filter(Boolean).join(", ") : null;
+
 function fmtDateTime(iso: string | null) {
   if (!iso) return null;
   return new Date(iso).toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -154,6 +199,7 @@ export default function SalesOrderCard({
   const [worker, setWorker] = useState<WorkerData | null>(null);
   const [items, setItems] = useState<SalesItem[]>([]);
   const [bm, setBm] = useState<BmOrder | null>(null);
+  const [rf, setRf] = useState<RefurbedOrder | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
 
@@ -167,7 +213,7 @@ export default function SalesOrderCard({
   }, [marketplace, externalId]);
 
   async function load() {
-    const [{ data: w, error: wErr }, itemsRes, bmRes] = await Promise.all([
+    const [{ data: w, error: wErr }, itemsRes, bmRes, rfRes] = await Promise.all([
       supabase.from("sales_orders").select("*").eq("marketplace", marketplace).eq("external_id", externalId).maybeSingle(),
       supabase
         .from("sales_order_items")
@@ -178,11 +224,15 @@ export default function SalesOrderCard({
       marketplace === "backmarket"
         ? supabase.from("bm_orders").select("*").eq("order_id", Number(externalId)).maybeSingle()
         : Promise.resolve({ data: null, error: null }),
+      marketplace === "refurbed"
+        ? supabase.from("refurbed_orders").select("*").eq("id", externalId).maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
     ]);
-    if (wErr || itemsRes.error || bmRes.error) setError((wErr || itemsRes.error || bmRes.error)!.message);
+    if (wErr || itemsRes.error || bmRes.error || rfRes.error) setError((wErr || itemsRes.error || bmRes.error || rfRes.error)!.message);
     setWorker((w as WorkerData) ?? null);
     setItems((itemsRes.data as SalesItem[]) || []);
     setBm((bmRes.data as BmOrder) ?? null);
+    setRf((rfRes.data as RefurbedOrder) ?? null);
     setLoaded(true);
   }
 
@@ -358,15 +408,75 @@ export default function SalesOrderCard({
               <Row label="Nasz status" value={OUR_STATUSES.find((o) => o.key === worker.our_status)?.label ?? worker.our_status} />
               <Row label="Data zamówienia" value={fmtDateTime(worker.order_date)} />
               <Row label="SKU" value={worker.sku} mono />
-              <Row label="Kraj" value={bm?.country_code} />
-              <Row label="Płatność" value={bm?.payment_method} />
-              <Row label="Suma (z podatkami, bez wysyłki)" value={fmtMoney(bm?.price, bm?.currency)} />
-              <Row label="Wysyłka" value={fmtMoney(bm?.shipping_price, bm?.currency)} />
-              <Row label="Podatki" value={fmtMoney(bm?.sales_taxes, bm?.currency)} />
+              {marketplace === "backmarket" && (
+                <>
+                  <Row label="Kraj" value={bm?.country_code} />
+                  <Row label="Płatność" value={bm?.payment_method} />
+                  <Row label="Suma (z podatkami, bez wysyłki)" value={fmtMoney(bm?.price, bm?.currency)} />
+                  <Row label="Wysyłka" value={fmtMoney(bm?.shipping_price, bm?.currency)} />
+                  <Row label="Podatki" value={fmtMoney(bm?.sales_taxes, bm?.currency)} />
+                </>
+              )}
+              {marketplace === "refurbed" && (
+                <>
+                  <Row label="Kraj" value={rf?.raw.shipping_address?.country_code} />
+                  <Row label="Płatność" value={rf?.payment_method} />
+                  <Row label="Suma (zapłacona przez klienta)" value={fmtMoney(rf?.total_charged, rf?.currency_code)} />
+                  <Row label="Zwroty" value={fmtMoney(rf?.raw.total_refunded, rf?.currency_code)} />
+                  <Row label="Podatek VAT" value={fmtMoney(rf?.raw.total_vat_charged, rf?.currency_code)} />
+                  <Row label="Prowizja" value={fmtMoney(rf?.raw.settlement_total_commission, rf?.raw.settlement_currency_code)} />
+                  <Row label="E-mail klienta" value={rf?.customer_email} />
+                </>
+              )}
             </div>
 
-            {marketplace === "backmarket" && !bm && (
+            {((marketplace === "backmarket" && !bm) || (marketplace === "refurbed" && !rf)) && (
               <p className="text-inksoft text-xs mb-6">Brak surowych danych z API dla tego zamówienia.</p>
+            )}
+
+            {rf && (
+              <>
+                {!!rf.raw.items?.length && (
+                  <>
+                    <h3 className="text-xs font-semibold text-inksoft mb-2">POZYCJE</h3>
+                    {rf.raw.items.map((l, i) => (
+                      <div key={l.id ?? i} className="border border-line bg-white mb-2">
+                        <Row label="Produkt" value={l.name} />
+                        <Row label="SKU" value={l.sku} mono />
+                        <Row label="Stan pozycji" value={l.state} />
+                        <Row label="Cena" value={fmtMoney(l.total_charged, l.currency_code)} />
+                        <Row
+                          label="Identyfikatory (refurbed)"
+                          value={(l.item_identifiers || []).map((x) => `${x.identifier_type ?? ""} ${x.value ?? ""}`.trim()).join(", ") || l.item_identifier}
+                          mono
+                        />
+                        {l.parcel_tracking_url && (
+                          <div className="flex justify-between px-3 py-2 text-sm border-t border-line">
+                            <span className="text-inksoft">Śledzenie paczki</span>
+                            <a href={l.parcel_tracking_url} target="_blank" rel="noreferrer" className="text-teal hover:underline">otwórz</a>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    <div className="mb-4" />
+                  </>
+                )}
+
+                <h3 className="text-xs font-semibold text-inksoft mb-2">DATY</h3>
+                <div className="border border-line bg-white mb-6">
+                  <Row label="Zamówienie trafiło do sprzedawcy" value={fmtDateTime(rf.released_at)} />
+                </div>
+
+                <h3 className="text-xs font-semibold text-inksoft mb-2">KLIENT (ADRES DOSTAWY)</h3>
+                <div className="border border-line bg-white mb-6">
+                  <Row
+                    label="Imię i nazwisko"
+                    value={[rf.raw.shipping_address?.first_name, rf.raw.shipping_address?.family_name].filter(Boolean).join(" ") || rf.raw.shipping_address?.company_name}
+                  />
+                  <Row label="Telefon" value={rf.raw.shipping_address?.phone_number} />
+                  <Row label="Adres" value={refurbedAddress(rf.raw.shipping_address)} />
+                </div>
+              </>
             )}
 
             {bm && (

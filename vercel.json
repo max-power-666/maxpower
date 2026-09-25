@@ -15,6 +15,10 @@
     {
       "path": "/api/orders/bm-sync",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/orders/refurbed-sync",
+      "schedule": "*/15 * * * *"
     }
   ]
 }

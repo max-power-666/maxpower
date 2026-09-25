@@ -5,7 +5,8 @@
 -- Dwie warstwy:
 --  * bm_orders    — surowe dane zamówień Back Market (GET /ws/orders), podgląd w "BM raw data".
 --                   To zamówienia SPRZEDAŻY (klient kupuje u nas), nie skupu — skup to buyback_orders.
---  * sales_orders — wspólna lista zamówień ze wszystkich marketplace'ów (dziś tylko Back Market;
+--  * refurbed_orders — surowe zamówienia refurbed (OrderService/ListOrders); pełna odpowiedź w kolumnie raw.
+--  * sales_orders — wspólna lista zamówień ze wszystkich marketplace'ów (dziś Back Market i refurbed;
 --                   Allegro/eBay dojdą jako kolejne wartości `marketplace`). Zapisuje ją ten sam
 --                   serwer, który wypełnia surową tabelę danego kanału.
 -- Dane z API zapisuje wyłącznie serwer (service_role, poza RLS); zespół czyta wszystko, a edytuje tylko
@@ -41,6 +42,20 @@ create table if not exists bm_orders (
 );
 create index if not exists bm_orders_creation_idx on bm_orders (date_creation desc);
 create index if not exists bm_orders_modification_idx on bm_orders (date_modification desc);
+
+-- Surowe zamówienia refurbed (OrderService/ListOrders). Pozycje (items), adresy, prowizje itd. są w `raw`.
+create table if not exists refurbed_orders (
+  id text primary key,                       -- Order.id (int64 jako tekst)
+  state text not null,                       -- NEW | ACCEPTED | SHIPPED | FULFILLED | PARTIALLY_FULFILLED | UNFULFILLED | REJECTED | CANCELLED | RETURNED
+  released_at timestamptz,                   -- kiedy zamówienie trafiło do sprzedawcy
+  customer_email text,
+  currency_code text,
+  total_charged numeric,
+  payment_method text,
+  raw jsonb not null,
+  synced_at timestamptz not null default now()
+);
+create index if not exists refurbed_orders_released_idx on refurbed_orders (released_at desc);
 
 create table if not exists sales_orders (
   marketplace text not null,                 -- 'backmarket' (kolejne kanały później)
@@ -132,17 +147,23 @@ create table if not exists sales_orders_sync_meta (
   last_synced_at timestamptz,
   full_scan_done boolean not null default false,
   scan_page int not null default 1,
-  scan_started_at timestamptz
+  scan_started_at timestamptz,
+  scan_cursor text                           -- refurbed: id ostatniego pobranego zamówienia (paginacja kursorem zamiast numeru strony)
 );
-insert into sales_orders_sync_meta (marketplace) values ('backmarket') on conflict (marketplace) do nothing;
+alter table sales_orders_sync_meta add column if not exists scan_cursor text;
+insert into sales_orders_sync_meta (marketplace) values ('backmarket'), ('refurbed') on conflict (marketplace) do nothing;
 
 alter table bm_orders enable row level security;
+alter table refurbed_orders enable row level security;
 alter table sales_orders enable row level security;
 alter table sales_order_items enable row level security;
 alter table sales_orders_sync_meta enable row level security;
 
 drop policy if exists "authenticated read bm_orders" on bm_orders;
 create policy "authenticated read bm_orders" on bm_orders
+  for select using (auth.role() = 'authenticated');
+drop policy if exists "authenticated read refurbed_orders" on refurbed_orders;
+create policy "authenticated read refurbed_orders" on refurbed_orders
   for select using (auth.role() = 'authenticated');
 drop policy if exists "authenticated read sales_orders" on sales_orders;
 create policy "authenticated read sales_orders" on sales_orders
@@ -233,4 +254,5 @@ begin
   begin alter publication supabase_realtime add table sales_orders; exception when duplicate_object then null; end;
   begin alter publication supabase_realtime add table sales_order_items; exception when duplicate_object then null; end;
   begin alter publication supabase_realtime add table bm_orders; exception when duplicate_object then null; end;
+  begin alter publication supabase_realtime add table refurbed_orders; exception when duplicate_object then null; end;
 end $$;

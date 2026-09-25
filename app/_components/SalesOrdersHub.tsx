@@ -88,33 +88,46 @@ export default function SalesOrdersHub({ session, members }: { session: Session;
   }, []);
 
   async function loadMeta() {
-    const { data } = await supabase.from("sales_orders_sync_meta").select("last_synced_at").eq("marketplace", "backmarket").maybeSingle();
-    setLastSynced((data?.last_synced_at as string) ?? null);
+    // Pokazujemy najświeższą synchronizację spośród wszystkich kanałów.
+    const { data } = await supabase.from("sales_orders_sync_meta").select("last_synced_at");
+    const times = (data || []).map((r) => r.last_synced_at as string | null).filter((t): t is string => !!t);
+    setLastSynced(times.length > 0 ? times.reduce((a, b) => (Date.parse(a) > Date.parse(b) ? a : b)) : null);
   }
 
+  // "Odśwież" synchronizuje wszystkie kanały po kolei; błąd jednego nie blokuje pozostałych.
   async function syncNow() {
     setSyncing(true);
     setError("");
     setNote("");
-    try {
-      const res = await fetch("/api/orders/bm-sync", { headers: { Authorization: `Bearer ${session.access_token}` } });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Błąd synchronizacji.");
-      // Pełny skan idzie w porcjach — niedokończony nie jest błędem, ale trzeba to powiedzieć.
-      if (data.finished === false) {
-        setNote(
-          `Pobrano kolejną porcję (${data.processed} zamówień, ${data.mode === "full" ? "pierwsze pobieranie" : "synchronizacja"} w toku` +
-            (data.apiCount ? `, Back Market zgłasza ${data.apiCount} łącznie` : "") +
-            `). Reszta dociągnie się automatycznie co 15 minut — możesz też kliknąć Odśwież ponownie.`
-        );
+    const channels = [
+      { label: "Back Market", url: "/api/orders/bm-sync" },
+      { label: "Refurbed", url: "/api/orders/refurbed-sync" },
+    ];
+    const errors: string[] = [];
+    const notes: string[] = [];
+    for (const ch of channels) {
+      try {
+        const res = await fetch(ch.url, { headers: { Authorization: `Bearer ${session.access_token}` } });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.error || "Błąd synchronizacji.");
+        if (data.skipped) notes.push(`${ch.label}: ${data.skipped}`);
+        // Pełny skan idzie w porcjach — niedokończony nie jest błędem, ale trzeba to powiedzieć.
+        else if (data.finished === false) {
+          notes.push(
+            `${ch.label}: pobrano kolejną porcję (${data.processed} zamówień, ${data.mode === "full" ? "pierwsze pobieranie" : "synchronizacja"} w toku` +
+              (data.apiCount ? `, łącznie ${data.apiCount}` : "") +
+              `). Reszta dociągnie się automatycznie co 15 minut — możesz też kliknąć Odśwież ponownie.`
+          );
+        }
+      } catch (e: any) {
+        errors.push(`${ch.label}: ${e.message || "Błąd synchronizacji."}`);
       }
-      setReloadKey((k) => k + 1);
-      await loadMeta();
-    } catch (e: any) {
-      setError(e.message || "Błąd synchronizacji.");
-    } finally {
-      setSyncing(false);
     }
+    setError(errors.join(" · "));
+    setNote(notes.join(" "));
+    setReloadKey((k) => k + 1);
+    await loadMeta();
+    setSyncing(false);
   }
 
   return (
@@ -173,6 +186,15 @@ const SALES_COLUMNS =
   "marketplace, external_id, order_date, status, sku, tracking_number, our_status, sales_order_items(item_key, position, sku, serial_number, pads, pad_serials)";
 const rowKey = (r: { marketplace: string; external_id: string }) => `${r.marketplace}:${r.external_id}`;
 
+// Back Market daje numer przesyłki, refurbed tylko link śledzenia — link pokazujemy jako klikalne "śledzenie".
+function TrackingCell({ value }: { value: string | null }) {
+  if (!value) return <>—</>;
+  if (/^https?:\/\//i.test(value)) {
+    return <a href={value} target="_blank" rel="noreferrer" className="text-teal hover:underline font-sans">śledzenie ↗</a>;
+  }
+  return <>{value}</>;
+}
+
 const OUR_STATUS_STYLE: Record<OurStatus, string> = {
   nowe: "bg-rustsoft text-rust",
   w_realizacji: "bg-ambersoft text-amber",
@@ -184,6 +206,10 @@ function statusStyle(marketplace: string, status: string) {
   if (marketplace === "backmarket") {
     if (status === "9") return "bg-tealsoft text-teal";
     if (status === "1" || status === "3") return "bg-ambersoft text-amber";
+  }
+  if (marketplace === "refurbed") {
+    if (status === "SHIPPED" || status === "FULFILLED") return "bg-tealsoft text-teal";
+    if (status === "NEW" || status === "ACCEPTED") return "bg-ambersoft text-amber";
   }
   return "bg-paper text-inksoft border border-line";
 }
@@ -420,7 +446,9 @@ function OrdersList({
                           {salesStatusLabel(r.marketplace, r.status)}
                         </span>
                       </td>
-                      <td rowSpan={items.length} className="p-3 font-mono whitespace-nowrap">{r.tracking_number || "—"}</td>
+                      <td rowSpan={items.length} className="p-3 font-mono whitespace-nowrap">
+                        <TrackingCell value={r.tracking_number} />
+                      </td>
                       <td rowSpan={items.length} className="p-3">
                         <select
                           value={r.our_status}

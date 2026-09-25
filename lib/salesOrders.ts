@@ -2,7 +2,10 @@
 // dopisujemy tu jako nowe wartości `marketplace` + własny mapper, a lista "Zamówienia" (tabela
 // sales_orders) pozostaje wspólna. Osobne od zamówień SKUPU (buyback_orders, lib/buybackOrders.ts).
 
-export const MARKETPLACES = [{ key: "backmarket", label: "Back Market" }] as const;
+export const MARKETPLACES = [
+  { key: "backmarket", label: "Back Market" },
+  { key: "refurbed", label: "Refurbed" },
+] as const;
 
 // Nasz wewnętrzny status realizacji zamówienia (niezależny od statusu kanału) — kolumna sales_orders.our_status.
 export const OUR_STATUSES = [
@@ -22,8 +25,22 @@ export const BM_ORDER_STATES: Record<string, string> = {
   "9": "Wysłane",
 };
 
+// Stany zamówienia refurbed (OrderState z API) — liczone z stanów pozycji.
+export const REFURBED_ORDER_STATES: Record<string, string> = {
+  NEW: "Nowe",
+  ACCEPTED: "Zaakceptowane",
+  SHIPPED: "Wysłane",
+  FULFILLED: "Zrealizowane",
+  PARTIALLY_FULFILLED: "Częściowo zrealizowane",
+  UNFULFILLED: "Niezrealizowane",
+  REJECTED: "Odrzucone",
+  CANCELLED: "Anulowane",
+  RETURNED: "Zwrócone",
+};
+
 export function salesStatusLabel(marketplace: string, status: string): string {
   if (marketplace === "backmarket") return BM_ORDER_STATES[status] ?? `Stan ${status}`;
+  if (marketplace === "refurbed") return REFURBED_ORDER_STATES[status] ?? status;
   return status;
 }
 
@@ -102,4 +119,52 @@ export function mapBmItems(o: any) {
     }
   });
   return items;
+}
+
+/* ---------------- refurbed ---------------- */
+
+// Zamówienie refurbed (Order z API) -> wiersz surowej tabeli refurbed_orders. Reszta pól (adresy, pozycje,
+// prowizje...) zostaje w `raw`.
+export function mapRefurbedOrder(o: any) {
+  return {
+    id: String(o.id),
+    state: o.state ?? "UNSPECIFIED",
+    released_at: o.released_at ?? null,
+    customer_email: o.customer_email ?? null,
+    currency_code: o.currency_code ?? null,
+    total_charged: num(o.total_charged),
+    payment_method: o.payment_method ?? null,
+    raw: o,
+    synced_at: new Date().toISOString(),
+  };
+}
+
+// Numer przesyłki: refurbed nie ma numeru, tylko link śledzenia paczki na pozycji — bierzemy pierwszy niepusty.
+const refurbedTracking = (o: any): string | null => {
+  for (const it of (o.items as any[]) || []) if (typeof it?.parcel_tracking_url === "string" && it.parcel_tracking_url.trim()) return it.parcel_tracking_url.trim();
+  return null;
+};
+
+export function mapRefurbedToSales(o: any) {
+  const skus = Array.from(new Set(((o.items as any[]) || []).map((i) => (typeof i?.sku === "string" ? i.sku.trim() : "")).filter(Boolean)));
+  return {
+    marketplace: "refurbed",
+    external_id: String(o.id),
+    order_date: o.released_at ?? null,
+    status: String(o.state ?? "UNSPECIFIED"),
+    sku: skus.length > 0 ? skus.join(", ") : null,
+    tracking_number: refurbedTracking(o),
+    synced_at: new Date().toISOString(),
+  };
+}
+
+// W refurbed każda sztuka to osobna pozycja (order_item) z własnym id — to jest klucz pozycji.
+export function mapRefurbedItems(o: any) {
+  return ((o.items as any[]) || []).map((it, i) => ({
+    marketplace: "refurbed",
+    external_id: String(o.id),
+    item_key: String(it?.id ?? i + 1),
+    position: i + 1,
+    sku: typeof it?.sku === "string" && it.sku.trim() ? it.sku.trim() : null,
+  }));
 }
