@@ -71,3 +71,26 @@ export function mapBmToSales(o: any) {
     synced_at: new Date().toISOString(),
   };
 }
+
+// Pozycje zamówienia -> wiersze sales_order_items. Jedna sztuka = jeden wiersz (pozycja z ilością > 1 jest
+// rozbijana), klucz to id pozycji z API ("id", dla kolejnych sztuk "id-2", "id-3"). Ta sama zasada kluczy
+// i kolejności jest w jednorazowym uzupełnieniu w supabase/sales-orders.sql — zmieniając jedno, zmień drugie.
+export function mapBmItems(o: any) {
+  const items: { marketplace: string; external_id: string; item_key: string; position: number; sku: string | null }[] = [];
+  const lines: any[] = Array.isArray(o.orderlines) ? o.orderlines : [];
+  lines.forEach((l, i) => {
+    const qty = Math.max(Number.isFinite(Number(l?.quantity)) ? Math.trunc(Number(l.quantity)) : 1, 1);
+    const base = String(l?.id ?? i + 1);
+    const sku = typeof l?.listing === "string" && l.listing.trim() ? l.listing.trim() : null;
+    for (let k = 1; k <= qty; k++) {
+      items.push({
+        marketplace: "backmarket",
+        external_id: String(o.order_id),
+        item_key: k > 1 ? `${base}-${k}` : base,
+        position: items.length + 1,
+        sku,
+      });
+    }
+  });
+  return items;
+}

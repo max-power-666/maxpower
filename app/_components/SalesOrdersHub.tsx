@@ -7,7 +7,7 @@ import { MARKETPLACES, salesStatusLabel } from "@/lib/salesOrders";
 import { escapeLike } from "@/lib/search";
 import { type MemberLite } from "@/lib/displayName";
 import InlineEditCell from "./InlineEditCell";
-import SalesOrderCard, { type FieldChange, type SalesHistoryEntry } from "./SalesOrderCard";
+import SalesOrderCard, { itemFieldLabel, updateSalesItem, type SalesHistoryEntry, type SalesItem } from "./SalesOrderCard";
 import PadSerialsCell, { MAX_PADS } from "./PadSerialsCell";
 
 // Zakładka Zamówienia: sprzedaż z marketplace'ów. Podstrona "Zamówienia" to wspólna lista ze wszystkich
@@ -157,18 +157,18 @@ export default function SalesOrdersHub({ session, members }: { session: Session;
 
 /* ---------------- wspólna lista zamówień ---------------- */
 
+// Zamówienie może mieć kilka pozycji (sztuk). Każda pozycja ma własny wiersz z własnym SKU, numerem seryjnym,
+// padami i numerami padów; numer, data i status zamówienia są wspólne (rowSpan).
 type SalesRow = {
   marketplace: string;
   external_id: string;
   order_date: string | null;
   status: string;
   sku: string | null;
-  serial_number: string | null; // od tąd dane wpisywane przez pracowników
-  pads: number | null;
-  pad_serials: string[] | null;
-  history: SalesHistoryEntry[];
+  sales_order_items: SalesItem[];
 };
-const SALES_COLUMNS = "marketplace, external_id, order_date, status, sku, serial_number, pads, pad_serials, history";
+const SALES_COLUMNS =
+  "marketplace, external_id, order_date, status, sku, sales_order_items(item_key, position, sku, serial_number, pads, pad_serials)";
 const rowKey = (r: { marketplace: string; external_id: string }) => `${r.marketplace}:${r.external_id}`;
 
 // Kolor plakietki statusu Back Market: w toku (do zrobienia) bursztyn, wysłane zielone, reszta neutralnie.
@@ -216,6 +216,7 @@ function OrdersList({
     const channel = supabase
       .channel("sales-orders-changes")
       .on("postgres_changes", { event: "*", schema: "public", table: "sales_orders" }, () => load())
+      .on("postgres_changes", { event: "*", schema: "public", table: "sales_order_items" }, () => load())
       .subscribe();
     return () => {
       supabase.removeChannel(channel);
@@ -231,69 +232,95 @@ function OrdersList({
     if (search) q = q.ilike("external_id", `%${escapeLike(search)}%`);
     const { data, error: err, count } = await q
       .order("order_date", { ascending: false, nullsFirst: false })
+      .order("position", { referencedTable: "sales_order_items" })
       .range(from, from + pageSize - 1);
     if (err) setError(`Nie udało się wczytać zamówień: ${err.message}`);
     else {
-      setRows((data as SalesRow[]) || []);
+      setRows((data as unknown as SalesRow[]) || []);
       setTotal(count ?? null);
     }
     setLoading(false);
   }
 
-  // build zwraca zmianę pola (patch) i jej opis do logu; zapis dopisuje wpis do history tak samo jak edycja na karcie.
-  function enqueueUpdate(key: string, label: string, build: (cur: SalesRow) => { patch: Partial<SalesRow>; changes: FieldChange[] } | null) {
+  // build dostaje aktualną pozycję i zwraca jej nowy stan oraz opis zmiany do logu (albo null, gdy nic się nie zmienia).
+  function enqueueItemUpdate(
+    orderKey: string,
+    itemKey: string,
+    field: string,
+    build: (it: SalesItem) => { next: Pick<SalesItem, "serial_number" | "pads" | "pad_serials">; from: string | null; to: string | null } | null
+  ) {
     setError("");
     saveQueue.current = saveQueue.current.then(async () => {
-      const cur = rowsRef.current.find((r) => rowKey(r) === key);
-      const built = cur && build(cur);
-      if (!cur || !built) return;
-      const entry: SalesHistoryEntry = { action: "edited", by_email: session.user.email ?? null, at: new Date().toISOString(), changes: built.changes };
-      const history = [...(cur.history || []), entry];
-      const { error: err } = await supabase
-        .from("sales_orders")
-        .update({ ...built.patch, history })
-        .eq("marketplace", cur.marketplace)
-        .eq("external_id", cur.external_id);
+      const order = rowsRef.current.find((r) => rowKey(r) === orderKey);
+      const item = order?.sales_order_items.find((i) => i.item_key === itemKey);
+      const built = item && build(item);
+      if (!order || !item || !built) return;
+      const entry: SalesHistoryEntry = {
+        action: "edited",
+        by_email: session.user.email ?? null,
+        at: new Date().toISOString(),
+        changes: [{ field: itemFieldLabel(field, item, order.sales_order_items.length > 1), from: built.from, to: built.to }],
+      };
+      const { error: err } = await updateSalesItem({
+        marketplace: order.marketplace,
+        externalId: order.external_id,
+        itemKey,
+        serial: built.next.serial_number,
+        pads: built.next.pads,
+        padSerials: built.next.pad_serials,
+        entry,
+      });
       if (err) {
-        setError(`Nie udało się zapisać (${label}): ${err.message}`);
+        setError(`Nie udało się zapisać (${field}): ${err.message}`);
         return;
       }
-      const next = rowsRef.current.map((r) => (rowKey(r) === key ? { ...r, ...built.patch, history } : r));
+      const next = rowsRef.current.map((r) =>
+        rowKey(r) !== orderKey
+          ? r
+          : { ...r, sales_order_items: r.sales_order_items.map((i) => (i.item_key === itemKey ? { ...i, ...built.next } : i)) }
+      );
       rowsRef.current = next;
       setRows(next);
     });
   }
 
-  function saveSerial(row: SalesRow, value: string | null) {
-    enqueueUpdate(rowKey(row), "Numer seryjny", (cur) =>
-      cur.serial_number === value ? null : { patch: { serial_number: value }, changes: [{ field: "Numer seryjny", from: cur.serial_number, to: value }] }
+  function saveSerial(order: SalesRow, item: SalesItem, value: string | null) {
+    enqueueItemUpdate(rowKey(order), item.item_key, "Numer seryjny", (cur) =>
+      cur.serial_number === value ? null : { next: { serial_number: value, pads: cur.pads, pad_serials: cur.pad_serials }, from: cur.serial_number, to: value }
     );
   }
 
   // Pady to liczba całkowita 0..MAX_PADS (0 = zestaw bez padów).
-  function savePads(row: SalesRow, text: string | null) {
+  function savePads(order: SalesRow, item: SalesItem, text: string | null) {
     if (text !== null && (!/^\d{1,2}$/.test(text) || Number(text) > MAX_PADS)) {
       setError(`Pady: podaj liczbę całkowitą od 0 do ${MAX_PADS}.`);
       return;
     }
     const value = text === null ? null : Number(text);
-    enqueueUpdate(rowKey(row), "Pady", (cur) =>
+    enqueueItemUpdate(rowKey(order), item.item_key, "Pady", (cur) =>
       cur.pads === value
         ? null
-        : { patch: { pads: value }, changes: [{ field: "Pady", from: cur.pads === null ? null : String(cur.pads), to: value === null ? null : String(value) }] }
+        : {
+            next: { serial_number: cur.serial_number, pads: value, pad_serials: cur.pad_serials },
+            from: cur.pads === null ? null : String(cur.pads),
+            to: value === null ? null : String(value),
+          }
     );
   }
 
   // Element i tablicy pad_serials = numer seryjny pada i+1.
-  function savePadSerial(row: SalesRow, index: number, value: string | null) {
-    const field = `Nr seryjny pada ${index + 1}`;
-    enqueueUpdate(rowKey(row), field, (cur) => {
+  function savePadSerial(order: SalesRow, item: SalesItem, index: number, value: string | null) {
+    enqueueItemUpdate(rowKey(order), item.item_key, `Nr seryjny pada ${index + 1}`, (cur) => {
       const arr = [...(cur.pad_serials ?? [])];
       while (arr.length <= index) arr.push("");
       const before = arr[index] || null;
       if (before === value) return null;
       arr[index] = value ?? "";
-      return { patch: { pad_serials: arr.every((x) => !x) ? null : arr }, changes: [{ field, from: before, to: value }] };
+      return {
+        next: { serial_number: cur.serial_number, pads: cur.pads, pad_serials: arr.every((x) => !x) ? null : arr },
+        from: before,
+        to: value,
+      };
     });
   }
 
@@ -324,35 +351,52 @@ function OrdersList({
             {!loading && rows.length === 0 && (
               <tr><td colSpan={7} className="p-6 text-center text-inksoft text-sm">{search ? "Nic nie znaleziono dla tego numeru." : "Brak zamówień — kliknij Odśwież, żeby pobrać je z Back Market."}</td></tr>
             )}
-            {rows.map((r) => (
-              <tr key={rowKey(r)} className="border-b border-line last:border-b-0 hover:bg-paper">
-                <td className="p-3 whitespace-nowrap">
-                  <button
-                    onClick={() => onOpen(r.marketplace, r.external_id)}
-                    title={MARKETPLACES.find((m) => m.key === r.marketplace)?.label}
-                    className="font-mono font-semibold text-teal hover:underline"
-                  >
-                    {r.external_id}
-                  </button>
-                </td>
-                <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDateTime(r.order_date)}</td>
-                <td className="p-3">
-                  <span className={`text-xs font-semibold px-2 py-1 rounded-full ${statusStyle(r.marketplace, r.status)}`}>
-                    {salesStatusLabel(r.marketplace, r.status)}
-                  </span>
-                </td>
-                <td className="p-3 font-mono">{r.sku || "—"}</td>
-                <td className="p-3">
-                  <InlineEditCell value={r.serial_number} placeholder="Dodaj numer" className="w-44 font-mono" onSave={(v) => saveSerial(r, v)} />
-                </td>
-                <td className="p-3">
-                  <InlineEditCell value={r.pads === null ? null : String(r.pads)} placeholder="np. 2" className="w-16 font-mono" onSave={(v) => savePads(r, v)} />
-                </td>
-                <td className="p-3">
-                  <PadSerialsCell count={r.pads} values={r.pad_serials} onSave={(i, v) => savePadSerial(r, i, v)} />
-                </td>
-              </tr>
-            ))}
+            {rows.map((r) => {
+              // Zamówienie bez pozycji (jeszcze nie zsynchronizowane) pokazujemy jednym wierszem z samym SKU.
+              const items: (SalesItem | null)[] = r.sales_order_items.length > 0 ? r.sales_order_items : [null];
+              return items.map((it, idx) => (
+                <tr
+                  key={`${rowKey(r)}#${it?.item_key ?? "none"}`}
+                  className={`align-top ${idx === items.length - 1 ? "border-b border-line" : "border-b border-dashed border-line"}`}
+                >
+                  {idx === 0 && (
+                    <>
+                      <td rowSpan={items.length} className="p-3 whitespace-nowrap">
+                        <button
+                          onClick={() => onOpen(r.marketplace, r.external_id)}
+                          title={MARKETPLACES.find((m) => m.key === r.marketplace)?.label}
+                          className="font-mono font-semibold text-teal hover:underline"
+                        >
+                          {r.external_id}
+                        </button>
+                      </td>
+                      <td rowSpan={items.length} className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDateTime(r.order_date)}</td>
+                      <td rowSpan={items.length} className="p-3">
+                        <span className={`text-xs font-semibold px-2 py-1 rounded-full ${statusStyle(r.marketplace, r.status)}`}>
+                          {salesStatusLabel(r.marketplace, r.status)}
+                        </span>
+                      </td>
+                    </>
+                  )}
+                  <td className="p-3 font-mono whitespace-nowrap">{it ? it.sku || "—" : r.sku || "—"}</td>
+                  {it ? (
+                    <>
+                      <td className="p-3">
+                        <InlineEditCell value={it.serial_number} placeholder="Dodaj numer" className="w-44 font-mono" onSave={(v) => saveSerial(r, it, v)} />
+                      </td>
+                      <td className="p-3">
+                        <InlineEditCell value={it.pads === null ? null : String(it.pads)} placeholder="np. 2" className="w-16 font-mono" onSave={(v) => savePads(r, it, v)} />
+                      </td>
+                      <td className="p-3">
+                        <PadSerialsCell count={it.pads} values={it.pad_serials} onSave={(i, v) => savePadSerial(r, it, i, v)} />
+                      </td>
+                    </>
+                  ) : (
+                    <td colSpan={3} className="p-3 text-xs text-inksoft">—</td>
+                  )}
+                </tr>
+              ));
+            })}
           </tbody>
         </table>
       </div>

@@ -15,17 +15,51 @@ import { MAX_PADS } from "./PadSerialsCell";
 export type FieldChange = { field: string; from: string | null; to: string | null };
 export type SalesHistoryEntry = { action: "edited"; by_email: string | null; at: string; changes?: FieldChange[] };
 
+// Jedna sztuka z zamówienia (sales_order_items): SKU z API, numer seryjny i pady wpisuje pracownik.
+export type SalesItem = {
+  item_key: string;
+  position: number;
+  sku: string | null;
+  serial_number: string | null;
+  pads: number | null;
+  pad_serials: string[] | null;
+};
+
 type WorkerData = {
   marketplace: string;
   external_id: string;
   order_date: string | null;
   status: string;
   sku: string | null;
-  serial_number: string | null;
-  pads: number | null;
-  pad_serials: string[] | null;
   history: SalesHistoryEntry[];
 };
+
+// Zapis danych jednej pozycji razem z wpisem do logu (funkcja sales_item_update w bazie — jedna transakcja).
+export function updateSalesItem(p: {
+  marketplace: string;
+  externalId: string;
+  itemKey: string;
+  serial: string | null;
+  pads: number | null;
+  padSerials: string[] | null;
+  entry: SalesHistoryEntry;
+}) {
+  return supabase.rpc("sales_item_update", {
+    p_marketplace: p.marketplace,
+    p_external_id: p.externalId,
+    p_item_key: p.itemKey,
+    p_serial: p.serial,
+    p_pads: p.pads,
+    p_pad_serials: p.padSerials,
+    p_entry: p.entry,
+  });
+}
+
+// Etykieta pola w logu; przy zamówieniu z kilkoma pozycjami wskazuje, której dotyczy zmiana.
+export const itemFieldLabel = (field: string, item: Pick<SalesItem, "position" | "sku">, multiple: boolean) =>
+  multiple ? `Poz. ${item.position} (${item.sku ?? "—"}) · ${field}` : field;
+
+type ItemDraft = { serial: string; pads: string; padSerials: string[] };
 
 type Address = {
   firstName?: string;
@@ -109,14 +143,13 @@ export default function SalesOrderCard({
   onClose: () => void;
 }) {
   const [worker, setWorker] = useState<WorkerData | null>(null);
+  const [items, setItems] = useState<SalesItem[]>([]);
   const [bm, setBm] = useState<BmOrder | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
 
   const [editing, setEditing] = useState(false);
-  const [serialDraft, setSerialDraft] = useState("");
-  const [padsDraft, setPadsDraft] = useState("");
-  const [padSerialsDraft, setPadSerialsDraft] = useState<string[]>([]);
+  const [drafts, setDrafts] = useState<Record<string, ItemDraft>>({});
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -125,49 +158,76 @@ export default function SalesOrderCard({
   }, [marketplace, externalId]);
 
   async function load() {
-    const [{ data: w, error: wErr }, bmRes] = await Promise.all([
+    const [{ data: w, error: wErr }, itemsRes, bmRes] = await Promise.all([
       supabase.from("sales_orders").select("*").eq("marketplace", marketplace).eq("external_id", externalId).maybeSingle(),
+      supabase
+        .from("sales_order_items")
+        .select("item_key, position, sku, serial_number, pads, pad_serials")
+        .eq("marketplace", marketplace)
+        .eq("external_id", externalId)
+        .order("position"),
       marketplace === "backmarket"
         ? supabase.from("bm_orders").select("*").eq("order_id", Number(externalId)).maybeSingle()
         : Promise.resolve({ data: null, error: null }),
     ]);
-    if (wErr || bmRes.error) setError((wErr || bmRes.error)!.message);
+    if (wErr || itemsRes.error || bmRes.error) setError((wErr || itemsRes.error || bmRes.error)!.message);
     setWorker((w as WorkerData) ?? null);
+    setItems((itemsRes.data as SalesItem[]) || []);
     setBm((bmRes.data as BmOrder) ?? null);
     setLoaded(true);
   }
 
   function startEdit() {
-    setSerialDraft(worker?.serial_number || "");
-    setPadsDraft(worker?.pads === null || worker?.pads === undefined ? "" : String(worker.pads));
-    setPadSerialsDraft(worker?.pad_serials ?? []);
+    setDrafts(
+      Object.fromEntries(
+        items.map((it) => [
+          it.item_key,
+          { serial: it.serial_number || "", pads: it.pads === null ? "" : String(it.pads), padSerials: it.pad_serials ?? [] },
+        ])
+      )
+    );
     setEditing(true);
+  }
+
+  function setDraft(key: string, patch: Partial<ItemDraft>) {
+    setDrafts((d) => ({ ...d, [key]: { ...d[key], ...patch } }));
   }
 
   async function saveEdit() {
     if (!worker) return;
-    const padsText = padsDraft.trim();
-    if (padsText && (!/^\d{1,2}$/.test(padsText) || Number(padsText) > MAX_PADS)) {
-      setError(`Pady: podaj liczbę całkowitą od 0 do ${MAX_PADS}.`);
-      return;
+    const multiple = items.length > 1;
+    const jobs: { item: SalesItem; next: { serial: string | null; pads: number | null; padSerials: string[] | null }; changes: FieldChange[] }[] = [];
+
+    for (const item of items) {
+      const d = drafts[item.item_key];
+      if (!d) continue;
+      const padsText = d.pads.trim();
+      if (padsText && (!/^\d{1,2}$/.test(padsText) || Number(padsText) > MAX_PADS)) {
+        setError(`Pady: podaj liczbę całkowitą od 0 do ${MAX_PADS}.`);
+        return;
+      }
+      const padCount = padsText ? Number(padsText) : 0;
+      const list = Array.from({ length: Math.max(padCount, d.padSerials.length) }, (_, i) => (d.padSerials[i] ?? "").trim());
+      const next = {
+        serial: d.serial.trim() || null,
+        pads: padsText ? Number(padsText) : null,
+        padSerials: list.every((x) => !x) ? null : list,
+      };
+      const changes: FieldChange[] = [];
+      const diff = (field: string, from: string | number | null, to: string | number | null) => {
+        if ((from ?? "") !== (to ?? "")) {
+          changes.push({ field: itemFieldLabel(field, item, multiple), from: from === null ? null : String(from), to: to === null ? null : String(to) });
+        }
+      };
+      diff("Numer seryjny", item.serial_number, next.serial);
+      diff("Pady", item.pads, next.pads);
+      for (let i = 0; i < Math.max(item.pad_serials?.length ?? 0, next.padSerials?.length ?? 0); i++) {
+        diff(`Nr seryjny pada ${i + 1}`, item.pad_serials?.[i] || null, next.padSerials?.[i] || null);
+      }
+      if (changes.length > 0) jobs.push({ item, next, changes });
     }
-    const padCount = padsText ? Number(padsText) : 0;
-    const list = Array.from({ length: Math.max(padCount, padSerialsDraft.length) }, (_, i) => (padSerialsDraft[i] ?? "").trim());
-    const next = {
-      serial_number: serialDraft.trim() || null,
-      pads: padsText ? Number(padsText) : null,
-      pad_serials: list.every((x) => !x) ? null : list,
-    };
-    const changes: FieldChange[] = [];
-    const diff = (field: string, from: string | number | null, to: string | number | null) => {
-      if ((from ?? "") !== (to ?? "")) changes.push({ field, from: from === null ? null : String(from), to: to === null ? null : String(to) });
-    };
-    diff("Numer seryjny", worker.serial_number, next.serial_number);
-    diff("Pady", worker.pads, next.pads);
-    for (let i = 0; i < Math.max(worker.pad_serials?.length ?? 0, next.pad_serials?.length ?? 0); i++) {
-      diff(`Nr seryjny pada ${i + 1}`, worker.pad_serials?.[i] || null, next.pad_serials?.[i] || null);
-    }
-    if (changes.length === 0) {
+
+    if (jobs.length === 0) {
       setEditing(false);
       return;
     }
@@ -175,24 +235,22 @@ export default function SalesOrderCard({
     setSaving(true);
     setError("");
     try {
-      const entry: SalesHistoryEntry = { action: "edited", by_email: session.user.email ?? null, at: new Date().toISOString(), changes };
-      const { error: err } = await supabase
-        .from("sales_orders")
-        .update({ ...next, history: [...(worker.history || []), entry] })
-        .eq("marketplace", marketplace)
-        .eq("external_id", externalId);
-      if (err) throw err;
+      for (const job of jobs) {
+        const entry: SalesHistoryEntry = { action: "edited", by_email: session.user.email ?? null, at: new Date().toISOString(), changes: job.changes };
+        const { error: err } = await updateSalesItem({ marketplace, externalId, itemKey: job.item.item_key, ...job.next, entry });
+        if (err) throw err;
+      }
       setEditing(false);
       await load();
     } catch (e: any) {
       setError(e.message || "Błąd zapisu.");
+      await load(); // część pozycji mogła się zapisać — pokaż aktualny stan
     } finally {
       setSaving(false);
     }
   }
 
   const marketplaceLabel = MARKETPLACES.find((m) => m.key === marketplace)?.label ?? marketplace;
-  const padFields = Math.min(Number(padsDraft) || 0, MAX_PADS);
 
   return (
     <div className="fixed inset-0 bg-black/30 flex justify-end z-50" onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -217,52 +275,67 @@ export default function SalesOrderCard({
 
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-xs font-semibold text-inksoft">DANE WPROWADZONE PRZEZ PRACOWNIKA</h3>
-              {!editing && <button onClick={startEdit} className="text-xs font-semibold text-teal hover:underline">Edytuj</button>}
+              {!editing && items.length > 0 && <button onClick={startEdit} className="text-xs font-semibold text-teal hover:underline">Edytuj</button>}
             </div>
-            <div className="border border-line bg-white mb-6">
-              {!editing && (
-                <>
-                  <Row label="Numer seryjny" value={worker.serial_number} mono />
-                  <Row label="Pady" value={worker.pads === null ? null : String(worker.pads)} mono />
-                  {Array.from({ length: Math.min(worker.pads ?? 0, MAX_PADS) }, (_, i) => (
-                    <Row key={i} label={`Nr seryjny pada ${i + 1}`} value={worker.pad_serials?.[i]} mono />
-                  ))}
-                </>
-              )}
-              {editing && (
-                <div className="p-3 space-y-2">
-                  <div>
-                    <label className="text-xs font-semibold text-inksoft block mb-1">Numer seryjny</label>
-                    <input value={serialDraft} onChange={(e) => setSerialDraft(e.target.value)} className="w-full border border-line bg-white px-2 py-1.5 rounded text-sm font-mono" />
-                  </div>
-                  <div>
-                    <label className="text-xs font-semibold text-inksoft block mb-1">Pady (liczba w zestawie)</label>
-                    <input value={padsDraft} onChange={(e) => setPadsDraft(e.target.value)} inputMode="numeric" className="w-full border border-line bg-white px-2 py-1.5 rounded text-sm font-mono" />
-                  </div>
-                  {Array.from({ length: padFields }, (_, i) => (
-                    <div key={i}>
-                      <label className="text-xs font-semibold text-inksoft block mb-1">Nr seryjny pada {i + 1}</label>
-                      <input
-                        value={padSerialsDraft[i] ?? ""}
-                        onChange={(e) => {
-                          const next = [...padSerialsDraft];
-                          while (next.length <= i) next.push("");
-                          next[i] = e.target.value;
-                          setPadSerialsDraft(next);
-                        }}
-                        className="w-full border border-line bg-white px-2 py-1.5 rounded text-sm font-mono"
-                      />
+            {items.length === 0 && (
+              <div className="border border-line bg-white mb-6 p-3 text-sm text-inksoft">
+                Brak pozycji dla tego zamówienia — pojawią się po synchronizacji (Odśwież).
+              </div>
+            )}
+            {items.map((it) => {
+              const d = drafts[it.item_key];
+              const title = items.length > 1 ? `Pozycja ${it.position} · ${it.sku ?? "—"}` : it.sku ? `SKU ${it.sku}` : null;
+              return (
+                <div key={it.item_key} className="border border-line bg-white mb-3">
+                  {title && <div className="px-3 py-2 text-xs font-semibold text-inksoft border-b border-line font-mono">{title}</div>}
+                  {!editing && (
+                    <>
+                      <Row label="Numer seryjny" value={it.serial_number} mono />
+                      <Row label="Pady" value={it.pads === null ? null : String(it.pads)} mono />
+                      {Array.from({ length: Math.min(it.pads ?? 0, MAX_PADS) }, (_, i) => (
+                        <Row key={i} label={`Nr seryjny pada ${i + 1}`} value={it.pad_serials?.[i]} mono />
+                      ))}
+                    </>
+                  )}
+                  {editing && d && (
+                    <div className="p-3 space-y-2">
+                      <div>
+                        <label className="text-xs font-semibold text-inksoft block mb-1">Numer seryjny</label>
+                        <input value={d.serial} onChange={(e) => setDraft(it.item_key, { serial: e.target.value })} className="w-full border border-line bg-white px-2 py-1.5 rounded text-sm font-mono" />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-inksoft block mb-1">Pady (liczba w zestawie)</label>
+                        <input value={d.pads} onChange={(e) => setDraft(it.item_key, { pads: e.target.value })} inputMode="numeric" className="w-full border border-line bg-white px-2 py-1.5 rounded text-sm font-mono" />
+                      </div>
+                      {Array.from({ length: Math.min(Number(d.pads) || 0, MAX_PADS) }, (_, i) => (
+                        <div key={i}>
+                          <label className="text-xs font-semibold text-inksoft block mb-1">Nr seryjny pada {i + 1}</label>
+                          <input
+                            value={d.padSerials[i] ?? ""}
+                            onChange={(e) => {
+                              const next = [...d.padSerials];
+                              while (next.length <= i) next.push("");
+                              next[i] = e.target.value;
+                              setDraft(it.item_key, { padSerials: next });
+                            }}
+                            className="w-full border border-line bg-white px-2 py-1.5 rounded text-sm font-mono"
+                          />
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                  <div className="flex gap-2 pt-1">
-                    <button onClick={saveEdit} disabled={saving} className="bg-ink text-paper px-4 py-2 rounded text-sm font-semibold disabled:opacity-50">
-                      {saving ? "Zapisywanie…" : "Zapisz"}
-                    </button>
-                    <button onClick={() => setEditing(false)} className="px-4 py-2 border border-line rounded text-sm font-semibold">Anuluj</button>
-                  </div>
+                  )}
                 </div>
-              )}
-            </div>
+              );
+            })}
+            {editing && (
+              <div className="flex gap-2 mb-6">
+                <button onClick={saveEdit} disabled={saving} className="bg-ink text-paper px-4 py-2 rounded text-sm font-semibold disabled:opacity-50">
+                  {saving ? "Zapisywanie…" : "Zapisz"}
+                </button>
+                <button onClick={() => setEditing(false)} className="px-4 py-2 border border-line rounded text-sm font-semibold">Anuluj</button>
+              </div>
+            )}
+            <div className="mb-3" />
 
             <h3 className="text-xs font-semibold text-inksoft mb-2">ZAMÓWIENIE</h3>
             <div className="border border-line bg-white mb-6">

@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { isAuthorized } from "@/lib/buyback";
 import { scanOrders } from "@/lib/scanOrders";
-import { mapBmOrder, mapBmToSales } from "@/lib/salesOrders";
+import { mapBmItems, mapBmOrder, mapBmToSales } from "@/lib/salesOrders";
 
 // Synchronizuje zamówienia SPRZEDAŻY z Back Marketu (GET /ws/orders, dokumentacja: https://api.backmarket.dev,
 // sekcja Orders) do bm_orders (surowe dane) i sales_orders (wspólna lista). Osobne od zamówień skupu
@@ -29,6 +29,21 @@ const OPEN_STATES = [0, 10, 1, 3]; // stan 9 (wysłane) i 8 (nieopłacone) są k
 const RECHECK_LIMIT = 25;
 const RECHECK_MIN_AGE_MS = 60 * 60 * 1000;
 const RECHECK_DEADLINE_MS = 250_000; // po tym czasie od startu funkcji nie zaczynamy kolejnego zapytania
+
+// Zapis pobranych zamówień: surowe dane, wspólna lista i pozycje (kolejność ma znaczenie: pozycje mają klucz
+// obcy do zamówienia). Upsert pozycji zawiera tylko pola z API, więc numery seryjne i pady wpisane
+// przez zespół zostają nietknięte.
+async function saveOrders(admin: SupabaseClient<any, any, any>, orders: any[]) {
+  const { error: rawErr } = await admin.from("bm_orders").upsert(orders.map(mapBmOrder));
+  if (rawErr) throw new Error(`Błąd zapisu do Supabase (bm_orders): ${rawErr.message}`);
+  const { error: salesErr } = await admin.from("sales_orders").upsert(orders.map(mapBmToSales));
+  if (salesErr) throw new Error(`Błąd zapisu do Supabase (sales_orders): ${salesErr.message}`);
+  const items = orders.flatMap(mapBmItems);
+  if (items.length > 0) {
+    const { error: itemsErr } = await admin.from("sales_order_items").upsert(items);
+    if (itemsErr) throw new Error(`Błąd zapisu do Supabase (sales_order_items): ${itemsErr.message}`);
+  }
+}
 
 function rfc3339(d: Date) {
   return d.toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -93,12 +108,7 @@ export async function GET(request: Request) {
         const data = await res.json();
         return { results: (data.results || []) as any[], hasNext: !!data.next, count: data.count };
       },
-      save: async (rows) => {
-        const { error: rawErr } = await admin.from("bm_orders").upsert(rows.map(mapBmOrder));
-        if (rawErr) throw new Error(`Błąd zapisu do Supabase (bm_orders): ${rawErr.message}`);
-        const { error: salesErr } = await admin.from("sales_orders").upsert(rows.map(mapBmToSales));
-        if (salesErr) throw new Error(`Błąd zapisu do Supabase (sales_orders): ${salesErr.message}`);
-      },
+      save: (rows) => saveOrders(admin, rows),
     });
   } catch (e: any) {
     return NextResponse.json({ error: e.message || "Błąd synchronizacji." }, { status: 502 });
@@ -138,8 +148,7 @@ export async function GET(request: Request) {
         if (!res.ok) continue; // np. zamówienie zniknęło z API — spróbujemy przy następnym przebiegu
         const order = await res.json();
         if (!order?.order_id) continue;
-        await admin.from("bm_orders").upsert(mapBmOrder(order));
-        await admin.from("sales_orders").upsert(mapBmToSales(order));
+        await saveOrders(admin, [order]);
         rechecked += 1;
       } catch {
         /* pojedyncza porażka nie psuje przebiegu */
