@@ -4,6 +4,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { MARKETPLACES, salesStatusLabel } from "@/lib/salesOrders";
+import { escapeLike } from "@/lib/search";
 import InlineEditCell from "./InlineEditCell";
 import PadSerialsCell, { MAX_PADS } from "./PadSerialsCell";
 
@@ -168,6 +169,8 @@ function OrdersList({ reloadKey }: { reloadKey: number }) {
   const [total, setTotal] = useState<number | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   // Zapisy idą jeden po drugim na najświeższym wierszu, żeby szybkie skanowanie kilku pól pod rząd
@@ -175,6 +178,14 @@ function OrdersList({ reloadKey }: { reloadKey: number }) {
   const rowsRef = useRef<SalesRow[]>([]);
   rowsRef.current = rows;
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setSearch(searchInput.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
 
   useEffect(() => {
     load();
@@ -186,15 +197,15 @@ function OrdersList({ reloadKey }: { reloadKey: number }) {
       supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, pageSize, reloadKey]);
+  }, [page, pageSize, search, reloadKey]);
 
   async function load() {
     setLoading(true);
     setError("");
     const from = (page - 1) * pageSize;
-    const { data, error: err, count } = await supabase
-      .from("sales_orders")
-      .select(SALES_COLUMNS, { count: "exact" })
+    let q = supabase.from("sales_orders").select(SALES_COLUMNS, { count: "exact" });
+    if (search) q = q.ilike("external_id", `%${escapeLike(search)}%`);
+    const { data, error: err, count } = await q
       .order("order_date", { ascending: false, nullsFirst: false })
       .range(from, from + pageSize - 1);
     if (err) setError(`Nie udało się wczytać zamówień: ${err.message}`);
@@ -253,6 +264,12 @@ function OrdersList({ reloadKey }: { reloadKey: number }) {
 
   return (
     <div>
+      <input
+        value={searchInput}
+        onChange={(e) => setSearchInput(e.target.value)}
+        placeholder="Szukaj po numerze zamówienia"
+        className="w-72 border border-line bg-white px-3 py-2 rounded text-sm font-mono mb-3"
+      />
       <Pager page={page} pageSize={pageSize} total={total} onPage={setPage} onPageSize={(n) => { setPageSize(n); setPage(1); }} />
       {error && <p className="text-rust text-xs mb-3">{error}</p>}
       <div className="border border-line bg-white overflow-x-auto">
@@ -270,7 +287,7 @@ function OrdersList({ reloadKey }: { reloadKey: number }) {
           </thead>
           <tbody>
             {!loading && rows.length === 0 && (
-              <tr><td colSpan={7} className="p-6 text-center text-inksoft text-sm">Brak zamówień — kliknij Odśwież, żeby pobrać je z Back Market.</td></tr>
+              <tr><td colSpan={7} className="p-6 text-center text-inksoft text-sm">{search ? "Nic nie znaleziono dla tego numeru." : "Brak zamówień — kliknij Odśwież, żeby pobrać je z Back Market."}</td></tr>
             )}
             {rows.map((r) => (
               <tr key={rowKey(r)} className="border-b border-line last:border-b-0 hover:bg-paper">
