@@ -195,6 +195,12 @@ function TrackingCell({ value }: { value: string | null }) {
   return <>{value}</>;
 }
 
+// Kolor plakietki kanału — żeby na liście od razu było widać, skąd jest zamówienie (inne barwy niż statusy).
+const MARKETPLACE_STYLE: Record<string, string> = {
+  backmarket: "bg-[#e3ecf9] text-[#2a6bb5]",
+  refurbed: "bg-[#efe6f8] text-[#7a3fb0]",
+};
+
 const OUR_STATUS_STYLE: Record<OurStatus, string> = {
   nowe: "bg-rustsoft text-rust",
   w_realizacji: "bg-ambersoft text-amber",
@@ -236,6 +242,8 @@ function OrdersList({
   const rowsRef = useRef<SalesRow[]>([]);
   rowsRef.current = rows;
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
+  const loadSeq = useRef(0); // numer ostatniego zapytania — starsze odpowiedzi są ignorowane
+  const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -247,33 +255,46 @@ function OrdersList({
 
   useEffect(() => {
     load();
+    // Synchronizacja zapisuje setki zamówień naraz i każda zmiana wysyła zdarzenie — przeładowanie po każdym
+    // z nich zalewało przeglądarkę zapytaniami ("Failed to fetch"). Zbieramy zdarzenia w jedno odświeżenie.
+    const scheduleReload = () => {
+      if (reloadTimer.current) clearTimeout(reloadTimer.current);
+      reloadTimer.current = setTimeout(load, 1500);
+    };
     const channel = supabase
       .channel("sales-orders-changes")
-      .on("postgres_changes", { event: "*", schema: "public", table: "sales_orders" }, () => load())
-      .on("postgres_changes", { event: "*", schema: "public", table: "sales_order_items" }, () => load())
+      .on("postgres_changes", { event: "*", schema: "public", table: "sales_orders" }, scheduleReload)
+      .on("postgres_changes", { event: "*", schema: "public", table: "sales_order_items" }, scheduleReload)
       .subscribe();
     return () => {
+      if (reloadTimer.current) clearTimeout(reloadTimer.current);
       supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, pageSize, search, reloadKey]);
 
   async function load() {
+    const seq = ++loadSeq.current;
     setLoading(true);
-    setError("");
     const from = (page - 1) * pageSize;
     let q = supabase.from("sales_orders").select(SALES_COLUMNS, { count: "exact" });
     if (search) q = q.ilike("external_id", `%${escapeLike(search)}%`);
-    const { data, error: err, count } = await q
-      .order("order_date", { ascending: false, nullsFirst: false })
-      .order("position", { referencedTable: "sales_order_items" })
-      .range(from, from + pageSize - 1);
-    if (err) setError(`Nie udało się wczytać zamówień: ${err.message}`);
-    else {
+    try {
+      const { data, error: err, count } = await q
+        .order("order_date", { ascending: false, nullsFirst: false })
+        .order("position", { referencedTable: "sales_order_items" })
+        .range(from, from + pageSize - 1);
+      if (seq !== loadSeq.current) return; // przyszła nowsza odpowiedź
+      if (err) throw new Error(err.message);
       setRows((data as unknown as SalesRow[]) || []);
       setTotal(count ?? null);
+      setError("");
+    } catch (e: any) {
+      // Błąd sieci przy odświeżaniu w tle nie kasuje listy — zostaje poprzedni stan i komunikat.
+      if (seq === loadSeq.current) setError(`Nie udało się wczytać zamówień: ${e.message || e}`);
+    } finally {
+      if (seq === loadSeq.current) setLoading(false);
     }
-    setLoading(false);
   }
 
   // build dostaje aktualną pozycję i zwraca jej nowy stan oraz opis zmiany do logu (albo null, gdy nic się nie zmienia).
@@ -430,7 +451,9 @@ function OrdersList({
                   {idx === 0 && (
                     <>
                       <td rowSpan={items.length} className="p-3 whitespace-nowrap">
-                        {MARKETPLACES.find((m) => m.key === r.marketplace)?.label ?? r.marketplace}
+                        <span className={`text-xs font-semibold px-2 py-1 rounded-full ${MARKETPLACE_STYLE[r.marketplace] ?? "bg-paper text-inksoft border border-line"}`}>
+                          {MARKETPLACES.find((m) => m.key === r.marketplace)?.label ?? r.marketplace}
+                        </span>
                       </td>
                       <td rowSpan={items.length} className="p-3 whitespace-nowrap">
                         <button

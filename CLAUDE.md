@@ -241,6 +241,9 @@ Configuration) musi być aktualny adres produkcyjny, inaczej magic link nie zadz
   Skan jest ukończony tylko wtedy, gdy API samo zakończy listę. Powód: do 2026-09-25 twardy limit 200
   stron (x 10 zamówień) urywał pierwsze pobranie po cichu na 2000 zamówieniach (do 15 lutego) i oznaczał je
   jako gotowe, więc zamówień z marca–sierpnia w bazie nie było. Nie wracać do "limitu stron = koniec".
+- **Realtime + synchronizacja:** listy zasilane masowo przez serwer (np. Zamówienia) nie mogą przeładowywać się po każdym
+  zdarzeniu realtime — sync zapisuje setki wierszy naraz i przeglądarka dostaje "Failed to fetch". Zdarzenia zbieramy w jedno
+  odświeżenie (debounce 1,5 s), a starsze odpowiedzi ignorujemy (`loadSeq`) — patrz `OrdersList` w `SalesOrdersHub.tsx`.
 - Back Market najpewniej filtruje po IP — endpointów nie da się testować z sandboxa
   asystenta (401 nawet dla działających). Testuje się na Vercelu albo na komputerze
   właściciela.
