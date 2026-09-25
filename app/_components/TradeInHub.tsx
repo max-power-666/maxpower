@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import TradeInOrdersView from "./TradeInOrdersView";
@@ -37,7 +37,7 @@ type IntakeEntry = {
   serial_number: string | null;
   sku: string | null;
   pads: number | null;
-  pad_serials: string | null;
+  pad_serials: string[] | null;
   notes: string | null;
   entered_by_email: string | null;
   entered_at: string;
@@ -48,6 +48,8 @@ type IntakeEntry = {
 };
 
 const INTAKE_COLUMNS = "id, order_public_id, serial_number, sku, pads, pad_serials, notes, entered_by_email, entered_at, finished_at, status, points, history";
+
+const MAX_PADS = 20; // tyle pól na numery seryjne padów pokazujemy maksymalnie
 
 function fmtPoints(n: number | string) {
   return Number(n).toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -148,6 +150,9 @@ function IntakeView({
   const [interval, setInterval] = useState<Interval>("today");
   const [rangeRows, setRangeRows] = useState<{ entered_by_email: string | null; points: number }[]>([]);
   const [entries, setEntries] = useState<IntakeEntry[]>([]);
+  const entriesRef = useRef<IntakeEntry[]>([]);
+  entriesRef.current = entries;
+  const saveQueue = useRef<Promise<void>>(Promise.resolve());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -271,27 +276,67 @@ function IntakeView({
     else await load();
   }
 
+  // Zapisy z listy idą jeden po drugim (kolejka) i zawsze na najświeższym wierszu. Bez tego szybkie
+  // skanowanie kilku pól pod rząd nadpisywałoby sobie nawzajem tablicę numerów padów i log zmian.
+  function enqueueUpdate(
+    id: number,
+    label: string,
+    build: (cur: IntakeEntry) => { patch: Partial<IntakeEntry>; changes: FieldChange[] } | null
+  ) {
+    saveQueue.current = saveQueue.current.then(async () => {
+      const cur = entriesRef.current.find((r) => r.id === id);
+      const built = cur && build(cur);
+      if (!cur || !built) return;
+      const entry: HistoryEntry = { action: "edited", by_email: session.user.email ?? null, at: new Date().toISOString(), changes: built.changes };
+      const history = [...(cur.history || []), entry];
+      const { error: err } = await supabase.from("buyback_order_intake").update({ ...built.patch, history }).eq("id", id);
+      if (err) {
+        setError(`Nie udało się zapisać (${label}): ${err.message}`);
+        return;
+      }
+      const next = entriesRef.current.map((r) => (r.id === id ? { ...r, ...built.patch, history } : r));
+      entriesRef.current = next;
+      setEntries(next);
+    });
+  }
+
   // Edycje z listy (uwagi, numer seryjny, SKU, pady) trafiają do tego samego logu zmian co edycja na karcie.
-  async function saveField(row: IntakeEntry, column: "notes" | "serial_number" | "sku" | "pads" | "pad_serials", label: string, value: string | number | null) {
+  function saveField(row: IntakeEntry, column: "notes" | "serial_number" | "sku" | "pads", label: string, value: string | number | null) {
     setError("");
-    const entry: HistoryEntry = {
-      action: "edited",
-      by_email: session.user.email ?? null,
-      at: new Date().toISOString(),
-      changes: [{ field: label, from: row[column] === null ? null : String(row[column]), to: value === null ? null : String(value) }],
-    };
-    const { error: err } = await supabase
-      .from("buyback_order_intake")
-      .update({ [column]: value, history: [...(row.history || []), entry] })
-      .eq("id", row.id);
-    if (err) setError(`Nie udało się zapisać (${label}): ${err.message}`);
+    enqueueUpdate(row.id, label, (cur) => ({
+      patch: { [column]: value },
+      changes: [{ field: label, from: cur[column] === null ? null : String(cur[column]), to: value === null ? null : String(value) }],
+    }));
+  }
+
+  // Element i tablicy pad_serials = numer seryjny pada i+1.
+  function savePadSerial(row: IntakeEntry, index: number, value: string | null) {
+    setError("");
+    enqueueUpdate(row.id, `Nr seryjny pada ${index + 1}`, (cur) => {
+      const arr = [...(cur.pad_serials ?? [])];
+      while (arr.length <= index) arr.push("");
+      const before = arr[index] || null;
+      if (before === value) return null;
+      arr[index] = value ?? "";
+      return {
+        patch: { pad_serials: arr.every((x) => !x) ? null : arr },
+        changes: [{ field: `Nr seryjny pada ${index + 1}`, from: before, to: value }],
+      };
+    });
+  }
+
+  // Skaner kończy numer Enterem: pole się zapisuje, a fokus przechodzi na kolejny pad.
+  function focusNextOnEnter(ev: React.KeyboardEvent<HTMLDivElement>) {
+    if (ev.key !== "Enter") return;
+    const inputs = Array.from(ev.currentTarget.querySelectorAll("input"));
+    inputs[inputs.indexOf(ev.target as HTMLInputElement) + 1]?.focus();
   }
 
   // Pady to liczba całkowita >= 0 (0 = zestaw bez padów, też jest poprawną, uzupełnioną wartością).
   function savePads(row: IntakeEntry, text: string | null) {
     if (text === null) return saveField(row, "pads", "Pady", null);
-    if (!/^\d{1,3}$/.test(text)) {
-      setError("Pady: podaj liczbę całkowitą (0 lub więcej).");
+    if (!/^\d{1,2}$/.test(text) || Number(text) > MAX_PADS) {
+      setError(`Pady: podaj liczbę całkowitą od 0 do ${MAX_PADS}.`);
       return;
     }
     return saveField(row, "pads", "Pady", Number(text));
@@ -459,12 +504,17 @@ function IntakeView({
                 </td>
                 <td className="p-3">
                   {(e.pads ?? 0) > 0 ? (
-                    <InlineEditCell
-                      value={e.pad_serials}
-                      placeholder={e.pads === 1 ? "Numer pada" : "Numery padów, po przecinku"}
-                      className="w-56 font-mono"
-                      onSave={(v) => saveField(e, "pad_serials", "Nr seryjny padów", v)}
-                    />
+                    <div className="flex flex-col gap-1" onKeyDown={focusNextOnEnter}>
+                      {Array.from({ length: e.pads as number }, (_, i) => (
+                        <InlineEditCell
+                          key={i}
+                          value={e.pad_serials?.[i] || null}
+                          placeholder={`Pad ${i + 1}`}
+                          className="w-48 font-mono"
+                          onSave={(v) => savePadSerial(e, i, v)}
+                        />
+                      ))}
+                    </div>
                   ) : (
                     <span className="text-inksoft px-2">—</span>
                   )}
@@ -522,7 +572,7 @@ function OrderCardDrawer({
   const [serialDraft, setSerialDraft] = useState("");
   const [skuDraft, setSkuDraft] = useState("");
   const [padsDraft, setPadsDraft] = useState("");
-  const [padSerialsDraft, setPadSerialsDraft] = useState("");
+  const [padSerialsDraft, setPadSerialsDraft] = useState<string[]>([]);
   const [notesDraft, setNotesDraft] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -549,7 +599,7 @@ function OrderCardDrawer({
     setSerialDraft(intake?.serial_number || "");
     setSkuDraft(intake?.sku || "");
     setPadsDraft(intake?.pads === null || intake?.pads === undefined ? "" : String(intake.pads));
-    setPadSerialsDraft(intake?.pad_serials || "");
+    setPadSerialsDraft(intake?.pad_serials ?? []);
     setNotesDraft(intake?.notes || "");
     setEditing(true);
   }
@@ -557,15 +607,18 @@ function OrderCardDrawer({
   async function saveEdit() {
     if (!intake) return;
     const padsText = padsDraft.trim();
-    if (padsText && !/^\d{1,3}$/.test(padsText)) {
-      setError("Pady: podaj liczbę całkowitą (0 lub więcej).");
+    if (padsText && (!/^\d{1,2}$/.test(padsText) || Number(padsText) > MAX_PADS)) {
+      setError(`Pady: podaj liczbę całkowitą od 0 do ${MAX_PADS}.`);
       return;
     }
+    const padCount = padsText ? Number(padsText) : 0;
+    const padSerialsList = Array.from({ length: Math.max(padCount, padSerialsDraft.length) }, (_, i) => (padSerialsDraft[i] ?? "").trim());
+    const padSerialsNext = padSerialsList.every((x) => !x) ? null : padSerialsList;
     const next = {
       serial_number: serialDraft.trim() || null,
       sku: skuDraft.trim() || null,
       pads: padsText ? Number(padsText) : null,
-      pad_serials: padSerialsDraft.trim() || null,
+      pad_serials: padSerialsNext,
       notes: notesDraft.trim() || null,
     };
     const changes: FieldChange[] = [];
@@ -575,7 +628,9 @@ function OrderCardDrawer({
     diff("Numer seryjny", intake.serial_number, next.serial_number);
     diff("SKU", intake.sku, next.sku);
     diff("Pady", intake.pads, next.pads);
-    diff("Nr seryjny padów", intake.pad_serials, next.pad_serials);
+    for (let i = 0; i < Math.max(intake.pad_serials?.length ?? 0, next.pad_serials?.length ?? 0); i++) {
+      diff(`Nr seryjny pada ${i + 1}`, intake.pad_serials?.[i] || null, next.pad_serials?.[i] || null);
+    }
     diff("Uwagi", intake.notes, next.notes);
 
     if (changes.length === 0) {
@@ -646,7 +701,9 @@ function OrderCardDrawer({
                   <Row label="Numer seryjny" value={intake.serial_number} mono />
                   <Row label="SKU" value={intake.sku} mono />
                   <Row label="Pady" value={intake.pads === null ? null : String(intake.pads)} mono />
-                  {(intake.pads ?? 0) > 0 && <Row label="Nr seryjny padów" value={intake.pad_serials} mono />}
+                  {Array.from({ length: intake.pads ?? 0 }, (_, i) => (
+                    <Row key={i} label={`Nr seryjny pada ${i + 1}`} value={intake.pad_serials?.[i]} mono />
+                  ))}
                   <Row label="Uwagi" value={intake.notes} />
                 </>
               )}
@@ -664,12 +721,21 @@ function OrderCardDrawer({
                     <label className="text-xs font-semibold text-inksoft block mb-1">Pady (liczba w zestawie)</label>
                     <input value={padsDraft} onChange={(e) => setPadsDraft(e.target.value)} inputMode="numeric" className="w-full border border-line bg-white px-2 py-1.5 rounded text-sm font-mono" />
                   </div>
-                  {Number(padsDraft) > 0 && (
-                    <div>
-                      <label className="text-xs font-semibold text-inksoft block mb-1">Nr seryjny padów (kilka: po przecinku)</label>
-                      <input value={padSerialsDraft} onChange={(e) => setPadSerialsDraft(e.target.value)} className="w-full border border-line bg-white px-2 py-1.5 rounded text-sm font-mono" />
+                  {Array.from({ length: Math.min(Number(padsDraft) || 0, MAX_PADS) }, (_, i) => (
+                    <div key={i}>
+                      <label className="text-xs font-semibold text-inksoft block mb-1">Nr seryjny pada {i + 1}</label>
+                      <input
+                        value={padSerialsDraft[i] ?? ""}
+                        onChange={(e) => {
+                          const next = [...padSerialsDraft];
+                          while (next.length <= i) next.push("");
+                          next[i] = e.target.value;
+                          setPadSerialsDraft(next);
+                        }}
+                        className="w-full border border-line bg-white px-2 py-1.5 rounded text-sm font-mono"
+                      />
                     </div>
-                  )}
+                  ))}
                   <div>
                     <label className="text-xs font-semibold text-inksoft block mb-1">Uwagi</label>
                     <input value={notesDraft} onChange={(e) => setNotesDraft(e.target.value)} className="w-full border border-line bg-white px-2 py-1.5 rounded text-sm" />

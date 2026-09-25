@@ -102,7 +102,7 @@ Macu jest wyłączony; bidder działa na produkcji, włącznik: `buyback_setting
   "Obsłużona", podsumowanie punktacji Dziś/7/30 dni. Numer przesyłki służy tylko do
   znalezienia zamówienia przy rozpoczynaniu (w liście nie ma kolumny przesyłki; jest na karcie).
 - Kolumny edytowane w wierszu: Numer seryjny, SKU, Pady (liczba padów w zestawie — konsole; int >= 0,
-  0 jest poprawną wartością), Nr seryjny padów (`pad_serials`, jedno pole tekstowe, kilka numerów po przecinku; widoczne tylko gdy Pady > 0; nie jest wymagane do "Obsłużona"), Uwagi. **Warunek:** status "Obsłużona" wymaga numeru seryjnego, SKU i padów —
+  0 jest poprawną wartością), Numery seryjne padów (`pad_serials text[]`, element i = pad i+1; osobne pole na każdy pad, tyle ile wpisano w Pady, max 20; Enter w polu — skaner — zapisuje i przechodzi do następnego; nie wymagane do "Obsłużona"), Uwagi. **Warunek:** status "Obsłużona" wymaga numeru seryjnego, SKU i padów —
   pilnuje tego UI (`changeStatus`, komunikat co brakuje) i trigger `buyback_order_intake_require_complete`
   w bazie (sprawdza przy przejściu na "Obsłużona" i przy czyszczeniu pola w już obsłużonej paczce,
   więc stare obsłużone wiersze bez danych można uzupełniać po jednym polu).
@@ -164,7 +164,8 @@ miesięczny (§2 ust. 6) — dziś każdy obszar ma osobną tabelę i podsumowan
   `displayNameForEmail(email, members)` → skrócone imię, w razie braku imienia e-mail.
 - **Uwagi w wierszu listy:** kolumna "Uwagi" (między Statusem a Czasem) w Serwisie, Testach i Trade-in
   to `InlineEditCell` (tak samo kolumny "Numer seryjny", "SKU" i "Pady" w Trade-in) — zapis przy wyjściu z pola/Enterem,
-  Escape porzuca. W Trade-in edycja trafia też do logu zmian karty zamówienia.
+  Escape porzuca. W Trade-in edycja trafia też do logu zmian karty zamówienia; zapisy z listy Trade-in idą
+  jedną kolejką na najświeższym wierszu (szybkie skanowanie nie nadpisuje poprzednich pól).
 - **Cykl życia rekordu:** status + `started_at`/`finished_at`, `finished_at` czyszczone przy
   powrocie do statusu początkowego (wzór: `service_log`, `buyback_order_intake`).
 
