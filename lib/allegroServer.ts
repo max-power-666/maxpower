@@ -6,10 +6,18 @@ import type { AllegroApp, AllegroTokens, TokenStore } from "./allegro";
 // Zwraca null, dopóki nie ma kompletu: Client_ID, Client_Secret i ALLEGRO_UA. User-Agent nie ma wartości domyślnej celowo —
 // zapytania z nieprawidłowym User-Agentem kończą się zablokowaniem klucza API przez Allegro.
 export function allegroApp(): AllegroApp | null {
-  const clientId = process.env.ALLEGRO_CLIENT_ID;
-  const clientSecret = process.env.ALLEGRO_CLIENT_SECRET;
+  // Wartości przycinamy: znak nowej linii albo spacja wklejone razem z kluczem psują dopasowanie po stronie Allegro.
+  const clientId = process.env.ALLEGRO_CLIENT_ID?.trim();
+  const clientSecret = process.env.ALLEGRO_CLIENT_SECRET?.trim();
   const userAgent = process.env.ALLEGRO_UA?.trim();
   return clientId && clientSecret && userAgent ? { clientId, clientSecret, userAgent } : null;
+}
+
+// Adres, na który Allegro odsyła przeglądarkę po zgodzie. MUSI być identyczny (znak w znak) z wpisanym w ustawieniach
+// aplikacji na apps.developer.allegro.pl. Domyślnie budujemy go z adresu, pod którym otwarto aplikację; zmienna
+// ALLEGRO_REDIRECT_URI pozwala go ustawić na sztywno (np. gdy aplikacja jest dostępna pod kilkoma domenami).
+export function allegroRedirectUri(request: Request): string {
+  return process.env.ALLEGRO_REDIRECT_URI?.trim() || `${new URL(request.url).origin}/api/orders/allegro-callback`;
 }
 
 export function serviceClient(): SupabaseClient<any, any, any> {

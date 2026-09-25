@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { authorizeUrl } from "@/lib/allegro";
-import { allegroApp, requireAdmin, serviceClient } from "@/lib/allegroServer";
+import { allegroApp, allegroRedirectUri, requireAdmin, serviceClient } from "@/lib/allegroServer";
 
 // Łączenie konta Allegro (OAuth Authorization Code) — tylko Admin.
 //  GET  -> stan połączenia: { configured, connected, connectedAt, redirectUri }
@@ -8,7 +8,7 @@ import { allegroApp, requireAdmin, serviceClient } from "@/lib/allegroServer";
 // Adres przekierowania (redirectUri) trzeba wpisać dokładnie tak samo w ustawieniach aplikacji na apps.developer.allegro.pl.
 // Po zgodzie Allegro odsyła przeglądarkę do /api/orders/allegro-callback (patrz tamten plik).
 
-const redirectUriFor = (request: Request) => `${new URL(request.url).origin}/api/orders/allegro-callback`;
+const redirectUriFor = allegroRedirectUri;
 
 export async function GET(request: Request) {
   const admin = serviceClient();

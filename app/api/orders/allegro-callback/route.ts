@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { exchangeCode } from "@/lib/allegro";
-import { allegroApp, serviceClient } from "@/lib/allegroServer";
+import { allegroApp, allegroRedirectUri, serviceClient } from "@/lib/allegroServer";
 
 // Powrót z Allegro po wyrażeniu zgody: ?code=...&state=... (albo ?error=... po anulowaniu). To zwykłe przejście
 // przeglądarki, bez nagłówka Authorization — dlatego wiarygodność żądania potwierdza `state`, który wydaliśmy przy
@@ -30,7 +30,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const redirectUri = `${new URL(request.url).origin}/api/orders/allegro-callback`;
+    const redirectUri = allegroRedirectUri(request);
     const t = await exchangeCode(app, code, redirectUri);
     const { error } = await admin.from("oauth_tokens").upsert({
       marketplace: "allegro",
