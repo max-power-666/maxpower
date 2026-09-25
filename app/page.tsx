@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import TradeInView from "./_components/TradeInView";
@@ -538,9 +538,23 @@ function TeamView({
 }) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
 
-  function saveName(userId: string, value: string) {
-    onChangeName(userId, value.trim());
+  // Imię i nazwisko to zwykły tekst; dopiero "Zmień" (tylko Admin) otwiera pole, żeby nie dało się go przypadkiem edytować.
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  function cancelEdit(userId: string) {
     setDrafts(({ [userId]: _omit, ...rest }) => rest);
+    setEditingId(null);
+  }
+
+  const cancelled = useRef(false);
+
+  function saveName(userId: string, value: string) {
+    const skip = cancelled.current;
+    cancelled.current = false;
+    if (skip) return cancelEdit(userId); // Escape: porzuć zmianę
+    const current = members.find((m) => m.user_id === userId)?.name ?? "";
+    if (value.trim() !== current.trim()) onChangeName(userId, value.trim());
+    cancelEdit(userId);
   }
 
   return (
@@ -563,15 +577,32 @@ function TeamView({
             return (
               <tr key={m.user_id} className="border-b border-line last:border-b-0">
                 <td className="p-3">
-                  <input
-                    value={draft ?? m.name ?? ""}
-                    onChange={(e) => setDrafts({ ...drafts, [m.user_id]: e.target.value })}
-                    onBlur={(e) => saveName(m.user_id, e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
-                    placeholder="Imię i nazwisko"
-                    readOnly={!canEdit}
-                    className="w-full border border-line bg-white px-2 py-1.5 rounded text-sm font-semibold"
-                  />
+                  {editingId === m.user_id ? (
+                    <input
+                      autoFocus
+                      value={draft ?? m.name ?? ""}
+                      onChange={(e) => setDrafts({ ...drafts, [m.user_id]: e.target.value })}
+                      onBlur={(e) => saveName(m.user_id, e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
+                        if (e.key === "Escape") {
+                          cancelled.current = true;
+                          (e.currentTarget as HTMLInputElement).blur();
+                        }
+                      }}
+                      placeholder="Imię i nazwisko"
+                      className="w-full border border-line bg-white px-2 py-1.5 rounded text-sm font-semibold"
+                    />
+                  ) : (
+                    <div className="flex items-center gap-3">
+                      <span className="font-semibold">{m.name || "—"}</span>
+                      {canEdit && (
+                        <button onClick={() => setEditingId(m.user_id)} className="text-xs font-semibold text-teal hover:underline">
+                          Zmień
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </td>
                 <td className="p-3 text-inksoft">{m.email || "—"}</td>
                 <td className="p-3">
