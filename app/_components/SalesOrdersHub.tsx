@@ -377,6 +377,7 @@ function OrdersList({
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-inksoft border-b border-line">
+              <th className="p-3">Marketplace</th>
               <th className="p-3">Nr zamówienia</th>
               <th className="p-3">Data zamówienia</th>
               <th className="p-3">Status</th>
@@ -390,7 +391,7 @@ function OrdersList({
           </thead>
           <tbody>
             {!loading && rows.length === 0 && (
-              <tr><td colSpan={9} className="p-6 text-center text-inksoft text-sm">{search ? "Nic nie znaleziono dla tego numeru." : "Brak zamówień — kliknij Odśwież, żeby pobrać je z Back Market."}</td></tr>
+              <tr><td colSpan={10} className="p-6 text-center text-inksoft text-sm">{search ? "Nic nie znaleziono dla tego numeru." : "Brak zamówień — kliknij Odśwież, żeby pobrać je z Back Market."}</td></tr>
             )}
             {rows.map((r) => {
               // Zamówienie bez pozycji (jeszcze nie zsynchronizowane) pokazujemy jednym wierszem z samym SKU.
@@ -403,9 +404,11 @@ function OrdersList({
                   {idx === 0 && (
                     <>
                       <td rowSpan={items.length} className="p-3 whitespace-nowrap">
+                        {MARKETPLACES.find((m) => m.key === r.marketplace)?.label ?? r.marketplace}
+                      </td>
+                      <td rowSpan={items.length} className="p-3 whitespace-nowrap">
                         <button
                           onClick={() => onOpen(r.marketplace, r.external_id)}
-                          title={MARKETPLACES.find((m) => m.key === r.marketplace)?.label}
                           className="font-mono font-semibold text-teal hover:underline"
                         >
                           {r.external_id}
