@@ -32,7 +32,8 @@ export async function refurbedListOrders(
     const res = await doFetch(`${c.baseUrl ?? REFURBED_BASE_URL}/refb.merchant.v1.OrderService/ListOrders`, {
       method: "POST",
       headers: {
-        Authorization: `Plain ${c.token}`,
+        // Tolerujemy token wklejony razem z przedrostkiem "Plain " (tak wygląda wartość nagłówka np. w Make.com).
+        Authorization: `Plain ${c.token.trim().replace(/^Plain\s+/i, "")}`,
         "Content-Type": "application/json",
         Accept: "application/json",
         "User-Agent": c.userAgent,
