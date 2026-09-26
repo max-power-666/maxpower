@@ -5,6 +5,8 @@ import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import {
+  ATTACHMENT_ACCEPT,
+  BACKLOG_BUCKET,
   BACKLOG_AREAS,
   BACKLOG_PRIORITIES,
   BACKLOG_STATUSES,
@@ -12,6 +14,11 @@ import {
   backlogCode,
   backlogLabel,
   compareBacklog,
+  formatSize,
+  isImageType,
+  pastedFileName,
+  safeFileName,
+  validateAttachments,
   type BacklogPriority,
   type BacklogStatus,
   type BacklogType,
@@ -39,6 +46,19 @@ type Item = {
   updated_at: string;
   done_at: string | null;
   history: HistoryEntry[];
+  backlog_attachments?: { count: number }[]; // z zapytania listy: liczba załączników
+};
+
+type Attachment = {
+  id: number;
+  item_id: number;
+  path: string;
+  filename: string;
+  mime_type: string | null;
+  size_bytes: number | null;
+  uploaded_by_user_id: string | null;
+  uploaded_by_email: string | null;
+  created_at: string;
 };
 
 type Patch = Partial<Pick<Item, "title" | "type" | "priority" | "status" | "area" | "description" | "acceptance" | "assignee_email">>;
@@ -93,6 +113,80 @@ function logValue(field: keyof Patch, v: string | null, members: MemberLite[]): 
   return v.length > 90 ? v.slice(0, 90) + "…" : v;
 }
 
+// Pliki ze schowka (wklejone zrzuty ekranu) mają ogólną nazwę "image.png" — dajemy im czytelną, z datą.
+function collectFiles(list: FileList | File[] | null | undefined, fromPaste = false): File[] {
+  return Array.from(list ?? []).map((f) =>
+    fromPaste && /^image\.\w+$/i.test(f.name) ? new File([f], pastedFileName(f), { type: f.type }) : f
+  );
+}
+
+// Wgrywa pliki do prywatnego bucketu i zapisuje ich metadane. Zwraca nazwy plików, których nie udało się wgrać.
+async function uploadFiles(session: Session, itemId: number, files: File[]): Promise<{ done: string[]; failed: string[] }> {
+  const done: string[] = [];
+  const failed: string[] = [];
+  for (const f of files) {
+    const path = `${itemId}/${crypto.randomUUID()}-${safeFileName(f.name)}`;
+    const up = await supabase.storage.from(BACKLOG_BUCKET).upload(path, f, { contentType: f.type, upsert: false });
+    if (up.error) {
+      failed.push(`${f.name} (${up.error.message})`);
+      continue;
+    }
+    const { error: rowErr } = await supabase.from("backlog_attachments").insert({
+      item_id: itemId,
+      path,
+      filename: f.name,
+      mime_type: f.type,
+      size_bytes: f.size,
+      uploaded_by_user_id: session.user.id,
+      uploaded_by_email: session.user.email,
+    });
+    if (rowErr) {
+      await supabase.storage.from(BACKLOG_BUCKET).remove([path]); // nie zostawiamy pliku bez wiersza
+      failed.push(`${f.name} (${rowErr.message})`);
+      continue;
+    }
+    done.push(f.name);
+  }
+  return { done, failed };
+}
+
+// Pole do dodawania plików: wybór z dysku albo przeciągnięcie. (Wklejanie ze schowka obsługuje kontener nadrzędny.)
+function FilePicker({ onFiles, disabled }: { onFiles: (files: File[]) => void; disabled?: boolean }) {
+  const [over, setOver] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  return (
+    <div
+      onDragOver={(e) => {
+        e.preventDefault();
+        setOver(true);
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setOver(false);
+        if (!disabled) onFiles(collectFiles(e.dataTransfer.files));
+      }}
+      className={`border border-dashed rounded px-3 py-3 text-xs text-inksoft flex items-center justify-between gap-3 ${over ? "border-teal bg-tealsoft" : "border-line bg-paper"}`}
+    >
+      <span>Przeciągnij pliki tutaj, wklej zrzut ekranu (Ctrl+V) albo wybierz z dysku. Do 10 MB, obrazy, PDF, TXT, CSV, DOCX, XLSX.</span>
+      <button type="button" onClick={() => inputRef.current?.click()} disabled={disabled} className="px-3 py-1.5 border border-line bg-white rounded font-semibold text-ink disabled:opacity-50 whitespace-nowrap">
+        Wybierz pliki
+      </button>
+      <input
+        ref={inputRef}
+        type="file"
+        multiple
+        accept={ATTACHMENT_ACCEPT}
+        className="hidden"
+        onChange={(e) => {
+          onFiles(collectFiles(e.target.files));
+          e.target.value = ""; // pozwala wybrać ten sam plik ponownie
+        }}
+      />
+    </div>
+  );
+}
+
 export default function BacklogView({
   session,
   members,
@@ -139,7 +233,7 @@ export default function BacklogView({
     try {
       const all: Item[] = [];
       for (let from = 0; ; from += 1000) {
-        const { data, error: err } = await supabase.from("backlog_items").select("*").order("id", { ascending: false }).range(from, from + 999);
+        const { data, error: err } = await supabase.from("backlog_items").select("*, backlog_attachments(count)").order("id", { ascending: false }).range(from, from + 999);
         if (err) throw new Error(err.message);
         all.push(...((data as Item[]) || []));
         if (!data || data.length < 1000) break;
@@ -172,6 +266,14 @@ export default function BacklogView({
     setError("");
     setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, ...patch, history: [...(i.history || []), entry] } : i)));
     return true;
+  }
+
+  // Wpis do logu bez zmiany pól zadania (np. dodanie/usunięcie załącznika) — ta sama funkcja bazy, pusty patch.
+  async function logChange(item: Item, changes: FieldChange[]) {
+    const entry: HistoryEntry = { action: "edited", by_email: session.user.email ?? null, at: new Date().toISOString(), changes };
+    const { error: err } = await supabase.rpc("backlog_apply", { p_id: item.id, p_patch: {}, p_entry: entry });
+    if (err) setError(`Nie udało się zapisać wpisu w logu (${backlogCode(item.id)}): ${err.message}`);
+    else await load();
   }
 
   const assignable = useMemo(() => members.filter((m) => m.email), [members]);
@@ -272,6 +374,9 @@ export default function BacklogView({
                 <td className="p-3 max-w-md">
                   <button onClick={() => setOpenId(i.id)} className={`text-left font-semibold hover:underline ${i.status === "done" ? "line-through" : "text-teal"}`}>{i.title}</button>
                   {i.description && <div className="text-xs text-inksoft truncate max-w-md">{i.description}</div>}
+                  {(i.backlog_attachments?.[0]?.count ?? 0) > 0 && (
+                    <div className="text-xs text-inksoft" title="Załączniki">📎 {i.backlog_attachments![0].count}</div>
+                  )}
                 </td>
                 <td className="p-3 whitespace-nowrap">
                   <span className={`text-xs font-semibold px-2 py-1 rounded-full ${TYPE_STYLE[i.type]}`}>{backlogLabel(BACKLOG_TYPES, i.type)}</span>
@@ -312,6 +417,8 @@ export default function BacklogView({
           isAdmin={isAdmin}
           onClose={() => setOpenId(null)}
           onApply={applyPatch}
+          session={session}
+          onLog={logChange}
           onDeleted={async () => {
             setOpenId(null);
             await load();
@@ -345,6 +452,18 @@ function AddForm({
   const [acceptance, setAcceptance] = useState("");
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
+
+  function addFiles(list: File[]) {
+    if (list.length === 0) return;
+    const problems = validateAttachments([...files, ...list], 0);
+    if (problems.length > 0) {
+      setFormError(problems.join(" "));
+      return;
+    }
+    setFormError("");
+    setFiles((prev) => [...prev, ...list]);
+  }
 
   async function submit() {
     setFormError("");
@@ -353,7 +472,7 @@ function AddForm({
       return;
     }
     setSaving(true);
-    const { error: err } = await supabase.from("backlog_items").insert({
+    const { data: created, error: err } = await supabase.from("backlog_items").insert({
       title: title.trim(),
       type,
       priority,
@@ -365,18 +484,31 @@ function AddForm({
       created_by_user_id: session.user.id,
       created_by_email: session.user.email,
       history: [{ action: "created", by_email: session.user.email ?? null, at: new Date().toISOString() }],
-    });
-    setSaving(false);
-    if (err) {
-      setFormError(`Nie udało się dodać zadania: ${err.message}`);
+    }).select("id").single();
+    if (err || !created) {
+      setSaving(false);
+      setFormError(`Nie udało się dodać zadania: ${err?.message ?? "brak odpowiedzi"}`);
       onError("");
       return;
     }
+    // Zadanie już istnieje — załączniki dodajemy do niego; ewentualne porażki zgłaszamy, ale zadania nie cofamy.
+    const { failed } = files.length > 0 ? await uploadFiles(session, created.id as number, files) : { failed: [] as string[] };
+    setSaving(false);
     await onCreated();
+    if (failed.length > 0) onError(`Zadanie dodano, ale nie wszystkie załączniki się wgrały: ${failed.join("; ")}. Dodaj je ponownie na karcie zadania.`);
   }
 
   return (
-    <div className="border border-line bg-white p-4 mb-4">
+    <div
+      className="border border-line bg-white p-4 mb-4"
+      onPaste={(e) => {
+        const pasted = collectFiles(e.clipboardData.files, true);
+        if (pasted.length > 0) {
+          e.preventDefault(); // wklejamy plik (zrzut ekranu), nie tekst
+          addFiles(pasted);
+        }
+      }}
+    >
       <h2 className="text-xs font-semibold text-inksoft mb-3">NOWE ZADANIE</h2>
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3">
         <div className="md:col-span-4">
@@ -418,8 +550,23 @@ function AddForm({
           <textarea value={acceptance} onChange={(e) => setAcceptance(e.target.value)} rows={3} placeholder="Po czym poznamy, że to jest zrobione" className={inputCls} />
         </div>
       </div>
+      <div className="mb-3">
+        <label className="text-xs font-semibold text-inksoft block mb-1">Załączniki (opcjonalnie)</label>
+        <FilePicker onFiles={addFiles} disabled={saving} />
+        {files.length > 0 && (
+          <ul className="mt-2 text-xs space-y-1">
+            {files.map((f, i) => (
+              <li key={i} className="flex items-center gap-2">
+                <span className="font-mono">{f.name}</span>
+                <span className="text-inksoft">{formatSize(f.size)}</span>
+                <button type="button" onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))} className="text-rust hover:underline">usuń</button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
       {formError && <p className="text-rust text-xs mb-2">{formError}</p>}
-      <button onClick={submit} disabled={saving} className={btnPrimary}>{saving ? "Zapisywanie…" : "Dodaj zadanie"}</button>
+      <button onClick={submit} disabled={saving} className={btnPrimary}>{saving ? (files.length > 0 ? "Zapisywanie i wgrywanie plików…" : "Zapisywanie…") : "Dodaj zadanie"}</button>
     </div>
   );
 }
@@ -442,6 +589,8 @@ function BacklogCard({
   isAdmin,
   onClose,
   onApply,
+  session,
+  onLog,
   onDeleted,
   onError,
 }: {
@@ -451,9 +600,72 @@ function BacklogCard({
   isAdmin: boolean;
   onClose: () => void;
   onApply: (item: Item, patch: Patch) => Promise<boolean>;
+  session: Session;
+  onLog: (item: Item, changes: FieldChange[]) => Promise<void>;
   onDeleted: () => Promise<void>;
   onError: (msg: string) => void;
 }) {
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [urls, setUrls] = useState<Record<string, string>>({});
+  const [uploading, setUploading] = useState(false);
+  const [attError, setAttError] = useState("");
+
+  useEffect(() => {
+    loadAttachments();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item.id]);
+
+  // Bucket jest prywatny — do wyświetlenia potrzebne są podpisane adresy (ważne godzinę, odnawiane przy każdym otwarciu karty).
+  async function loadAttachments() {
+    const { data, error: err } = await supabase.from("backlog_attachments").select("*").eq("item_id", item.id).order("created_at");
+    if (err) {
+      setAttError(`Nie udało się wczytać załączników: ${err.message}`);
+      return;
+    }
+    const list = (data as Attachment[]) || [];
+    setAttachments(list);
+    if (list.length > 0) {
+      const signed = await supabase.storage.from(BACKLOG_BUCKET).createSignedUrls(list.map((a) => a.path), 3600);
+      const map: Record<string, string> = {};
+      for (const x of signed.data || []) if (x.signedUrl && x.path) map[x.path] = x.signedUrl;
+      setUrls(map);
+    }
+  }
+
+  async function addFiles(list: File[]) {
+    if (list.length === 0) return;
+    const problems = validateAttachments(list, attachments.length);
+    if (problems.length > 0) {
+      setAttError(problems.join(" "));
+      return;
+    }
+    setAttError("");
+    setUploading(true);
+    const { done, failed } = await uploadFiles(session, item.id, list);
+    setUploading(false);
+    if (failed.length > 0) setAttError(`Nie udało się wgrać: ${failed.join("; ")}`);
+    await loadAttachments();
+    if (done.length > 0) await onLog(item, done.map((n) => ({ field: "Załącznik", from: null, to: n })));
+  }
+
+  // Najpierw plik, potem wiersz: polityka usuwania pliku sprawdza wiersz w backlog_attachments (patrz backlog.sql).
+  async function removeAttachment(a: Attachment) {
+    if (!confirm(`Usunąć załącznik „${a.filename}”?`)) return;
+    const rm = await supabase.storage.from(BACKLOG_BUCKET).remove([a.path]);
+    if (rm.error || !rm.data?.length) {
+      setAttError(rm.error ? `Nie udało się usunąć pliku: ${rm.error.message}` : "Nie usunięto — załącznik może usunąć tylko jego autor albo Admin.");
+      return;
+    }
+    const { error: err } = await supabase.from("backlog_attachments").delete().eq("id", a.id);
+    if (err) {
+      setAttError(`Plik usunięto, ale nie wiersz: ${err.message}`);
+      return;
+    }
+    setAttError("");
+    await loadAttachments();
+    await onLog(item, [{ field: "Załącznik", from: a.filename, to: null }]);
+  }
+
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState({ title: "", type: "task" as BacklogType, priority: "p2" as BacklogPriority, area: "", assignee: "", description: "", acceptance: "" });
@@ -493,6 +705,8 @@ function BacklogCard({
   // Usuwanie tylko dla Admina (polityka w bazie: is_admin(); każde usunięcie trafia do deleted_records).
   async function remove() {
     if (!confirm(`Usunąć zadanie ${backlogCode(item.id)} „${item.title}”? Tej operacji nie można cofnąć.`)) return;
+    // Pliki zadania usuwamy razem z nim (wiersze znikną kaskadowo, ale pliki w Storage same by zostały).
+    if (attachments.length > 0) await supabase.storage.from(BACKLOG_BUCKET).remove(attachments.map((a) => a.path));
     const { data, error: err } = await supabase.from("backlog_items").delete().eq("id", item.id).select("id");
     if (err) onError(`Nie udało się usunąć: ${err.message}`);
     else if (!data?.length) onError("Nie usunięto — brak uprawnień (tylko Admin) albo zadanie już nie istnieje.");
@@ -501,7 +715,17 @@ function BacklogCard({
 
   return (
     <div className="fixed inset-0 bg-black/30 flex justify-end z-50" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="w-full max-w-lg bg-paper h-full overflow-y-auto p-6 border-l border-line">
+      <div
+        className="w-full max-w-lg bg-paper h-full overflow-y-auto p-6 border-l border-line"
+        onPaste={(e) => {
+          if (editing) return;
+          const pasted = collectFiles(e.clipboardData.files, true);
+          if (pasted.length > 0) {
+            e.preventDefault();
+            addFiles(pasted);
+          }
+        }}
+      >
         <div className="flex justify-between items-start mb-1">
           <div className="text-xs text-inksoft font-mono">{backlogCode(item.id)}</div>
           <button onClick={onClose} className="text-inksoft text-lg">✕</button>
@@ -585,6 +809,44 @@ function BacklogCard({
             </div>
           </div>
         )}
+
+        <h3 className="text-xs font-semibold text-inksoft mb-2">ZAŁĄCZNIKI {attachments.length > 0 && `(${attachments.length})`}</h3>
+        <div className="border border-line bg-white mb-6 p-3 text-sm">
+          {attachments.length === 0 && <div className="text-inksoft mb-2">Brak załączników.</div>}
+          {attachments.some((a) => isImageType(a.mime_type)) && (
+            <div className="flex flex-wrap gap-2 mb-3">
+              {attachments.filter((a) => isImageType(a.mime_type)).map((a) => (
+                <div key={a.id} className="relative">
+                  {urls[a.path] ? (
+                    <a href={urls[a.path]} target="_blank" rel="noreferrer" title={a.filename}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={urls[a.path]} alt={a.filename} className="h-24 w-24 object-cover border border-line rounded" />
+                    </a>
+                  ) : (
+                    <div className="h-24 w-24 border border-line rounded bg-paper" />
+                  )}
+                  <button onClick={() => removeAttachment(a)} title="Usuń załącznik" className="absolute -top-2 -right-2 bg-white border border-line rounded-full w-5 h-5 text-xs leading-none text-rust">✕</button>
+                </div>
+              ))}
+            </div>
+          )}
+          {attachments.filter((a) => !isImageType(a.mime_type)).map((a) => (
+            <div key={a.id} className="flex items-center justify-between gap-2 mb-1">
+              {urls[a.path] ? (
+                <a href={urls[a.path]} target="_blank" rel="noreferrer" className="text-teal hover:underline truncate">{a.filename}</a>
+              ) : (
+                <span className="truncate">{a.filename}</span>
+              )}
+              <span className="text-xs text-inksoft whitespace-nowrap">{formatSize(a.size_bytes)}</span>
+              <button onClick={() => removeAttachment(a)} className="text-xs text-rust hover:underline">usuń</button>
+            </div>
+          ))}
+          <div className="mt-2">
+            <FilePicker onFiles={addFiles} disabled={uploading} />
+          </div>
+          {uploading && <p className="text-xs text-inksoft mt-2">Wgrywanie…</p>}
+          {attError && <p className="text-rust text-xs mt-2">{attError}</p>}
+        </div>
 
         <h3 className="text-xs font-semibold text-inksoft mb-2">LOG ZMIAN</h3>
         <div className="border border-line bg-white mb-6 p-3 text-sm">

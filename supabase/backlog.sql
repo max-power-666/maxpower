@@ -88,7 +88,63 @@ begin
   end if;
 end $$;
 
+-- Załączniki (zrzuty ekranu, PDF-y itp.). Pliki leżą w PRYWATNYM bucketcie Supabase Storage (bez publicznych linków —
+-- aplikacja pokazuje je przez krótkotrwałe, podpisane adresy), a metadane w tabeli backlog_attachments.
+-- Limity pilnuje też sam bucket: do 10 MB na plik i tylko wymienione typy (obrazy, PDF, tekst, CSV, dokumenty Office).
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'backlog-attachments', 'backlog-attachments', false, 10485760,
+  array['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/pdf', 'text/plain', 'text/csv',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']
+)
+on conflict (id) do update
+  set public = false, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
+
+create table if not exists backlog_attachments (
+  id bigint generated always as identity primary key,
+  item_id bigint not null references backlog_items(id) on delete cascade,
+  path text not null unique,                   -- ścieżka pliku w bucketcie: <id zadania>/<uuid>-<nazwa>
+  filename text not null,                      -- oryginalna nazwa do wyświetlenia
+  mime_type text,
+  size_bytes bigint,
+  uploaded_by_user_id uuid references auth.users(id),
+  uploaded_by_email text,
+  created_at timestamptz not null default now()
+);
+create index if not exists backlog_attachments_item_idx on backlog_attachments (item_id);
+alter table backlog_attachments enable row level security;
+
+drop policy if exists "authenticated read backlog_attachments" on backlog_attachments;
+create policy "authenticated read backlog_attachments" on backlog_attachments
+  for select using (auth.role() = 'authenticated');
+drop policy if exists "authenticated insert backlog_attachments" on backlog_attachments;
+create policy "authenticated insert backlog_attachments" on backlog_attachments
+  for insert with check (auth.role() = 'authenticated' and uploaded_by_user_id = auth.uid());
+-- Załącznik usuwa jego autor albo Admin. Nie ma UPDATE — plik zastępuje się nowym.
+drop policy if exists "uploader or admin delete backlog_attachments" on backlog_attachments;
+create policy "uploader or admin delete backlog_attachments" on backlog_attachments
+  for delete using (uploaded_by_user_id = auth.uid() or is_admin());
+
+-- Dostęp do samych plików w Storage: czytać i wgrywać może każdy zalogowany; usunąć plik może Admin albo ten, kto go wgrał
+-- (sprawdzamy to po wierszu w backlog_attachments, dlatego aplikacja usuwa NAJPIERW plik, a potem wiersz).
+drop policy if exists "backlog attachments read" on storage.objects;
+create policy "backlog attachments read" on storage.objects
+  for select to authenticated using (bucket_id = 'backlog-attachments');
+drop policy if exists "backlog attachments upload" on storage.objects;
+create policy "backlog attachments upload" on storage.objects
+  for insert to authenticated with check (bucket_id = 'backlog-attachments');
+drop policy if exists "backlog attachments delete" on storage.objects;
+create policy "backlog attachments delete" on storage.objects
+  for delete to authenticated using (
+    bucket_id = 'backlog-attachments'
+    and (is_admin() or exists (
+      select 1 from backlog_attachments a where a.path = storage.objects.name and a.uploaded_by_user_id = auth.uid()
+    ))
+  );
+
 do $$
 begin
   begin alter publication supabase_realtime add table backlog_items; exception when duplicate_object then null; end;
+  begin alter publication supabase_realtime add table backlog_attachments; exception when duplicate_object then null; end;
 end $$;

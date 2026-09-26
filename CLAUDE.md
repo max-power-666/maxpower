@@ -185,6 +185,12 @@ statusów z licznikami (domyślnie "Aktywne" = bez zrobionych), filtry (prioryte
 zmiana statusu/priorytetu/osoby w wierszu i karta zadania (panel boczny). Dodawać i edytować może każdy zalogowany (autor ustawiany tylko z własnej sesji,
 niezmienny), **usuwać tylko Admin** (polityka + `audit_delete`). Zmiany idą przez funkcję bazy `backlog_apply` (patch tylko zmienianych pól + wpis do logu
 w jednej transakcji, historia dopisywana po stronie bazy); `updated_at` i `done_at` ustawia trigger.
+**Załączniki zadań** (zrzuty ekranu, PDF, TXT, CSV, DOCX, XLSX; do 10 MB, max 10 na zadanie): pliki w **prywatnym** buckecie Supabase Storage
+`backlog-attachments` (bez publicznych linków — widok przez podpisane adresy ważne godzinę), metadane w `backlog_attachments`. Dodawanie: przy tworzeniu
+zadania i na karcie — wybór z dysku, przeciągnięcie albo **wklejenie zrzutu ze schowka (Ctrl+V)**. Limity rozmiaru i typów pilnuje też sam bucket (`backlog.sql`).
+Usuwa załącznik jego autor albo Admin; kolejność usuwania to **najpierw plik, potem wiersz** (polityka `storage.objects` sprawdza wiersz). Usunięcie zadania
+usuwa też jego pliki ze Storage (wiersze znikają kaskadowo, ale pliki same by zostały). Dodanie/usunięcie załącznika trafia do logu zadania. Storage na
+darmowym planie Supabase ma łącznie 1 GB — warto go pilnować.
 
 **Serwis** (`ServiceView.tsx`, `service_log`). Rejestr napraw wg tabeli z regulaminu:
 Joy-Con para 15 pkt, kontroler PS4 25, Xbox One 35, PS5 12, czyszczenie konsoli 45.

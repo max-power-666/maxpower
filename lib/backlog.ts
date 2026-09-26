@@ -54,3 +54,58 @@ export function compareBacklog(
 }
 
 export const backlogCode = (id: number) => `ZAD-${id}`;
+
+/* ---------------- załączniki ---------------- */
+
+export const BACKLOG_BUCKET = "backlog-attachments";
+export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024; // tyle samo co limit bucketu w backlog.sql
+export const MAX_ATTACHMENTS_PER_ITEM = 10;
+
+// Te same typy co w bucketcie (backlog.sql) — sprawdzamy je przed wysłaniem, żeby błąd był czytelny.
+export const ALLOWED_ATTACHMENT_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "application/pdf",
+  "text/plain",
+  "text/csv",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+];
+export const ATTACHMENT_ACCEPT = ALLOWED_ATTACHMENT_TYPES.join(",");
+
+export const isImageType = (mime: string | null | undefined) => !!mime && mime.startsWith("image/");
+
+export function formatSize(bytes: number | null | undefined): string {
+  if (bytes === null || bytes === undefined) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+// Nazwa do ścieżki w Storage: tylko bezpieczne znaki (polskie litery i spacje zamieniamy), z zachowanym rozszerzeniem.
+export function safeFileName(name: string): string {
+  const cleaned = name.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "");
+  return (cleaned || "plik").slice(-80);
+}
+
+// Wklejone ze schowka zrzuty ekranu mają nazwę "image.png" — nadajemy czytelną, z datą.
+export function pastedFileName(file: File, now: Date = new Date()): string {
+  const ext = (file.type.split("/")[1] || "png").replace("jpeg", "jpg");
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `zrzut-${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}-${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}.${ext}`;
+}
+
+// Zwraca listę problemów (pusta = wszystko w porządku). `existing` to liczba już dodanych załączników zadania.
+export function validateAttachments(files: { name: string; size: number; type: string }[], existing: number): string[] {
+  const problems: string[] = [];
+  if (existing + files.length > MAX_ATTACHMENTS_PER_ITEM) {
+    problems.push(`Do zadania można dodać maksymalnie ${MAX_ATTACHMENTS_PER_ITEM} załączników.`);
+  }
+  for (const f of files) {
+    if (f.size > MAX_ATTACHMENT_BYTES) problems.push(`„${f.name}” jest za duży (${formatSize(f.size)}, limit ${formatSize(MAX_ATTACHMENT_BYTES)}).`);
+    else if (!ALLOWED_ATTACHMENT_TYPES.includes(f.type)) problems.push(`„${f.name}”: ten typ pliku nie jest obsługiwany (dozwolone: obrazy, PDF, TXT, CSV, DOCX, XLSX).`);
+  }
+  return problems;
+}
