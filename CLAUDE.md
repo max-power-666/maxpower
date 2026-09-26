@@ -166,6 +166,12 @@ Numer przesyłki (waybill) nie jest na liście — dociągamy `GET /order/checko
 (zapisane w `raw._shipments`). **Jak przy Erli: COD (`payment.type = CASH_ON_DELIVERY`) ma ten sam status `READY_FOR_PROCESSING` co opłacone**, więc zapisujemy
 je jako `READY_FOR_PROCESSING_COD` ("Za pobraniem"). Nie testowane na żywym API (brak konta/aplikacji w środowisku asystenta) — zweryfikowane na atrapie
 `fetch` wg swaggera (developer.allegro.pl/swagger.yaml).
+**Back Market — stan zamówienia vs stany pozycji:** gdy wszystkie pozycje dojdą do stanu końcowego, całe zamówienie ma stan 9 ("przetworzone") także
+przy zamówieniu anulowanym przez klienta (pozycja stan 4, brak `date_shipping`) — pokazywało się to jako "Wysłane" (w dniu poprawki: 463 anulowane
+i 399 zwrócone z 5748 zamówień). Dlatego `bmDerivedStatus` (`lib/salesOrders.ts`) zapisuje `cancelled` ("Anulowane"), gdy WSZYSTKIE pozycje mają stan 4,
+i `refunded` ("Zwrot"), gdy wszystkie 5/6; zamówienia częściowo anulowane zachowują stan z API. Stany pozycji (`BM_ORDERLINE_STATES`) widać na karcie
+("Stan pozycji"), a SQL poprawia stare wiersze. Ogólna zasada dla nowych kanałów: nie ufaj samemu stanowi zamówienia — sprawdź stany pozycji,
+płatność (COD) i anulowania.
 Nowy marketplace = nowa wartość `marketplace`, własna tabela surowa, własny mapper i sync; lista pozostaje wspólna.
 
 **Serwis** (`ServiceView.tsx`, `service_log`). Rejestr napraw wg tabeli z regulaminu:

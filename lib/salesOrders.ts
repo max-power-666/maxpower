@@ -25,6 +25,23 @@ export const BM_ORDER_STATES: Record<string, string> = {
   "3": "Do wysyłki",
   "8": "Nieopłacone",
   "9": "Wysłane",
+  // Nasze znaczniki wyliczone ze stanów pozycji (patrz mapBmToSales) — nie są wartościami z API:
+  cancelled: "Anulowane",
+  refunded: "Zwrot",
+};
+
+// Stany pozycji (orderline) Back Market — tabela "States for Orderlines" w dokumentacji API.
+export const BM_ORDERLINE_STATES: Record<string, string> = {
+  "0": "Nowa (czeka na płatność)",
+  "9": "Wstrzymana",
+  "8": "Oczekuje na płatność",
+  "1": "Opłacona (do zaakceptowania)",
+  "2": "Zaakceptowana",
+  "3": "Wysłana",
+  "4": "Anulowana",
+  "5": "Zwrot przed wysyłką",
+  "6": "Zwrot po wysyłce",
+  "7": "Nieopłacona",
 };
 
 // Stany zamówienia refurbed (OrderState z API) — liczone z stanów pozycji.
@@ -107,6 +124,17 @@ export function mapBmOrder(o: any) {
   };
 }
 
+// Stan zamówienia w Back Market bywa mylący: gdy WSZYSTKIE pozycje dojdą do stanu końcowego, całe zamówienie dostaje stan 9
+// ("przetworzone") — także wtedy, gdy klient je anulował i nic nie wysłano. Dlatego jeśli wszystkie pozycje są anulowane (4)
+// albo zwrócone (5, 6), pokazujemy "cancelled" / "refunded" zamiast stanu zamówienia. Zamówienie tylko częściowo anulowane
+// zachowuje stan z API (stany pozycji widać na karcie). Tę samą regułę ma jednorazowa poprawka w supabase/sales-orders.sql.
+export function bmDerivedStatus(o: any): string {
+  const states = ((o.orderlines as any[]) || []).map((l) => Number(l?.state));
+  if (states.length > 0 && states.every((s) => s === 4)) return "cancelled";
+  if (states.length > 0 && states.every((s) => s === 5 || s === 6)) return "refunded";
+  return String(o.state);
+}
+
 // To samo zamówienie -> wiersz wspólnej tabeli sales_orders. W orderlines[].listing API zwraca SKU.
 export function mapBmToSales(o: any) {
   const skus = Array.from(
@@ -116,7 +144,7 @@ export function mapBmToSales(o: any) {
     marketplace: "backmarket",
     external_id: String(o.order_id),
     order_date: o.date_creation ?? null,
-    status: String(o.state),
+    status: bmDerivedStatus(o),
     sku: skus.length > 0 ? skus.join(", ") : null,
     tracking_number: o.tracking_number || null,
     synced_at: new Date().toISOString(),

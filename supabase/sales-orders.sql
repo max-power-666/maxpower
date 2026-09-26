@@ -200,6 +200,20 @@ create table if not exists sales_orders_sync_meta (
   scan_cursor text                           -- refurbed: id ostatniego pobranego zamówienia; Erli: pole `cursor` ostatniego zamówienia; Allegro: updatedAt ostatniego zamówienia (paginacja kursorem zamiast numeru strony)
 );
 alter table sales_orders_sync_meta add column if not exists scan_cursor text;
+-- Back Market: gdy wszystkie pozycje zamówienia są anulowane (stan 4) albo zwrócone (5, 6), zamówienie ma w API i tak stan 9
+-- ("przetworzone"), co wyglądało jak "wysłane". Pokazujemy wtedy "cancelled" / "refunded" (patrz bmDerivedStatus w
+-- lib/salesOrders.ts). Tu poprawiamy zamówienia pobrane wcześniej; kolejne synchronizacje robią to same.
+update sales_orders s set status = d.derived
+  from (
+    select o.order_id::text as id,
+           case when bool_and((l->>'state')::int = 4) then 'cancelled'
+                when bool_and((l->>'state')::int in (5, 6)) then 'refunded' end as derived
+      from bm_orders o
+     cross join lateral jsonb_array_elements(case when jsonb_typeof(o.orderlines) = 'array' then o.orderlines else '[]'::jsonb end) l
+     group by o.order_id
+  ) d
+ where s.marketplace = 'backmarket' and s.external_id = d.id and d.derived is not null and s.status <> d.derived;
+
 -- Erli: zamówienie za pobraniem (COD) ma w API status "purchased", tak samo jak opłacone. Rozróżniamy je własnym statusem
 -- "purchased_cod" (ustawia to synchronizacja, patrz mapErliToSales). Tu poprawiamy zamówienia pobrane wcześniej.
 update sales_orders s set status = 'purchased_cod'

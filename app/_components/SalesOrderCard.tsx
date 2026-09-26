@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
-import { MARKETPLACES, OUR_STATUSES, salesStatusLabel } from "@/lib/salesOrders";
+import { BM_ORDERLINE_STATES, MARKETPLACES, OUR_STATUSES, salesStatusLabel } from "@/lib/salesOrders";
 import { MAX_PADS } from "./PadSerialsCell";
 
 // Karta zamówienia sprzedaży (panel boczny po kliknięciu numeru zamówienia): dane z API marketplace'u,
@@ -76,6 +76,7 @@ type Address = {
 };
 type OrderLine = {
   id?: number;
+  state?: number;
   listing?: string;
   product?: string;
   brand?: string;
@@ -686,6 +687,7 @@ export default function SalesOrderCard({
                       <div key={l.id ?? i} className="border border-line bg-white mb-2">
                         <Row label="Produkt" value={l.product} />
                         <Row label="SKU" value={l.listing} mono />
+                        <Row label="Stan pozycji" value={l.state === undefined ? null : (BM_ORDERLINE_STATES[String(l.state)] ?? `Stan ${l.state}`)} />
                         <Row label="Ilość" value={l.quantity === undefined ? null : String(l.quantity)} />
                         <Row label="Cena" value={fmtMoney(l.price, l.currency)} />
                         <Row label="IMEI (Back Market)" value={l.imei} mono />
