@@ -129,6 +129,9 @@ w porcjach z kursorem (`sales_orders_sync_meta`, wiersz per kanał), potem przyr
 `lib/scanOrders.ts` co przy skupie. Dodatkowo każdy przebieg odświeża pojedynczo (`GET /ws/orders/{id}`) do 25 zamówień w stanach
 nieskończonych (0/10/1/3), nieodświeżanych od godziny — siatka bezpieczeństwa, gdyby `date_modification` pominęło zmianę statusu. Surowy status Back Market to kod stanu ("1", "3", "9"), etykiety w `lib/salesOrders.ts`
 (`BM_ORDER_STATES`); API nie zwraca stanów 0 i 8. SKU = `orderlines[].listing`, kilka pozycji po przecinku.
+Na górze zakładki są kafelki **Zamówienia dzisiaj / wczoraj** (`DaySummary`, `summarizeDays` w `lib/salesOrders.ts`): doby lokalne
+(północ do północy w strefie przeglądarki), po `order_date`, z podziałem na marketplace'y. **Nie liczą się** anulowane, zwrócone/odrzucone
+i nieopłacone (`NOT_COUNTED` — nowy kanał trzeba tam dopisać); zamówienie za pobraniem się liczy.
 Numer zamówienia na liście jest linkiem do **karty zamówienia** (`SalesOrderCard.tsx`, panel boczny): dane z API
 (pozycje, daty, dostawa, adres dostawy — z surowej tabeli kanału), dane pracownicze (edytowalne) i numerowany log zmian;
 edycje z listy i z karty trafiają do tego samego logu (wzór: karta zamówienia Trade-in). Na górze karty link "Otwórz w Back Market" (`https://www.backmarket.fr/bo-seller/orders/all?page=1&pageSize=10&endDate={dziś}&orderId={numer}`).

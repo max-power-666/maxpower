@@ -345,3 +345,41 @@ export function mapAllegroItems(o: any) {
   });
   return items;
 }
+
+/* ---------------- podsumowanie dzienne ---------------- */
+
+// Statusy, które NIE liczą się do "liczby zamówień": anulowane, zwrócone/odrzucone i jeszcze nieopłacone
+// (klient nie zapłacił, więc to nie jest jeszcze zamówienie do realizacji). Zamówienie za pobraniem liczy się.
+const NOT_COUNTED: Record<string, string[]> = {
+  backmarket: ["cancelled", "refunded", "10", "0", "8"],
+  refurbed: ["CANCELLED", "REJECTED", "RETURNED"],
+  erli: ["cancelled", "returned", "pending"],
+  allegro: ["CANCELLED", "BOUGHT", "FILLED_IN"],
+};
+
+export function isCountedOrder(marketplace: string, status: string): boolean {
+  return !(NOT_COUNTED[marketplace] ?? []).includes(status);
+}
+
+export type DayCount = { total: number; byMarketplace: Record<string, number> };
+
+// Liczy zamówienia z dzisiaj i wczoraj według LOKALNEJ doby (północ do północy w strefie przeglądarki).
+export function summarizeDays(
+  rows: { marketplace: string; status: string; order_date: string | null }[],
+  now: Date = new Date()
+): { today: DayCount; yesterday: DayCount } {
+  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const startYesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1).getTime();
+  const out = { today: { total: 0, byMarketplace: {} as Record<string, number> }, yesterday: { total: 0, byMarketplace: {} as Record<string, number> } };
+  for (const r of rows) {
+    if (!r.order_date || !isCountedOrder(r.marketplace, r.status)) continue;
+    const t = Date.parse(r.order_date);
+    const bucket = t >= startToday ? out.today : t >= startYesterday ? out.yesterday : null;
+    if (!bucket || t >= startToday + 24 * 3600 * 1000 + 3600 * 1000) continue; // przyszłe daty (błędne dane) pomijamy
+    bucket.total += 1;
+    bucket.byMarketplace[r.marketplace] = (bucket.byMarketplace[r.marketplace] ?? 0) + 1;
+  }
+  return out;
+}
+
+export const startOfYesterdayIso = (now: Date = new Date()) => new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1).toISOString();

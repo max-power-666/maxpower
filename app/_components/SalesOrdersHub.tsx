@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
-import { MARKETPLACES, OUR_STATUSES, salesStatusLabel, type OurStatus } from "@/lib/salesOrders";
+import { MARKETPLACES, OUR_STATUSES, salesStatusLabel, startOfYesterdayIso, summarizeDays, type DayCount, type OurStatus } from "@/lib/salesOrders";
 import { escapeLike } from "@/lib/search";
 import { type MemberLite } from "@/lib/displayName";
 import InlineEditCell from "./InlineEditCell";
@@ -208,6 +208,8 @@ export default function SalesOrdersHub({ session, members, isAdmin }: { session:
       {error && <p className="text-rust text-xs mb-3">{error}</p>}
       {note && <p className="text-inksoft text-xs mb-3">{note}</p>}
 
+      <DaySummary reloadKey={reloadKey} />
+
       {sub === "orders" && (
         <OrdersList reloadKey={reloadKey} session={session} onOpen={(marketplace, externalId) => setOpenOrder({ marketplace, externalId })} />
       )}
@@ -222,6 +224,82 @@ export default function SalesOrdersHub({ session, members, isAdmin }: { session:
           onClose={() => setOpenOrder(null)}
         />
       )}
+    </div>
+  );
+}
+
+/* ---------------- podsumowanie: zamówienia dziś i wczoraj ---------------- */
+
+// Liczy zamówienia z dzisiejszej i wczorajszej doby (czas lokalny), bez anulowanych, zwróconych i nieopłaconych
+// (patrz isCountedOrder). Data zamówienia = order_date z listy, więc liczby zgadzają się z tym, co widać poniżej.
+function DaySummary({ reloadKey }: { reloadKey: number }) {
+  const [days, setDays] = useState<{ today: DayCount; yesterday: DayCount } | null>(null);
+  const [error, setError] = useState("");
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    load();
+    // Synchronizacja zmienia setki wierszy naraz — odświeżamy z opóźnieniem, jednym zapytaniem (jak lista poniżej).
+    const schedule = () => {
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = setTimeout(load, 3000);
+    };
+    const channel = supabase
+      .channel("sales-day-summary")
+      .on("postgres_changes", { event: "*", schema: "public", table: "sales_orders" }, schedule)
+      .subscribe();
+    return () => {
+      if (timer.current) clearTimeout(timer.current);
+      supabase.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reloadKey]);
+
+  async function load() {
+    try {
+      const since = startOfYesterdayIso();
+      const rows: { marketplace: string; status: string; order_date: string | null }[] = [];
+      // PostgREST oddaje max 1000 wierszy na zapytanie — czytamy stronami.
+      for (let from = 0; ; from += 1000) {
+        const { data, error: err } = await supabase
+          .from("sales_orders")
+          .select("marketplace, status, order_date")
+          .gte("order_date", since)
+          .order("order_date", { ascending: false })
+          .range(from, from + 999);
+        if (err) throw new Error(err.message);
+        rows.push(...((data as typeof rows) || []));
+        if (!data || data.length < 1000) break;
+      }
+      setDays(summarizeDays(rows));
+      setError("");
+    } catch (e: any) {
+      setError(`Nie udało się policzyć zamówień: ${e.message || e}`);
+    }
+  }
+
+  const tile = (label: string, d: DayCount | undefined) => (
+    <div className="border border-line bg-white px-4 py-3 min-w-[13rem]">
+      <div className="text-xs font-semibold text-inksoft">{label}</div>
+      <div className="text-3xl font-semibold font-mono">{d ? d.total : "—"}</div>
+      <div className="flex flex-wrap gap-1 mt-1 min-h-[1.5rem]">
+        {d &&
+          MARKETPLACES.filter((m) => d.byMarketplace[m.key]).map((m) => (
+            <span key={m.key} className={`text-xs font-semibold px-2 py-0.5 rounded-full ${MARKETPLACE_STYLE[m.key] ?? "bg-paper text-inksoft border border-line"}`}>
+              {m.label} {d.byMarketplace[m.key]}
+            </span>
+          ))}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="mb-5">
+      <div className="flex flex-wrap gap-3" title="Bez anulowanych, zwróconych i nieopłaconych zamówień">
+        {tile("Zamówienia dzisiaj", days?.today)}
+        {tile("Zamówienia wczoraj", days?.yesterday)}
+      </div>
+      {error && <p className="text-rust text-xs mt-2">{error}</p>}
     </div>
   );
 }
