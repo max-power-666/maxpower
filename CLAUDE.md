@@ -278,6 +278,10 @@ Configuration) musi być aktualny adres produkcyjny, inaczej magic link nie zadz
 - **Realtime + synchronizacja:** listy zasilane masowo przez serwer (np. Zamówienia) nie mogą przeładowywać się po każdym
   zdarzeniu realtime — sync zapisuje setki wierszy naraz i przeglądarka dostaje "Failed to fetch". Zdarzenia zbieramy w jedno
   odświeżenie (debounce 1,5 s), a starsze odpowiedzi ignorujemy (`loadSeq`) — patrz `OrdersList` w `SalesOrdersHub.tsx`.
+- **Duplikaty w paczce upsertu:** jedna operacja upsert nie może zawierać dwóch wierszy o tym samym kluczu (błąd "ON CONFLICT DO UPDATE
+  command cannot affect row a second time"). Paczki pobranych zamówień mają duplikaty (kursor po dacie jest włączny; lista ze stronami
+  przesuwa się w trakcie), więc każdy `saveOrders` w `app/api/orders/*-sync` przepuszcza dane przez `uniqueBy` (`lib/salesOrders.ts`) —
+  zamówienia po id, pozycje po `external_id#item_key`. Nowy kanał musi robić to samo.
 - Back Market najpewniej filtruje po IP — endpointów nie da się testować z sandboxa
   asystenta (401 nawet dla działających). Testuje się na Vercelu albo na komputerze
   właściciela.

@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { isAuthorized } from "@/lib/buyback";
 import { AllegroReauthError, allegroSweep, attachShipments, getAccessToken, type AllegroClient } from "@/lib/allegro";
 import { allegroApp, serviceClient, tokenStore } from "@/lib/allegroServer";
-import { mapAllegroItems, mapAllegroOrder, mapAllegroToSales } from "@/lib/salesOrders";
+import { mapAllegroItems, mapAllegroOrder, mapAllegroToSales, uniqueBy } from "@/lib/salesOrders";
 
 // Synchronizuje zamówienia SPRZEDAŻY z Allegro (GET /order/checkout-forms, dokumentacja: https://developer.allegro.pl)
 // do allegro_orders (surowe dane) i sales_orders + sales_order_items (wspólna lista). Odpowiednik orders/bm-sync.
@@ -24,11 +24,12 @@ const BUDGET_MS = 200_000;
 // Zapis pobranych zamówień. Upsert pozycji zawiera tylko pola z API, więc numery seryjne i pady wpisane
 // przez zespół zostają nietknięte (patrz bm-sync).
 async function saveOrders(admin: SupabaseClient<any, any, any>, orders: any[]) {
+  // orders są już bez duplikatów (patrz save niżej), ale pozycje zabezpieczamy osobno
   const { error: rawErr } = await admin.from("allegro_orders").upsert(orders.map(mapAllegroOrder));
   if (rawErr) throw new Error(`Błąd zapisu do Supabase (allegro_orders): ${rawErr.message}`);
   const { error: salesErr } = await admin.from("sales_orders").upsert(orders.map(mapAllegroToSales));
   if (salesErr) throw new Error(`Błąd zapisu do Supabase (sales_orders): ${salesErr.message}`);
-  const items = orders.flatMap(mapAllegroItems);
+  const items = uniqueBy(orders.flatMap(mapAllegroItems), (i) => `${i.external_id}#${i.item_key}`);
   if (items.length > 0) {
     const { error: itemsErr } = await admin.from("sales_order_items").upsert(items);
     if (itemsErr) throw new Error(`Błąd zapisu do Supabase (sales_order_items): ${itemsErr.message}`);
@@ -70,7 +71,9 @@ export async function GET(request: Request) {
     const result = await allegroSweep(client, {
       since,
       budgetMs: BUDGET_MS,
-      save: async (orders) => {
+      save: async (all) => {
+        // Kursor po updatedAt jest włączny — kolejna strona zaczyna od ostatniego zamówienia poprzedniej, więc paczka ma duplikaty.
+        const orders = uniqueBy(all, (o) => String(o.id));
         await attachShipments(client, orders);
         await saveOrders(admin, orders);
       },

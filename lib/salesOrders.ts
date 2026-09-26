@@ -383,3 +383,13 @@ export function summarizeDays(
 }
 
 export const startOfYesterdayIso = (now: Date = new Date()) => new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1).toISOString();
+
+// Jedna operacja upsert nie może zawierać dwóch wierszy o tym samym kluczu ("ON CONFLICT DO UPDATE command cannot affect row a
+// second time"), a paczki pobranych zamówień potrafią mieć duplikaty: kursor po dacie jest włączny (kolejna strona zaczyna od
+// ostatniego zamówienia poprzedniej), a lista z numerami stron przesuwa się, gdy zamówienie zmieni się w trakcie pobierania.
+// Przy powtórzeniu wygrywa późniejsze (świeższe) wystąpienie.
+export function uniqueBy<T>(list: T[], key: (item: T) => string): T[] {
+  const m = new Map<string, T>();
+  for (const item of list) m.set(key(item), item);
+  return Array.from(m.values());
+}

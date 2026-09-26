@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { isAuthorized } from "@/lib/buyback";
 import { scanOrders } from "@/lib/scanOrders";
-import { mapBmItems, mapBmOrder, mapBmToSales } from "@/lib/salesOrders";
+import { mapBmItems, mapBmOrder, mapBmToSales, uniqueBy } from "@/lib/salesOrders";
 
 // Synchronizuje zamówienia SPRZEDAŻY z Back Marketu (GET /ws/orders, dokumentacja: https://api.backmarket.dev,
 // sekcja Orders) do bm_orders (surowe dane) i sales_orders (wspólna lista). Osobne od zamówień skupu
@@ -33,12 +33,13 @@ const RECHECK_DEADLINE_MS = 250_000; // po tym czasie od startu funkcji nie zacz
 // Zapis pobranych zamówień: surowe dane, wspólna lista i pozycje (kolejność ma znaczenie: pozycje mają klucz
 // obcy do zamówienia). Upsert pozycji zawiera tylko pola z API, więc numery seryjne i pady wpisane
 // przez zespół zostają nietknięte.
-async function saveOrders(admin: SupabaseClient<any, any, any>, orders: any[]) {
+async function saveOrders(admin: SupabaseClient<any, any, any>, all: any[]) {
+  const orders = uniqueBy(all, (o) => String(o.order_id));
   const { error: rawErr } = await admin.from("bm_orders").upsert(orders.map(mapBmOrder));
   if (rawErr) throw new Error(`Błąd zapisu do Supabase (bm_orders): ${rawErr.message}`);
   const { error: salesErr } = await admin.from("sales_orders").upsert(orders.map(mapBmToSales));
   if (salesErr) throw new Error(`Błąd zapisu do Supabase (sales_orders): ${salesErr.message}`);
-  const items = orders.flatMap(mapBmItems);
+  const items = uniqueBy(orders.flatMap(mapBmItems), (i) => `${i.external_id}#${i.item_key}`);
   if (items.length > 0) {
     const { error: itemsErr } = await admin.from("sales_order_items").upsert(items);
     if (itemsErr) throw new Error(`Błąd zapisu do Supabase (sales_order_items): ${itemsErr.message}`);

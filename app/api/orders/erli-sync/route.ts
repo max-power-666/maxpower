@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { isAuthorized } from "@/lib/buyback";
 import { erliSweep, type ErliClient } from "@/lib/erli";
-import { mapErliItems, mapErliOrder, mapErliToSales } from "@/lib/salesOrders";
+import { mapErliItems, mapErliOrder, mapErliToSales, uniqueBy } from "@/lib/salesOrders";
 
 // Synchronizuje zamówienia SPRZEDAŻY z Erli (POST /orders/_search, dokumentacja: https://erli.pl/svc/shop-api/doc/)
 // do erli_orders (surowe dane) i sales_orders + sales_order_items (wspólna lista). Odpowiednik orders/bm-sync.
@@ -21,12 +21,13 @@ const BUDGET_MS = 200_000;
 
 // Zapis pobranych zamówień. Upsert pozycji zawiera tylko pola z API, więc numery seryjne i pady wpisane
 // przez zespół zostają nietknięte (patrz bm-sync).
-async function saveOrders(admin: SupabaseClient<any, any, any>, orders: any[]) {
+async function saveOrders(admin: SupabaseClient<any, any, any>, all: any[]) {
+  const orders = uniqueBy(all, (o) => String(o.id));
   const { error: rawErr } = await admin.from("erli_orders").upsert(orders.map(mapErliOrder));
   if (rawErr) throw new Error(`Błąd zapisu do Supabase (erli_orders): ${rawErr.message}`);
   const { error: salesErr } = await admin.from("sales_orders").upsert(orders.map(mapErliToSales));
   if (salesErr) throw new Error(`Błąd zapisu do Supabase (sales_orders): ${salesErr.message}`);
-  const items = orders.flatMap(mapErliItems);
+  const items = uniqueBy(orders.flatMap(mapErliItems), (i) => `${i.external_id}#${i.item_key}`);
   if (items.length > 0) {
     const { error: itemsErr } = await admin.from("sales_order_items").upsert(items);
     if (itemsErr) throw new Error(`Błąd zapisu do Supabase (sales_order_items): ${itemsErr.message}`);

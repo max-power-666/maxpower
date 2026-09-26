@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { isAuthorized } from "@/lib/buyback";
 import { refurbedSweep, type RefurbedClient } from "@/lib/refurbed";
-import { mapRefurbedItems, mapRefurbedOrder, mapRefurbedToSales } from "@/lib/salesOrders";
+import { mapRefurbedItems, mapRefurbedOrder, mapRefurbedToSales, uniqueBy } from "@/lib/salesOrders";
 
 // Synchronizuje zamówienia SPRZEDAŻY z refurbed (OrderService/ListOrders, dokumentacja w CLAUDE.md) do
 // refurbed_orders (surowe dane) i sales_orders + sales_order_items (wspólna lista). Odpowiednik orders/bm-sync.
@@ -26,12 +26,13 @@ const OPEN_STATES = ["NEW", "ACCEPTED", "SHIPPED"];
 
 // Zapis pobranych zamówień. Upsert pozycji zawiera tylko pola z API, więc numery seryjne i pady wpisane
 // przez zespół zostają nietknięte (patrz bm-sync).
-async function saveOrders(admin: SupabaseClient<any, any, any>, orders: any[]) {
+async function saveOrders(admin: SupabaseClient<any, any, any>, all: any[]) {
+  const orders = uniqueBy(all, (o) => String(o.id));
   const { error: rawErr } = await admin.from("refurbed_orders").upsert(orders.map(mapRefurbedOrder));
   if (rawErr) throw new Error(`Błąd zapisu do Supabase (refurbed_orders): ${rawErr.message}`);
   const { error: salesErr } = await admin.from("sales_orders").upsert(orders.map(mapRefurbedToSales));
   if (salesErr) throw new Error(`Błąd zapisu do Supabase (sales_orders): ${salesErr.message}`);
-  const items = orders.flatMap(mapRefurbedItems);
+  const items = uniqueBy(orders.flatMap(mapRefurbedItems), (i) => `${i.external_id}#${i.item_key}`);
   if (items.length > 0) {
     const { error: itemsErr } = await admin.from("sales_order_items").upsert(items);
     if (itemsErr) throw new Error(`Błąd zapisu do Supabase (sales_order_items): ${itemsErr.message}`);
