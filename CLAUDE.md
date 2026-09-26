@@ -194,8 +194,9 @@ usuwa też jego pliki ze Storage (wiersze znikają kaskadowo, ale pliki same by 
 darmowym planie Supabase ma łącznie 1 GB — warto go pilnować.
 
 **Wysyłka** (`ShippingView.tsx`, `lib/dhlExpress.ts`, `app/api/shipping/dhl-express/check`) — moduł nadawania przesyłek w budowie; dziś tylko
-**sprawdzenie połączenia z DHL Express** (MyDHL API REST, OpenAPI 3.3.1, nagłówek `x-version: 3.3.1`): `GET /products` pokazuje produkty dostępne na naszym koncie
-dla trasy z Polski i parametrów paczki, z wyróżnionym **Economy Select** (kod `H` towary / `W` dokumenty — weryfikowany na żywo). Logowanie Basic:
+**sprawdzenie połączenia i wycena DHL Express** (MyDHL API REST, OpenAPI 3.3.1, nagłówek `x-version: 3.3.1`): `GET /rates` pokazuje produkty dostępne na naszym koncie
+dla trasy z Polski i parametrów paczki **razem z ceną wg cennika konta** (cena w walucie rozliczeniowej `BILLC` i w PLN `PULCL`, waga taryfowa = większa z rzeczywistej
+i objętościowej, rozwijane składniki ceny), z wyróżnionym **Economy Select** (kod `H` towary / `W` dokumenty — weryfikowany na żywo). Logowanie Basic:
 API Key (Username / site ID) : API Secret (Password) z aplikacji MyDHL na developer.dhl.com — ta sama para dla testu i produkcji; środowisko wybiera adres
 (`express.api.dhl.com/mydhlapi/test` vs `/mydhlapi`), domyślnie testowe. Route dostępny tylko dla Admina i Managera (`lib/serverAuth.ts` `requireRole`), klucze i numer
 konta nie trafiają do przeglądarki. **Ograniczenia DHL Express:** środowisko testowe ma limit 500 wywołań dziennie; API **nie pozwala anulować przesyłki**

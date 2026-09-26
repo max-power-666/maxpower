@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
-import { isEconomySelect, type DhlProduct } from "@/lib/dhlExpress";
+import { isEconomySelect, type DhlMoney, type DhlProduct } from "@/lib/dhlExpress";
 
 // Zakładka Wysyłka. Na razie: sprawdzenie połączenia z DHL Express (MyDHL API) — pokazuje, jakie produkty (w tym Economy Select)
-// są dostępne na naszym koncie dla wybranej trasy. Niczego nie nadaje i nic nie kosztuje. Tworzenie przesyłek i etykiet dojdzie
+// są dostępne na naszym koncie dla wybranej trasy oraz ICH WYCENĘ wg cennika konta. Niczego nie nadaje i nic nie kosztuje. Tworzenie przesyłek i etykiet dojdzie
 // po potwierdzeniu, że produkt i trasa działają. Klucze i numer konta są tylko na serwerze (route /api/shipping/dhl-express/check).
 
 // Kraje docelowe do wyboru (UE + kilka popularnych poza nią). Poza UE przesyłka wymaga odprawy celnej.
@@ -17,6 +17,9 @@ const COUNTRY_NAME: Record<string, string> = {
   MT: "Malta", NL: "Holandia", PL: "Polska", PT: "Portugalia", RO: "Rumunia", SK: "Słowacja", SI: "Słowenia", ES: "Hiszpania", SE: "Szwecja",
   GB: "Wielka Brytania", CH: "Szwajcaria", NO: "Norwegia", US: "USA", UA: "Ukraina", TR: "Turcja",
 };
+
+const fmtMoney = (m: DhlMoney | null) =>
+  m ? `${m.price.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${m.currency}` : "—";
 
 const inputCls = "w-full border border-line bg-white px-2 py-2 rounded text-sm";
 const STORAGE_KEY = "dhl-check-origin";
@@ -35,6 +38,7 @@ export default function ShippingView({ session }: { session: Session }) {
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<{ env: string; products: DhlProduct[]; warnings: string[]; country: string } | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/shipping/dhl-express/check", { headers: auth })
@@ -53,6 +57,7 @@ export default function ShippingView({ session }: { session: Session }) {
   async function check() {
     setError("");
     setResult(null);
+    setExpanded(null);
     setChecking(true);
     try {
       try {
@@ -162,7 +167,9 @@ export default function ShippingView({ session }: { session: Session }) {
         <div>
           <div className={`border p-3 mb-3 text-sm ${economy.length > 0 ? "border-teal bg-tealsoft text-teal" : "border-rust bg-rustsoft text-rust"} font-semibold`}>
             {economy.length > 0
-              ? `Economy Select jest dostępny na trasie PL → ${result.country} (kod produktu: ${economy.map((p) => p.code).join(", ")}).`
+              ? `Economy Select jest dostępny na trasie PL → ${result.country} (kod ${economy.map((p) => p.code).join(", ")}): ${economy
+                  .map((p) => [fmtMoney(p.billing), p.local && p.billing?.currency !== p.local.currency ? `≈ ${fmtMoney(p.local)}` : null, p.transitDays !== null ? `${p.transitDays} dni` : null].filter(Boolean).join(" · "))
+                  .join("; ")}.`
               : `Economy Select NIE jest dostępny na trasie PL → ${result.country} na tym koncie (albo dla tych parametrów paczki).`}
           </div>
           <div className="border border-line bg-white overflow-x-auto">
@@ -173,6 +180,9 @@ export default function ShippingView({ session }: { session: Session }) {
                   <th className="p-3">Produkt</th>
                   <th className="p-3">Typ sieci</th>
                   <th className="p-3">Tylko w umowie</th>
+                  <th className="p-3 text-right">Cena</th>
+                  <th className="p-3 text-right">Cena (PLN)</th>
+                  <th className="p-3 text-right">Waga taryfowa</th>
                   <th className="p-3 text-right">Dni w drodze</th>
                   <th className="p-3">Szacowana dostawa</th>
                   <th className="p-3">Odbiór do godz.</th>
@@ -180,24 +190,57 @@ export default function ShippingView({ session }: { session: Session }) {
               </thead>
               <tbody>
                 {result.products.length === 0 && (
-                  <tr><td colSpan={7} className="p-6 text-center text-inksoft text-sm">DHL nie zwrócił żadnych produktów dla tej trasy.</td></tr>
+                  <tr><td colSpan={10} className="p-6 text-center text-inksoft text-sm">DHL nie zwrócił żadnych produktów dla tej trasy.</td></tr>
                 )}
                 {result.products.map((p) => (
-                  <tr key={p.code + p.name} className={`border-b border-line last:border-b-0 ${isEconomySelect(p) ? "bg-tealsoft font-semibold" : ""}`}>
-                    <td className="p-3 font-mono">{p.code}</td>
-                    <td className="p-3">{p.name}</td>
-                    <td className="p-3">{p.networkType || "—"}</td>
-                    <td className="p-3">{p.customerAgreement ? "tak" : "nie"}</td>
-                    <td className="p-3 text-right font-mono">{p.transitDays ?? "—"}</td>
-                    <td className="p-3 text-xs whitespace-nowrap">{fmtDateTime(p.estimatedDelivery)}</td>
-                    <td className="p-3 text-xs whitespace-nowrap">{fmtDateTime(p.pickupCutoff)}</td>
-                  </tr>
+                  <Fragment key={p.code + p.name}>
+                    <tr className={`border-b border-line last:border-b-0 ${isEconomySelect(p) ? "bg-tealsoft font-semibold" : ""}`}>
+                      <td className="p-3 font-mono">{p.code}</td>
+                      <td className="p-3">
+                        {p.name}
+                        {p.breakdown.length > 0 && (
+                          <button onClick={() => setExpanded(expanded === p.code ? null : p.code)} className="ml-2 text-xs font-semibold text-teal hover:underline">
+                            {expanded === p.code ? "ukryj składniki" : "składniki ceny"}
+                          </button>
+                        )}
+                      </td>
+                      <td className="p-3">{p.networkType || "—"}</td>
+                      <td className="p-3">{p.customerAgreement ? "tak" : "nie"}</td>
+                      <td className="p-3 text-right font-mono whitespace-nowrap">{fmtMoney(p.billing)}</td>
+                      <td className="p-3 text-right font-mono whitespace-nowrap">{fmtMoney(p.local)}</td>
+                      <td className="p-3 text-right font-mono whitespace-nowrap" title={p.volumetricWeight !== null ? `waga objętościowa: ${p.volumetricWeight} kg` : undefined}>
+                        {p.chargeableWeight !== null ? `${p.chargeableWeight} kg` : "—"}
+                      </td>
+                      <td className="p-3 text-right font-mono">{p.transitDays ?? "—"}</td>
+                      <td className="p-3 text-xs whitespace-nowrap">{fmtDateTime(p.estimatedDelivery)}</td>
+                      <td className="p-3 text-xs whitespace-nowrap">{fmtDateTime(p.pickupCutoff)}</td>
+                    </tr>
+                    {expanded === p.code && (
+                      <tr className="border-b border-line bg-paper">
+                        <td colSpan={10} className="p-3 text-xs">
+                          <div className="font-semibold text-inksoft mb-1">Składniki ceny ({p.billing?.currency ?? "waluta rozliczeniowa"})</div>
+                          <ul className="space-y-0.5">
+                            {p.breakdown.map((b, i) => (
+                              <li key={i} className="flex justify-between max-w-md">
+                                <span>{b.name}</span>
+                                <span className="font-mono">{b.price.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
           </div>
           {result.warnings.length > 0 && <p className="text-xs text-inksoft mt-2">Ostrzeżenia DHL: {result.warnings.join("; ")}</p>}
-          <p className="text-xs text-inksoft mt-2">Środowisko: {result.env === "production" ? "produkcyjne" : "testowe"}. Wynik dotyczy jednej paczki o podanych parametrach.</p>
+          <p className="text-xs text-inksoft mt-2">
+            Środowisko: {result.env === "production" ? "produkcyjne" : "testowe"}. Wynik dotyczy jednej paczki o podanych parametrach. Cena to wycena wg cennika konta —
+            nie jest to zobowiązanie, a ostateczną kwotę (opłaty dodatkowe, podatek VAT) potwierdza faktura DHL.
+            {result.env !== "production" && " Środowisko testowe może zwracać inne stawki niż produkcyjne — porównaj po przełączeniu na produkcję (wycena niczego nie tworzy i nie kosztuje)."}
+          </p>
         </div>
       )}
     </div>

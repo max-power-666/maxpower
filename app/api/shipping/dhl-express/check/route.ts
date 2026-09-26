@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { requireRole } from "@/lib/serverAuth";
-import { DhlExpressError, dhlExpressConfigFromEnv, dhlListProducts, type ProductQuery } from "@/lib/dhlExpress";
+import { DhlExpressError, dhlExpressConfigFromEnv, dhlRates, type ProductQuery } from "@/lib/dhlExpress";
 
 // Sprawdzenie połączenia z DHL Express (MyDHL API) — tylko Admin i Manager.
 //  GET  -> { configured, env }: czy zmienne środowiskowe są ustawione i które środowisko DHL jest aktywne (test / production).
-//  POST -> lista produktów DHL Express dostępnych dla jednej paczki na wskazanej trasie na NASZYM koncie (m.in. Economy Select
-//          i jego dokładny kod). Nic nie tworzy i nie kosztuje — to zapytanie tylko do odczytu.
+//  POST -> produkty DHL Express dostępne dla jednej paczki na wskazanej trasie na NASZYM koncie (m.in. Economy Select i jego kod)
+//          wraz z WYCENĄ wg cennika konta (GET /rates). Nic nie tworzy i nie kosztuje — to zapytanie tylko do odczytu.
 // Numer konta i klucze zostają na serwerze; do przeglądarki nie trafiają.
 
 const ROLES = ["Admin", "Manager"];
@@ -57,7 +57,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await dhlListProducts(cfg, query as ProductQuery);
+    const result = await dhlRates(cfg, query as ProductQuery);
     return NextResponse.json({ ok: true, env: cfg.env, ...result });
   } catch (e: any) {
     const status = e instanceof DhlExpressError && e.status && e.status >= 400 && e.status < 500 ? 422 : 502;
