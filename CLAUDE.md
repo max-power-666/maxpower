@@ -35,7 +35,7 @@ numerach seryjnych, wielokanałowa synchronizacja stanów, naprawy, auto-wycena)
   zamówień Back Market z budżetem czasu i kursorem).
 - `supabase/*.sql` — schemat, każdy plik idempotentny: `schema.sql` (units, members,
   cache Fakturowni), `tradein.sql` (bidder), `buyback-orders.sql` (zamówienia + obsługa
-  paczek), `sales-orders.sql` (zamówienia sprzedaży Back Market, refurbed, Erli i Allegro; tokeny OAuth), `service.sql` (rejestr napraw), `tests.sql` (rejestr testów).
+  paczek), `backlog.sql` (zakładka Backlog), `sales-orders.sql` (zamówienia sprzedaży Back Market, refurbed, Erli i Allegro; tokeny OAuth), `service.sql` (rejestr napraw), `tests.sql` (rejestr testów).
 - `scripts/import-buyback.mjs` — jednorazowy import ze starego programu Buyback Bidder.
 
 ## Zakładki i role
@@ -52,6 +52,7 @@ Rola jest zwykłym tekstem w `members.role` — dodanie roli nie wymaga SQL.
 | Przegląd | `overview` | wszyscy |
 | Magazyn | `inventory` | Admin, Manager, Magazyn |
 | Zamówienia | `sales` | Admin, Manager |
+| Backlog | `backlog` | wszyscy (każda rola) |
 | Zespół | `team` | Admin (edycja), Manager (tylko odczyt) |
 | Serwis | `service` | Admin, Manager, Serwis |
 | Testy | `tests` | Admin, Manager, Testy |
@@ -176,6 +177,14 @@ i `refunded` ("Zwrot"), gdy wszystkie 5/6; zamówienia częściowo anulowane zac
 ("Stan pozycji"), a SQL poprawia stare wiersze. Ogólna zasada dla nowych kanałów: nie ufaj samemu stanowi zamówienia — sprawdź stany pozycji,
 płatność (COD) i anulowania.
 Nowy marketplace = nowa wartość `marketplace`, własna tabela surowa, własny mapper i sync; lista pozostaje wspólna.
+
+**Backlog** (`BacklogView.tsx`, `lib/backlog.ts`, `backlog.sql`, tabela `backlog_items`): wspólna lista zadań i pomysłów zespołu, widoczna dla
+wszystkich ról. Zadanie: tytuł, typ (funkcja/usprawnienie/błąd/zadanie), priorytet (P1 pilne / P2 ważne / P3 kiedyś), status (backlog / do zrobienia /
+w toku / do sprawdzenia / zrobione), obszar (moduł; lista w kodzie), opis, kryteria akceptacji, osoba, autor i data dodania oraz log zmian. Widok: pigułki
+statusów z licznikami (domyślnie "Aktywne" = bez zrobionych), filtry (priorytet, typ, obszar, osoba, wyszukiwanie po tytule/opisie/ZAD-numerze), szybka
+zmiana statusu/priorytetu/osoby w wierszu i karta zadania (panel boczny). Dodawać i edytować może każdy zalogowany (autor ustawiany tylko z własnej sesji,
+niezmienny), **usuwać tylko Admin** (polityka + `audit_delete`). Zmiany idą przez funkcję bazy `backlog_apply` (patch tylko zmienianych pól + wpis do logu
+w jednej transakcji, historia dopisywana po stronie bazy); `updated_at` i `done_at` ustawia trigger.
 
 **Serwis** (`ServiceView.tsx`, `service_log`). Rejestr napraw wg tabeli z regulaminu:
 Joy-Con para 15 pkt, kontroler PS4 25, Xbox One 35, PS5 12, czyszczenie konsoli 45.

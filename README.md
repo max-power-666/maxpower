@@ -3,6 +3,7 @@
 Wewnętrzny system firmy do obsługi magazynu, napraw i skupu elektroniki. Moduły:
 
 - **Magazyn** — stan z Fakturowni: podsumowanie (liczba, wartość, wykres per kategoria) i lista sztuk z wyszukiwaniem po numerze seryjnym
+- **Backlog** — wspólna lista zadań i pomysłów zespołu (priorytet, status, kryteria akceptacji, log zmian)
 - **Zamówienia** — sprzedaż z marketplace'ów (Back Market, refurbed, Erli, Allegro): lista i podgląd surowych danych z API
 - **Zespół** — użytkownicy, role i dostęp do zakładek (rolę nadaje Admin)
 - **Serwis** — rejestr napraw z punktacją wg regulaminu premiowania
@@ -28,6 +29,7 @@ token API Fakturowni i dane dostępowe do API Back Market.
    4. `sales-orders.sql` — zamówienia sprzedaży (zakładka Zamówienia)
    5. `service.sql` — rejestr napraw
    6. `tests.sql` — rejestr testów
+   7. `backlog.sql` — zakładka Backlog (zadania zespołu)
 
    Pliki są idempotentne — po zmianach w repo można je uruchomić ponownie, nic nie zepsują.
    Po każdej aktualizacji kodu, która zmienia schemat, uruchom odpowiedni plik.
