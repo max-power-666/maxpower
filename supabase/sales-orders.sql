@@ -8,7 +8,8 @@
 --  * refurbed_orders — surowe zamówienia refurbed (OrderService/ListOrders); pełna odpowiedź w kolumnie raw.
 --  * erli_orders — surowe zamówienia Erli (POST /orders/_search); pełna odpowiedź w kolumnie raw.
 --  * allegro_orders — surowe zamówienia Allegro (GET /order/checkout-forms); oauth_tokens — tokeny OAuth (tylko serwer).
---  * sales_orders — wspólna lista zamówień ze wszystkich marketplace'ów (dziś Back Market, refurbed, Erli i Allegro;
+--  * octopia_orders — surowe zamówienia Octopia (GET /orders, np. Cdiscount); pełna odpowiedź w kolumnie raw.
+--  * sales_orders — wspólna lista zamówień ze wszystkich marketplace'ów (dziś Back Market, refurbed, Erli, Allegro i Octopia;
 --                   Allegro/eBay dojdą jako kolejne wartości `marketplace`). Zapisuje ją ten sam
 --                   serwer, który wypełnia surową tabelę danego kanału.
 -- Dane z API zapisuje wyłącznie serwer (service_role, poza RLS); zespół czyta wszystko, a edytuje tylko
@@ -106,6 +107,23 @@ create table if not exists oauth_tokens (
 );
 alter table oauth_tokens enable row level security;
 
+-- Surowe zamówienia Octopia (GET /orders). Pozycje, adresy, opłaty itd. są w `raw`.
+create table if not exists octopia_orders (
+  id text primary key,                       -- orderId
+  reference text,
+  status text not null,
+  sales_channel_id text,
+  sales_channel_name text,
+  currency_code text,
+  total_price numeric,
+  purchased_at timestamptz,
+  updated_at timestamptz,
+  created_at timestamptz,
+  raw jsonb not null,
+  synced_at timestamptz not null default now()
+);
+create index if not exists octopia_orders_updated_idx on octopia_orders (updated_at desc);
+
 create table if not exists sales_orders (
   marketplace text not null,                 -- 'backmarket' (kolejne kanały później)
   external_id text not null,                 -- numer zamówienia w danym kanale
@@ -197,7 +215,7 @@ create table if not exists sales_orders_sync_meta (
   full_scan_done boolean not null default false,
   scan_page int not null default 1,
   scan_started_at timestamptz,
-  scan_cursor text                           -- refurbed: id ostatniego pobranego zamówienia; Erli: pole `cursor` ostatniego zamówienia; Allegro: updatedAt ostatniego zamówienia (paginacja kursorem zamiast numeru strony)
+  scan_cursor text                           -- refurbed: id ostatniego pobranego zamówienia; Erli: pole `cursor` ostatniego zamówienia; Allegro/Octopia: updatedAt ostatniego zamówienia (paginacja kursorem zamiast numeru strony)
 );
 alter table sales_orders_sync_meta add column if not exists scan_cursor text;
 -- Back Market: gdy wszystkie pozycje zamówienia są anulowane (stan 4) albo zwrócone (5, 6), zamówienie ma w API i tak stan 9
@@ -222,12 +240,13 @@ update sales_orders s set status = 'purchased_cod'
    and e.status = 'purchased' and e.raw->'delivery'->>'cod' = 'true'
    and s.status <> 'purchased_cod';
 
-insert into sales_orders_sync_meta (marketplace) values ('backmarket'), ('refurbed'), ('erli'), ('allegro') on conflict (marketplace) do nothing;
+insert into sales_orders_sync_meta (marketplace) values ('backmarket'), ('refurbed'), ('erli'), ('allegro'), ('octopia') on conflict (marketplace) do nothing;
 
 alter table bm_orders enable row level security;
 alter table refurbed_orders enable row level security;
 alter table erli_orders enable row level security;
 alter table allegro_orders enable row level security;
+alter table octopia_orders enable row level security;
 alter table sales_orders enable row level security;
 alter table sales_order_items enable row level security;
 alter table sales_orders_sync_meta enable row level security;
@@ -243,6 +262,9 @@ create policy "authenticated read erli_orders" on erli_orders
   for select using (auth.role() = 'authenticated');
 drop policy if exists "authenticated read allegro_orders" on allegro_orders;
 create policy "authenticated read allegro_orders" on allegro_orders
+  for select using (auth.role() = 'authenticated');
+drop policy if exists "authenticated read octopia_orders" on octopia_orders;
+create policy "authenticated read octopia_orders" on octopia_orders
   for select using (auth.role() = 'authenticated');
 drop policy if exists "authenticated read sales_orders" on sales_orders;
 create policy "authenticated read sales_orders" on sales_orders
@@ -336,4 +358,5 @@ begin
   begin alter publication supabase_realtime add table refurbed_orders; exception when duplicate_object then null; end;
   begin alter publication supabase_realtime add table erli_orders; exception when duplicate_object then null; end;
   begin alter publication supabase_realtime add table allegro_orders; exception when duplicate_object then null; end;
+  begin alter publication supabase_realtime add table octopia_orders; exception when duplicate_object then null; end;
 end $$;

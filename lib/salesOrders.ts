@@ -7,6 +7,7 @@ export const MARKETPLACES = [
   { key: "refurbed", label: "Refurbed" },
   { key: "erli", label: "Erli" },
   { key: "allegro", label: "Allegro" },
+  { key: "octopia", label: "Octopia" },
 ] as const;
 
 // Nasz wewnętrzny status realizacji zamówienia (niezależny od statusu kanału) — kolumna sales_orders.our_status.
@@ -78,11 +79,25 @@ export const ALLEGRO_ORDER_STATES: Record<string, string> = {
   CANCELLED: "Anulowane",
 };
 
+// Stany zamówienia Octopia (Enums.Orders.Status).
+export const OCTOPIA_ORDER_STATES: Record<string, string> = {
+  Processing: "Przetwarzane",
+  WaitingAcceptance: "Oczekuje na akceptację",
+  Accepted: "Zaakceptowane",
+  Refused: "Odrzucone",
+  InPreparation: "W przygotowaniu",
+  Shipped: "Wysłane",
+  Delivered: "Dostarczone",
+  Cancelled: "Anulowane",
+  Rejected: "Odrzucone (kontrola)",
+};
+
 export function salesStatusLabel(marketplace: string, status: string): string {
   if (marketplace === "backmarket") return BM_ORDER_STATES[status] ?? `Stan ${status}`;
   if (marketplace === "refurbed") return REFURBED_ORDER_STATES[status] ?? status;
   if (marketplace === "erli") return ERLI_ORDER_STATES[status] ?? status;
   if (marketplace === "allegro") return ALLEGRO_ORDER_STATES[status] ?? status;
+  if (marketplace === "octopia") return OCTOPIA_ORDER_STATES[status] ?? status;
   return status;
 }
 
@@ -392,4 +407,57 @@ export function uniqueBy<T>(list: T[], key: (item: T) => string): T[] {
   const m = new Map<string, T>();
   for (const item of list) m.set(key(item), item);
   return Array.from(m.values());
+}
+
+/* ---------------- Octopia ---------------- */
+
+// Zamówienie Octopia -> wiersz surowej tabeli octopia_orders.
+export function mapOctopiaOrder(o: any) {
+  return {
+    id: String(o.orderId),
+    reference: o.reference ?? null,
+    status: o.status ?? "Processing",
+    sales_channel_id: o.salesChannel?.id ?? null,
+    sales_channel_name: o.salesChannel?.name ?? null,
+    currency_code: o.currencyCode ?? null,
+    total_price: num(o.totalPrice?.sellingPrice ?? o.totalPrice?.offerPrice),
+    purchased_at: o.purchasedAt ?? null,
+    updated_at: o.updatedAt ?? null,
+    created_at: o.createdAt ?? null,
+    raw: o,
+    synced_at: new Date().toISOString(),
+  };
+}
+
+// Numer przesyłki: pierwszy niepusty parcelNumber z dowolnej pozycji.
+const octopiaTracking = (o: any): string | null => {
+  for (const l of (o.lines as any[]) || []) for (const p of (l.parcels as any[]) || []) if (typeof p?.parcelNumber === "string" && p.parcelNumber.trim()) return p.parcelNumber.trim();
+  return null;
+};
+
+export function mapOctopiaToSales(o: any) {
+  const skus = Array.from(new Set(((o.lines as any[]) || []).map((l) => (typeof l?.offer?.sellerProductId === "string" ? l.offer.sellerProductId.trim() : "")).filter(Boolean)));
+  return {
+    marketplace: "octopia",
+    external_id: String(o.orderId),
+    order_date: o.purchasedAt ?? o.createdAt ?? null,
+    status: String(o.status ?? "Processing"),
+    sku: skus.length > 0 ? skus.join(", ") : null,
+    tracking_number: octopiaTracking(o),
+    synced_at: new Date().toISOString(),
+  };
+}
+
+// Każda pozycja Octopia to jedna sztuka (quantity > 1 rozbijamy jak w pozostałych kanałach): klucz "orderLineId", "id-2"...
+export function mapOctopiaItems(o: any) {
+  const items: { marketplace: string; external_id: string; item_key: string; position: number; sku: string | null }[] = [];
+  ((o.lines as any[]) || []).forEach((l, i) => {
+    const qty = Math.max(Number.isFinite(Number(l?.quantity)) ? Math.trunc(Number(l.quantity)) : 1, 1);
+    const base = String(l?.orderLineId ?? i + 1);
+    const sku = typeof l?.offer?.sellerProductId === "string" && l.offer.sellerProductId.trim() ? l.offer.sellerProductId.trim() : null;
+    for (let k = 1; k <= qty; k++) {
+      items.push({ marketplace: "octopia", external_id: String(o.orderId), item_key: k > 1 ? `${base}-${k}` : base, position: items.length + 1, sku });
+    }
+  });
+  return items;
 }

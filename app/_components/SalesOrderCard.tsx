@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
@@ -219,6 +219,22 @@ type AllegroOrder = {
 const allegroAddress = (a?: NonNullable<AllegroOrder["raw"]["delivery"]>["address"]) =>
   a ? [a.street, [a.zipCode, a.city].filter(Boolean).join(" "), a.countryCode].filter(Boolean).join(", ") : null;
 
+// Zamówienie Octopia — czytamy z kolumny raw tabeli octopia_orders.
+type OctopiaOrder = {
+  id: string;
+  status: string;
+  sales_channel_name: string | null;
+  currency_code: string | null;
+  total_price: number | null;
+  purchased_at: string | null;
+  updated_at: string | null;
+  raw: {
+    billingAddress?: { firstName?: string; lastName?: string; companyName?: string; addressLine1?: string; postalCode?: string; city?: string; countryCode?: string };
+    payment?: { method?: string };
+    lines?: { orderLineId?: string; quantity?: number; offer?: { productTitle?: string; sellerProductId?: string; condition?: string }; sellingPrice?: { unitSalesPrice?: number }; shippingAddress?: { firstName?: string; lastName?: string; phone?: string; email?: string; city?: string; countryCode?: string }; parcels?: { parcelNumber?: string; carrierName?: string; trackingUrl?: string }[] }[];
+  };
+};
+
 function fmtDateTime(iso: string | null) {
   if (!iso) return null;
   return new Date(iso).toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -261,6 +277,7 @@ export default function SalesOrderCard({
   const [rf, setRf] = useState<RefurbedOrder | null>(null);
   const [er, setEr] = useState<ErliOrder | null>(null);
   const [al, setAl] = useState<AllegroOrder | null>(null);
+  const [oc, setOc] = useState<OctopiaOrder | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
 
@@ -274,7 +291,7 @@ export default function SalesOrderCard({
   }, [marketplace, externalId]);
 
   async function load() {
-    const [{ data: w, error: wErr }, itemsRes, bmRes, rfRes, erRes, alRes] = await Promise.all([
+    const [{ data: w, error: wErr }, itemsRes, bmRes, rfRes, erRes, alRes, ocRes] = await Promise.all([
       supabase.from("sales_orders").select("*").eq("marketplace", marketplace).eq("external_id", externalId).maybeSingle(),
       supabase
         .from("sales_order_items")
@@ -294,8 +311,11 @@ export default function SalesOrderCard({
       marketplace === "allegro"
         ? supabase.from("allegro_orders").select("*").eq("id", externalId).maybeSingle()
         : Promise.resolve({ data: null, error: null }),
+      marketplace === "octopia"
+        ? supabase.from("octopia_orders").select("*").eq("id", externalId).maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
     ]);
-    const firstError = wErr || itemsRes.error || bmRes.error || rfRes.error || erRes.error || alRes.error;
+    const firstError = wErr || itemsRes.error || bmRes.error || rfRes.error || erRes.error || alRes.error || ocRes.error;
     if (firstError) setError(firstError.message);
     setWorker((w as WorkerData) ?? null);
     setItems((itemsRes.data as SalesItem[]) || []);
@@ -303,6 +323,7 @@ export default function SalesOrderCard({
     setRf((rfRes.data as RefurbedOrder) ?? null);
     setEr((erRes.data as ErliOrder) ?? null);
     setAl((alRes.data as AllegroOrder) ?? null);
+    setOc((ocRes.data as OctopiaOrder) ?? null);
     setLoaded(true);
   }
 
@@ -500,6 +521,13 @@ export default function SalesOrderCard({
                   <Row label="Podatki" value={fmtMoney(bm?.sales_taxes, bm?.currency)} />
                 </>
               )}
+              {marketplace === "octopia" && (
+                <>
+                  <Row label="Kanał sprzedaży" value={oc?.sales_channel_name} />
+                  <Row label="Płatność" value={oc?.raw.payment?.method} />
+                  <Row label="Suma" value={fmtMoney(oc?.total_price, oc?.currency_code)} />
+                </>
+              )}
               {marketplace === "allegro" && (
                 <>
                   <Row label="Rynek" value={al?.marketplace_id} />
@@ -538,8 +566,47 @@ export default function SalesOrderCard({
               )}
             </div>
 
-            {((marketplace === "backmarket" && !bm) || (marketplace === "refurbed" && !rf) || (marketplace === "erli" && !er) || (marketplace === "allegro" && !al)) && (
+            {((marketplace === "backmarket" && !bm) || (marketplace === "refurbed" && !rf) || (marketplace === "erli" && !er) || (marketplace === "allegro" && !al) || (marketplace === "octopia" && !oc)) && (
               <p className="text-inksoft text-xs mb-6">Brak surowych danych z API dla tego zamówienia.</p>
+            )}
+
+            {oc && (
+              <>
+                {!!oc.raw.lines?.length && (
+                  <>
+                    <h3 className="text-xs font-semibold text-inksoft mb-2">POZYCJE</h3>
+                    {oc.raw.lines.map((l, i) => (
+                      <div key={l.orderLineId ?? i} className="border border-line bg-white mb-2">
+                        <Row label="Produkt" value={l.offer?.productTitle} />
+                        <Row label="SKU" value={l.offer?.sellerProductId} mono />
+                        <Row label="Stan" value={l.offer?.condition} />
+                        <Row label="Ilość" value={l.quantity === undefined ? null : String(l.quantity)} />
+                        <Row label="Cena jednostkowa" value={fmtMoney(l.sellingPrice?.unitSalesPrice, oc.currency_code)} />
+                        <Row label="Numer przesyłki" value={(l.parcels || []).map((p) => p.parcelNumber).filter(Boolean).join(", ")} mono />
+                      </div>
+                    ))}
+                    <div className="mb-4" />
+                  </>
+                )}
+
+                <h3 className="text-xs font-semibold text-inksoft mb-2">DATY</h3>
+                <div className="border border-line bg-white mb-6">
+                  <Row label="Zakupiono" value={fmtDateTime(oc.purchased_at)} />
+                  <Row label="Zmieniono" value={fmtDateTime(oc.updated_at)} />
+                </div>
+
+                <h3 className="text-xs font-semibold text-inksoft mb-2">KLIENT (ADRES DOSTAWY)</h3>
+                <div className="border border-line bg-white mb-6">
+                  {(oc.raw.lines || []).slice(0, 1).map((l, i) => (
+                    <Fragment key={i}>
+                      <Row label="Imię i nazwisko" value={[l.shippingAddress?.firstName, l.shippingAddress?.lastName].filter(Boolean).join(" ")} />
+                      <Row label="Telefon" value={l.shippingAddress?.phone} />
+                      <Row label="Miasto" value={[l.shippingAddress?.city, l.shippingAddress?.countryCode].filter(Boolean).join(", ")} />
+                      <Row label="E-mail" value={l.shippingAddress?.email} />
+                    </Fragment>
+                  ))}
+                </div>
+              </>
             )}
 
             {al && (
