@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { BM_ORDERLINE_STATES, MARKETPLACES, OUR_STATUSES, salesStatusLabel } from "@/lib/salesOrders";
 import { MAX_PADS } from "./PadSerialsCell";
+import { buildShipPrefill, type ShipPrefill } from "@/lib/shipping";
 
 // Karta zamówienia sprzedaży (panel boczny po kliknięciu numeru zamówienia): dane z API marketplace'u,
 // dane wpisane przez pracowników (numer seryjny, pady) i numerowany log zmian — jak karta zamówienia
@@ -245,12 +246,14 @@ export default function SalesOrderCard({
   session,
   members,
   onClose,
+  onShip,
 }: {
   marketplace: string;
   externalId: string;
   session: Session;
   members: MemberLite[];
   onClose: () => void;
+  onShip?: (prefill: ShipPrefill) => void; // tylko Admin i Manager
 }) {
   const [worker, setWorker] = useState<WorkerData | null>(null);
   const [items, setItems] = useState<SalesItem[]>([]);
@@ -378,6 +381,14 @@ export default function SalesOrderCard({
 
   const marketplaceLabel = MARKETPLACES.find((m) => m.key === marketplace)?.label ?? marketplace;
 
+  // Adres odbiorcy z zamówienia -> formularz przesyłki DHL (tylko zamówienia zagraniczne z obsługiwanych kanałów).
+  const shipPrefill: ShipPrefill | null =
+    marketplace === "backmarket" && bm
+      ? buildShipPrefill("backmarket", externalId, bm, null)
+      : marketplace === "refurbed" && rf
+        ? buildShipPrefill("refurbed", externalId, rf.raw, rf.customer_email)
+        : null;
+
   return (
     <div className="fixed inset-0 bg-black/30 flex justify-end z-50" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="w-full max-w-lg bg-paper h-full overflow-y-auto p-6 border-l border-line">
@@ -399,6 +410,11 @@ export default function SalesOrderCard({
               <span className="inline-block text-xs font-semibold px-2 py-1 rounded-full bg-tealsoft text-teal">
                 {salesStatusLabel(marketplace, worker.status)}
               </span>
+              {onShip && shipPrefill && (
+                <button onClick={() => onShip(shipPrefill)} className="text-xs font-semibold text-teal hover:underline">
+                  Nadaj przesyłkę DHL →
+                </button>
+              )}
               {marketplace === "backmarket" && (
                 <a href={backMarketOrderUrl(externalId)} target="_blank" rel="noreferrer" className="text-xs font-semibold text-teal hover:underline">
                   Otwórz w Back Market ↗

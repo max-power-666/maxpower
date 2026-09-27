@@ -142,3 +142,174 @@ export async function dhlRates(cfg: DhlExpressConfig, q: ProductQuery): Promise<
   });
   return { products, warnings: ((data.warnings as any[]) || []).map(String) };
 }
+
+/* ---------------- tworzenie przesyłki (POST /shipments) ---------------- */
+
+// Kraje UE, do których nadajemy bez odprawy celnej. Poza UE potrzebne są dane celne (opis, wartość, kod HS) — jeszcze nie obsługujemy.
+export const DHL_EU_COUNTRIES = ["AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL", "PT", "RO", "SK", "SI", "ES", "SE"];
+
+export const COUNTRY_NAMES: Record<string, string> = {
+  AT: "Austria", BE: "Belgia", BG: "Bułgaria", HR: "Chorwacja", CY: "Cypr", CZ: "Czechy", DK: "Dania", EE: "Estonia", FI: "Finlandia",
+  FR: "Francja", DE: "Niemcy", GR: "Grecja", HU: "Węgry", IE: "Irlandia", IT: "Włochy", LV: "Łotwa", LT: "Litwa", LU: "Luksemburg",
+  MT: "Malta", NL: "Holandia", PL: "Polska", PT: "Portugalia", RO: "Rumunia", SK: "Słowacja", SI: "Słowenia", ES: "Hiszpania", SE: "Szwecja",
+  GB: "Wielka Brytania", CH: "Szwajcaria", NO: "Norwegia", US: "USA", UA: "Ukraina", TR: "Turcja",
+};
+
+// Szablon etykiety 6x4 cala (= 10x15 cm), PDF do wydruku na Zebrze przez sterownik. Nazwę można zmienić zmienną DHL_EXPRESS_LABEL_TEMPLATE.
+export const DEFAULT_LABEL_TEMPLATE = "ECOM26_64_001";
+
+export type ShipmentParty = {
+  company?: string;
+  name: string;
+  street: string; // ulica i numer domu w jednym polu
+  postalCode: string;
+  city: string;
+  countryCode: string;
+  phone: string;
+  email?: string;
+};
+
+export type CreateShipmentInput = {
+  productCode: string;
+  plannedDate: string; // YYYY-MM-DD
+  shipper: ShipmentParty;
+  receiver: ShipmentParty;
+  package: { weight: number; length: number; width: number; height: number; description: string };
+  reference?: string; // np. numer zamówienia — drukowany jako referencja klienta
+  labelTemplate?: string;
+};
+
+// DHL ogranicza linie adresu do 45 znaków (max 3 linie) — łamiemy na spacjach; gdy się nie mieści, zgłaszamy czytelny błąd zamiast ucinać.
+export function splitAddressLines(street: string, max = 45): string[] {
+  const words = street.trim().split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let cur = "";
+  for (const w of words) {
+    if (w.length > max) throw new DhlExpressError(`Adres jest za długi (pojedyncze słowo „${w.slice(0, 20)}…” przekracza ${max} znaków).`);
+    if (!cur) cur = w;
+    else if ((cur + " " + w).length <= max) cur += " " + w;
+    else {
+      lines.push(cur);
+      cur = w;
+    }
+  }
+  if (cur) lines.push(cur);
+  if (lines.length === 0) throw new DhlExpressError("Podaj ulicę i numer domu.");
+  if (lines.length > 3) throw new DhlExpressError("Adres jest za długi — DHL przyjmuje do 3 linii po 45 znaków.");
+  return lines;
+}
+
+// "2026-09-28T12:00:00 GMT+02:00" — format daty nadania wymagany przez MyDHL API; przesunięcie liczymy dla strefy Europe/Warsaw.
+export function plannedShippingDateAndTime(date: string, hour = 12): string {
+  const probe = new Date(`${date}T${String(hour).padStart(2, "0")}:00:00Z`);
+  const part = new Intl.DateTimeFormat("en-US", { timeZone: "Europe/Warsaw", timeZoneName: "shortOffset" })
+    .formatToParts(probe)
+    .find((p) => p.type === "timeZoneName")?.value; // np. "GMT+2"
+  const m = /GMT([+-])(\d{1,2})(?::(\d{2}))?/.exec(part ?? "");
+  const offset = m ? `${m[1]}${m[2].padStart(2, "0")}:${m[3] ?? "00"}` : "+01:00";
+  return `${date}T${String(hour).padStart(2, "0")}:00:00 GMT${offset}`;
+}
+
+const party = (p: ShipmentParty) => {
+  const [line1, line2, line3] = splitAddressLines(p.street);
+  return {
+    postalAddress: {
+      postalCode: p.postalCode,
+      cityName: p.city,
+      countryCode: p.countryCode,
+      addressLine1: line1,
+      ...(line2 ? { addressLine2: line2 } : {}),
+      ...(line3 ? { addressLine3: line3 } : {}),
+    },
+    contactInformation: {
+      phone: p.phone,
+      companyName: p.company?.trim() || p.name, // DHL wymaga nazwy firmy — dla osoby prywatnej wpisujemy jej imię i nazwisko
+      fullName: p.name,
+      ...(p.email ? { email: p.email } : {}),
+    },
+  };
+};
+
+export type CreatedShipment = {
+  trackingNumber: string;
+  trackingUrl: string | null;
+  charges: { currencyType: string; priceCurrency: string; price: number }[];
+  labelBase64: string | null;
+  labelFormat: string | null;
+  warnings: string[];
+};
+
+// Składa treść zapytania POST /shipments. Osobno od wysyłki, żeby dało się ją przetestować bez sieci.
+export function buildShipmentRequest(cfg: Pick<DhlExpressConfig, "account">, input: CreateShipmentInput) {
+  if (!DHL_EU_COUNTRIES.includes(input.receiver.countryCode)) {
+    throw new DhlExpressError("Na razie nadajemy tylko do krajów UE (bez odprawy celnej).");
+  }
+  return {
+    plannedShippingDateAndTime: plannedShippingDateAndTime(input.plannedDate),
+    pickup: { isRequested: false }, // kuriera zamawiamy osobno (odbiór stały albo w panelu DHL)
+    productCode: input.productCode,
+    accounts: [{ typeCode: "shipper", number: cfg.account }],
+    customerDetails: { shipperDetails: party(input.shipper), receiverDetails: party(input.receiver) },
+    content: {
+      packages: [
+        {
+          weight: input.package.weight,
+          dimensions: { length: input.package.length, width: input.package.width, height: input.package.height },
+          description: input.package.description.slice(0, 70),
+          ...(input.reference ? { customerReferences: [{ typeCode: "CU", value: input.reference.slice(0, 35) }] } : {}),
+        },
+      ],
+      isCustomsDeclarable: false,
+      description: input.package.description.slice(0, 70),
+      incoterm: "DAP",
+      unitOfMeasurement: "metric",
+    },
+    outputImageProperties: {
+      encodingFormat: "pdf",
+      imageOptions: [{ typeCode: "label", templateName: input.labelTemplate || DEFAULT_LABEL_TEMPLATE }],
+    },
+    getRateEstimates: false,
+  };
+}
+
+// POST /shipments — TWORZY przesyłkę i etykietę. Na środowisku produkcyjnym to prawdziwa przesyłka na koncie (koszt), a DHL Express
+// nie pozwala jej anulować przez API (tylko w panelu DHL).
+export async function dhlCreateShipment(cfg: DhlExpressConfig, input: CreateShipmentInput): Promise<CreatedShipment> {
+  const body = buildShipmentRequest(cfg, input);
+  const res = await (cfg.fetchImpl ?? fetch)(`${DHL_EXPRESS_URLS[cfg.env]}/shipments`, {
+    method: "POST",
+    headers: {
+      Authorization: "Basic " + Buffer.from(`${cfg.apiKey}:${cfg.apiSecret}`).toString("base64"),
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "x-version": DHL_EXPRESS_VERSION,
+      "Message-Reference": crypto.randomUUID().replace(/-/g, "").slice(0, 28),
+      "Message-Reference-Date": new Date().toUTCString(),
+    },
+    body: JSON.stringify(body),
+    cache: "no-store",
+    signal: AbortSignal.timeout(45_000),
+  });
+  const text = await res.text().catch(() => "");
+  // DHL zwraca 201 (utworzono) albo 200 z częściowymi ostrzeżeniami; wszystko inne to błąd.
+  if (res.status !== 201 && res.status !== 200) throw new DhlExpressError(describeError(res.status, text), res.status);
+  let data: any;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new DhlExpressError("DHL Express zwrócił odpowiedź, której nie da się odczytać.", res.status);
+  }
+  const trackingNumber = String(data.shipmentTrackingNumber ?? "");
+  if (!trackingNumber) throw new DhlExpressError("DHL Express nie zwrócił numeru przesyłki.", res.status);
+  const label = ((data.documents as any[]) || []).find((d) => d?.typeCode === "label") ?? (data.documents as any[])?.[0];
+  return {
+    trackingNumber,
+    trackingUrl: data.trackingUrl ?? null,
+    charges: ((data.shipmentCharges as any[]) || [])
+      .map((c) => ({ currencyType: String(c?.currencyType ?? ""), priceCurrency: String(c?.priceCurrency ?? ""), price: Number(c?.price) }))
+      .filter((c) => Number.isFinite(c.price)),
+    labelBase64: label?.content ?? null,
+    labelFormat: label?.imageFormat ? String(label.imageFormat).toLowerCase() : null,
+    warnings: ((data.warnings as any[]) || []).map(String),
+  };
+}

@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { MARKETPLACES, OUR_STATUSES, salesStatusLabel, startOfYesterdayIso, summarizeDays, type DayCount, type OurStatus } from "@/lib/salesOrders";
 import { escapeLike } from "@/lib/search";
 import { type MemberLite } from "@/lib/displayName";
+import type { ShipPrefill } from "@/lib/shipping";
 import InlineEditCell from "./InlineEditCell";
 import SalesOrderCard, { itemFieldLabel, updateSalesItem, type SalesHistoryEntry, type SalesItem } from "./SalesOrderCard";
 import PadSerialsCell, { MAX_PADS } from "./PadSerialsCell";
@@ -67,7 +68,19 @@ function Pager({
   );
 }
 
-export default function SalesOrdersHub({ session, members, isAdmin }: { session: Session; members: MemberLite[]; isAdmin: boolean }) {
+export default function SalesOrdersHub({
+  session,
+  members,
+  isAdmin,
+  canShip,
+  onShip,
+}: {
+  session: Session;
+  members: MemberLite[];
+  isAdmin: boolean;
+  canShip: boolean; // Admin i Manager mogą nadawać przesyłki
+  onShip: (prefill: ShipPrefill) => void;
+}) {
   const [sub, setSub] = useState<"orders" | "bm">("orders");
   const [reloadKey, setReloadKey] = useState(0);
   const [lastSynced, setLastSynced] = useState<string | null>(null);
@@ -222,6 +235,7 @@ export default function SalesOrdersHub({ session, members, isAdmin }: { session:
           session={session}
           members={members}
           onClose={() => setOpenOrder(null)}
+          onShip={canShip ? onShip : undefined}
         />
       )}
     </div>

@@ -35,12 +35,16 @@ export async function POST(request: Request) {
     );
   }
 
+  // Miejsce nadania bierzemy z ustawień nadawcy (shipping_settings), nie z przeglądarki.
+  const { data: settings } = await admin().from("shipping_settings").select("city, postal_code, country_code").eq("id", 1).maybeSingle();
+  if (!settings) return NextResponse.json({ error: "Brak danych nadawcy (tabela shipping_settings) — uruchom supabase/shipping.sql." }, { status: 500 });
+
   const b = await request.json().catch(() => null);
   const destCountry = typeof b?.destinationCountryCode === "string" ? b.destinationCountryCode.trim().toUpperCase() : "";
   const query: Partial<ProductQuery> = {
-    originCountryCode: "PL",
-    originCityName: text(b?.originCityName) ?? undefined,
-    originPostalCode: text(b?.originPostalCode, 12) ?? undefined,
+    originCountryCode: settings.country_code,
+    originCityName: settings.city,
+    originPostalCode: settings.postal_code,
     destinationCountryCode: /^[A-Z]{2}$/.test(destCountry) ? destCountry : undefined,
     destinationCityName: text(b?.destinationCityName) ?? undefined,
     destinationPostalCode: text(b?.destinationPostalCode, 12) ?? undefined,
@@ -49,9 +53,9 @@ export async function POST(request: Request) {
     width: num(b?.width, 1, 300) ?? undefined,
     height: num(b?.height, 1, 300) ?? undefined,
     isCustomsDeclarable: b?.isCustomsDeclarable === true,
-    plannedShippingDate: new Date().toISOString().slice(0, 10),
+    plannedShippingDate: typeof b?.plannedDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(b.plannedDate) ? b.plannedDate : new Date().toISOString().slice(0, 10),
   };
-  const missing = (["originCityName", "destinationCountryCode", "destinationCityName", "weight", "length", "width", "height"] as const).filter((k) => query[k] === undefined);
+  const missing = (["destinationCountryCode", "destinationCityName", "weight", "length", "width", "height"] as const).filter((k) => query[k] === undefined);
   if (missing.length > 0) {
     return NextResponse.json({ error: `Uzupełnij poprawnie: ${missing.join(", ")}.` }, { status: 400 });
   }

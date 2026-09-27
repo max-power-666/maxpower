@@ -3,6 +3,7 @@
 Wewnętrzny system firmy do obsługi magazynu, napraw i skupu elektroniki. Moduły:
 
 - **Magazyn** — stan z Fakturowni: podsumowanie (liczba, wartość, wykres per kategoria) i lista sztuk z wyszukiwaniem po numerze seryjnym
+- **Wysyłka** — nadawanie przesyłek DHL Express (wycena, etykieta 10x15, szablony paczek)
 - **Backlog** — wspólna lista zadań i pomysłów zespołu (priorytet, status, kryteria akceptacji, załączniki i zrzuty ekranu, log zmian)
 - **Zamówienia** — sprzedaż z marketplace'ów (Back Market, refurbed, Erli, Allegro): lista i podgląd surowych danych z API
 - **Zespół** — użytkownicy, role i dostęp do zakładek (rolę nadaje Admin)
@@ -30,6 +31,7 @@ token API Fakturowni i dane dostępowe do API Back Market.
    5. `service.sql` — rejestr napraw
    6. `tests.sql` — rejestr testów
    7. `backlog.sql` — zakładka Backlog (zadania zespołu)
+   8. `shipping.sql` — zakładka Wysyłka (dane nadawcy, szablony paczek, nadane przesyłki DHL)
 
    Pliki są idempotentne — po zmianach w repo można je uruchomić ponownie, nic nie zepsują.
    Po każdej aktualizacji kodu, która zmienia schemat, uruchom odpowiedni plik.

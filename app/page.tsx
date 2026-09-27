@@ -8,6 +8,7 @@ import TradeInHub from "./_components/TradeInHub";
 import SalesOrdersHub from "./_components/SalesOrdersHub";
 import BacklogView from "./_components/BacklogView";
 import ShippingView from "./_components/ShippingView";
+import type { ShipPrefill } from "@/lib/shipping";
 import ServiceView from "./_components/ServiceView";
 import TestsView from "./_components/TestsView";
 import InventoryRawView from "./_components/InventoryRawView";
@@ -145,6 +146,7 @@ export default function Home() {
   const [units, setUnits] = useState<Unit[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [view, setView] = useState<ViewKey>("overview");
+  const [shipPrefill, setShipPrefill] = useState<ShipPrefill | null>(null); // dane z karty zamówienia do formularza przesyłki
   const [invSub, setInvSub] = useState<"summary" | "raw">("summary");
   const [rawReloadKey, setRawReloadKey] = useState(0);
   const [fakturowniaSummary, setFakturowniaSummary] = useState<FakturowniaSummary | null>(null);
@@ -385,7 +387,16 @@ export default function Home() {
             </div>
           )}
 
-          {view === "sales" && <SalesOrdersHub session={session} members={members} isAdmin={role === "Admin"} />}
+          {view === "sales" && <SalesOrdersHub
+              session={session}
+              members={members}
+              isAdmin={role === "Admin"}
+              canShip={role === "Admin" || role === "Manager"}
+              onShip={(p) => {
+                setShipPrefill(p);
+                setView("shipping");
+              }}
+            />}
 
           {view === "team" && (
             <TeamView
@@ -403,7 +414,9 @@ export default function Home() {
 
           {view === "tradein" && <TradeInView session={session} />}
 
-          {view === "shipping" && <ShippingView session={session} />}
+          {view === "shipping" && (
+            <ShippingView session={session} isAdmin={role === "Admin"} prefill={shipPrefill} onPrefillUsed={() => setShipPrefill(null)} />
+          )}
 
           {view === "backlog" && <BacklogView session={session} members={members} isAdmin={role === "Admin"} />}
 

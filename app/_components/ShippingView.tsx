@@ -1,28 +1,22 @@
 "use client";
 
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
-import { isEconomySelect, type DhlMoney, type DhlProduct } from "@/lib/dhlExpress";
+import { supabase } from "@/lib/supabaseClient";
+import { COUNTRY_NAMES, DHL_EU_COUNTRIES, isEconomySelect, type DhlMoney, type DhlProduct } from "@/lib/dhlExpress";
+import { base64ToBlobUrl, defaultShippingDate, type ShipPrefill } from "@/lib/shipping";
 
-// Zakładka Wysyłka. Na razie: sprawdzenie połączenia z DHL Express (MyDHL API) — pokazuje, jakie produkty (w tym Economy Select)
-// są dostępne na naszym koncie dla wybranej trasy oraz ICH WYCENĘ wg cennika konta. Niczego nie nadaje i nic nie kosztuje. Tworzenie przesyłek i etykiet dojdzie
-// po potwierdzeniu, że produkt i trasa działają. Klucze i numer konta są tylko na serwerze (route /api/shipping/dhl-express/check).
+// Zakładka Wysyłka: nadawanie przesyłek DHL Express (MyDHL API) — formularz z wyceną, szablony paczek, ustawienia nadawcy i lista nadanych
+// przesyłek z etykietami (PDF 10x15 na Zebrę). Dostęp: Admin i Manager. Klucze i numer konta są tylko na serwerze
+// (route'y /api/shipping/dhl-express/*). Na środowisku produkcyjnym nadanie to PRAWDZIWA przesyłka (koszt), a DHL Express nie pozwala
+// jej anulować przez API — dlatego przed nadaniem jest ostrzeżenie z potwierdzeniem.
 
-// Kraje docelowe do wyboru (UE + kilka popularnych poza nią). Poza UE przesyłka wymaga odprawy celnej.
-const EU = ["AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL", "PL", "PT", "RO", "SK", "SI", "ES", "SE"];
-const NON_EU = ["GB", "CH", "NO", "US", "UA", "TR"];
-const COUNTRY_NAME: Record<string, string> = {
-  AT: "Austria", BE: "Belgia", BG: "Bułgaria", HR: "Chorwacja", CY: "Cypr", CZ: "Czechy", DK: "Dania", EE: "Estonia", FI: "Finlandia",
-  FR: "Francja", DE: "Niemcy", GR: "Grecja", HU: "Węgry", IE: "Irlandia", IT: "Włochy", LV: "Łotwa", LT: "Litwa", LU: "Luksemburg",
-  MT: "Malta", NL: "Holandia", PL: "Polska", PT: "Portugalia", RO: "Rumunia", SK: "Słowacja", SI: "Słowenia", ES: "Hiszpania", SE: "Szwecja",
-  GB: "Wielka Brytania", CH: "Szwajcaria", NO: "Norwegia", US: "USA", UA: "Ukraina", TR: "Turcja",
-};
-
-const fmtMoney = (m: DhlMoney | null) =>
+const fmtMoney = (m: DhlMoney | null | undefined) =>
   m ? `${m.price.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${m.currency}` : "—";
-
 const inputCls = "w-full border border-line bg-white px-2 py-2 rounded text-sm";
-const STORAGE_KEY = "dhl-check-origin";
+const btnPrimary = "bg-ink text-paper px-4 py-2 rounded text-sm font-semibold disabled:opacity-50";
+const btnGhost = "bg-white border border-line px-3 py-2 rounded text-sm font-semibold disabled:opacity-50";
+const label = "text-xs font-semibold text-inksoft block mb-1";
 
 function fmtDateTime(iso: string | null) {
   if (!iso) return "—";
@@ -30,217 +24,585 @@ function fmtDateTime(iso: string | null) {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-export default function ShippingView({ session }: { session: Session }) {
+type Settings = {
+  shipper_company: string;
+  shipper_name: string;
+  street: string;
+  postal_code: string;
+  city: string;
+  country_code: string;
+  phone: string;
+  email: string | null;
+  default_description: string;
+};
+type Template = { id: number; name: string; weight_kg: number; length_cm: number; width_cm: number; height_cm: number; description: string | null };
+type ShipmentRow = {
+  id: number;
+  created_at: string;
+  created_by_email: string | null;
+  environment: string;
+  marketplace: string | null;
+  order_external_id: string | null;
+  product_code: string;
+  product_name: string | null;
+  tracking_number: string;
+  tracking_url: string | null;
+  receiver: { name?: string; company?: string; city?: string; countryCode?: string };
+  charges: { currencyType: string; priceCurrency: string; price: number }[] | null;
+};
+
+const EMPTY_FORM = { name: "", company: "", street: "", postalCode: "", city: "", countryCode: "DE", phone: "", email: "", template: "", weight: "", length: "", width: "", height: "", description: "", reference: "" };
+
+export default function ShippingView({
+  session,
+  isAdmin,
+  prefill,
+  onPrefillUsed,
+}: {
+  session: Session;
+  isAdmin: boolean;
+  prefill: ShipPrefill | null;
+  onPrefillUsed: () => void;
+}) {
   const auth = { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" };
   const [status, setStatus] = useState<{ configured: boolean; env: string | null } | null>(null);
-  const [origin, setOrigin] = useState({ city: "", postal: "" });
-  const [form, setForm] = useState({ country: "DE", city: "", postal: "", weight: "5", length: "40", width: "30", height: "20" });
-  const [checking, setChecking] = useState(false);
+  const [settings, setSettings] = useState<Settings | null>(null);
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [shipments, setShipments] = useState<ShipmentRow[]>([]);
   const [error, setError] = useState("");
-  const [result, setResult] = useState<{ env: string; products: DhlProduct[]; warnings: string[]; country: string } | null>(null);
+
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [order, setOrder] = useState<{ marketplace: string; externalId: string } | null>(null);
+  const [plannedDate, setPlannedDate] = useState(defaultShippingDate());
+  const [quoting, setQuoting] = useState(false);
+  const [quote, setQuote] = useState<{ products: DhlProduct[]; warnings: string[] } | null>(null);
+  const [chosen, setChosen] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [done, setDone] = useState<{ trackingNumber: string; trackingUrl: string | null; price: string; env: string; saved: boolean; labelBase64?: string | null; id?: number; error?: string } | null>(null);
+  const requestId = useRef<string>(crypto.randomUUID());
 
   useEffect(() => {
     fetch("/api/shipping/dhl-express/check", { headers: auth })
       .then((r) => r.json())
       .then((d) => setStatus({ configured: !!d.configured, env: d.env ?? null }))
       .catch(() => setStatus(null));
-    try {
-      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
-      if (saved?.city) setOrigin(saved);
-    } catch {
-      /* brak zapamiętanych danych — zostają puste pola */
-    }
+    loadSettings();
+    loadTemplates();
+    loadShipments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function check() {
+  // Wejście z karty zamówienia: adres odbiorcy i numer zamówienia wypełniają formularz.
+  useEffect(() => {
+    if (!prefill) return;
+    setForm({ ...EMPTY_FORM, name: prefill.name, company: prefill.company, street: prefill.street, postalCode: prefill.postalCode, city: prefill.city, countryCode: prefill.countryCode, phone: prefill.phone, email: prefill.email, reference: prefill.externalId });
+    setOrder({ marketplace: prefill.marketplace, externalId: prefill.externalId });
+    setQuote(null);
+    setChosen(null);
+    setDone(null);
+    requestId.current = crypto.randomUUID();
+    onPrefillUsed();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefill]);
+
+  async function loadSettings() {
+    const { data } = await supabase.from("shipping_settings").select("*").eq("id", 1).maybeSingle();
+    setSettings((data as Settings) ?? null);
+  }
+  async function loadTemplates() {
+    const { data } = await supabase.from("shipping_templates").select("*").order("name");
+    setTemplates((data as Template[]) || []);
+  }
+  async function loadShipments() {
+    const { data, error: err } = await supabase
+      .from("shipments")
+      .select("id, created_at, created_by_email, environment, marketplace, order_external_id, product_code, product_name, tracking_number, tracking_url, receiver, charges")
+      .order("created_at", { ascending: false })
+      .limit(50);
+    if (err) setError(`Nie udało się wczytać przesyłek: ${err.message}`);
+    else setShipments((data as ShipmentRow[]) || []);
+  }
+
+  function setField(k: keyof typeof EMPTY_FORM, v: string) {
+    setForm((f) => ({ ...f, [k]: v }));
+    setQuote(null); // zmiana danych unieważnia wycenę
+    setChosen(null);
+  }
+
+  function applyTemplate(id: string) {
+    const t = templates.find((x) => String(x.id) === id);
+    setQuote(null);
+    setChosen(null);
+    if (!t) return setForm((f) => ({ ...f, template: "" }));
+    setForm((f) => ({
+      ...f,
+      template: String(t.id),
+      weight: String(t.weight_kg),
+      length: String(t.length_cm),
+      width: String(t.width_cm),
+      height: String(t.height_cm),
+      description: t.description || settings?.default_description || "",
+    }));
+  }
+
+  const packagePayload = () => ({
+    weight: Number(form.weight.replace(",", ".")),
+    length: Number(form.length.replace(",", ".")),
+    width: Number(form.width.replace(",", ".")),
+    height: Number(form.height.replace(",", ".")),
+    description: form.description.trim() || settings?.default_description || "",
+    template: templates.find((t) => String(t.id) === form.template)?.name ?? null,
+  });
+
+  async function getQuote() {
     setError("");
-    setResult(null);
-    setExpanded(null);
-    setChecking(true);
+    setQuote(null);
+    setChosen(null);
+    setDone(null);
+    setQuoting(true);
     try {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(origin));
-      } catch {
-        /* zapamiętywanie jest tylko wygodą */
-      }
+      const p = packagePayload();
       const res = await fetch("/api/shipping/dhl-express/check", {
         method: "POST",
         headers: auth,
         body: JSON.stringify({
-          originCityName: origin.city,
-          originPostalCode: origin.postal,
-          destinationCountryCode: form.country,
+          destinationCountryCode: form.countryCode,
           destinationCityName: form.city,
-          destinationPostalCode: form.postal,
-          weight: Number(form.weight.replace(",", ".")),
-          length: Number(form.length.replace(",", ".")),
-          width: Number(form.width.replace(",", ".")),
-          height: Number(form.height.replace(",", ".")),
-          isCustomsDeclarable: !EU.includes(form.country),
+          destinationPostalCode: form.postalCode,
+          weight: p.weight,
+          length: p.length,
+          width: p.width,
+          height: p.height,
+          plannedDate,
+          isCustomsDeclarable: false,
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Nie udało się sprawdzić połączenia.");
-      setResult({ env: data.env, products: data.products, warnings: data.warnings || [], country: form.country });
+      if (!res.ok) throw new Error(data?.error || "Nie udało się wycenić przesyłki.");
+      setQuote({ products: data.products, warnings: data.warnings || [] });
+      const eco = (data.products as DhlProduct[]).find(isEconomySelect);
+      if (eco) setChosen(eco.code); // Economy Select jest domyślnym wyborem
     } catch (e: any) {
-      setError(e.message || "Nie udało się sprawdzić połączenia.");
+      setError(e.message || "Nie udało się wycenić przesyłki.");
     } finally {
-      setChecking(false);
+      setQuoting(false);
     }
   }
 
-  const economy = result?.products.filter(isEconomySelect) ?? [];
+  async function create() {
+    const product = quote?.products.find((p) => p.code === chosen);
+    if (!product) return;
+    const env = status?.env === "production" ? "PRODUKCYJNE" : "TESTOWE";
+    const ok = confirm(
+      `NADANIE PRZESYŁKI DHL EXPRESS (środowisko ${env})\\n\\n` +
+        `Produkt: ${product.name} (${product.code})\\nCena wg cennika: ${fmtMoney(product.billing)}\\n` +
+        `Odbiorca: ${form.name}, ${form.street}, ${form.postalCode} ${form.city}, ${form.countryCode}\\n` +
+        `Paczka: ${form.weight} kg, ${form.length}×${form.width}×${form.height} cm\\n\\n` +
+        (status?.env === "production"
+          ? "To PRAWDZIWA przesyłka — obciąży konto DHL. DHL Express nie pozwala jej anulować przez API (tylko w panelu DHL).\\n\\n"
+          : "Środowisko testowe: przesyłka nie jest prawdziwa i nie obciąża konta.\\n\\n") +
+        "Nadać przesyłkę i wygenerować etykietę?"
+    );
+    if (!ok) return;
+
+    setError("");
+    setCreating(true);
+    try {
+      const res = await fetch("/api/shipping/dhl-express/create", {
+        method: "POST",
+        headers: auth,
+        body: JSON.stringify({
+          confirm: true,
+          clientRequestId: requestId.current,
+          productCode: product.code,
+          productName: product.name,
+          plannedDate,
+          receiver: { name: form.name, company: form.company, street: form.street, postalCode: form.postalCode, city: form.city, countryCode: form.countryCode, phone: form.phone, email: form.email },
+          package: packagePayload(),
+          reference: form.reference,
+          order,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Nie udało się nadać przesyłki.");
+      setDone({
+        trackingNumber: data.trackingNumber,
+        trackingUrl: data.trackingUrl ?? null,
+        price: fmtMoney(product.billing),
+        env: data.environment ?? status?.env ?? "test",
+        saved: data.saved !== false,
+        labelBase64: data.labelBase64 ?? null,
+        id: data.id,
+        error: data.saved === false ? data.error : undefined,
+      });
+      requestId.current = crypto.randomUUID(); // kolejna przesyłka = nowy klucz
+      setQuote(null);
+      setChosen(null);
+      await loadShipments();
+    } catch (e: any) {
+      setError(e.message || "Nie udało się nadać przesyłki.");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function openLabel(id: number | undefined, base64?: string | null) {
+    setError("");
+    let data = base64 ?? null;
+    if (!data && id !== undefined) {
+      const { data: row, error: err } = await supabase.from("shipments").select("label_data").eq("id", id).maybeSingle();
+      if (err) return setError(`Nie udało się wczytać etykiety: ${err.message}`);
+      data = (row?.label_data as string | null) ?? null;
+    }
+    if (!data) return setError("Brak etykiety dla tej przesyłki.");
+    window.open(base64ToBlobUrl(data), "_blank"); // PDF 10x15 — drukuj (Ctrl+P) na Zebrze, rozmiar strony 100×150 mm
+  }
+
+  function reset() {
+    setForm(EMPTY_FORM);
+    setOrder(null);
+    setQuote(null);
+    setChosen(null);
+    setDone(null);
+    setPlannedDate(defaultShippingDate());
+    requestId.current = crypto.randomUUID();
+  }
+
+  const formReady =
+    form.name.trim() && form.street.trim() && form.postalCode.trim() && form.city.trim() && form.phone.trim() && Number(form.weight.replace(",", ".")) > 0 && form.length && form.width && form.height;
 
   return (
     <div>
+      {/* połączenie */}
       <div className="border border-line bg-white p-4 mb-6">
-        <h2 className="text-xs font-semibold text-inksoft mb-2">DHL EXPRESS — SPRAWDZENIE POŁĄCZENIA</h2>
+        <h2 className="text-xs font-semibold text-inksoft mb-2">DHL EXPRESS</h2>
         {status === null && <p className="text-xs text-inksoft">Sprawdzanie konfiguracji…</p>}
         {status && !status.configured && (
           <p className="text-xs text-rust">
-            DHL Express nie jest skonfigurowany. Ustaw w zmiennych środowiskowych (Vercel): DHL_EXPRESS_API_KEY, DHL_EXPRESS_API_SECRET,
-            DHL_EXPRESS_ACCOUNT (numer konta nadawcy) i DHL_EXPRESS_ENV (test albo production), potem zrób Redeploy.
+            DHL Express nie jest skonfigurowany. Ustaw w Vercel: DHL_EXPRESS_API_KEY, DHL_EXPRESS_API_SECRET, DHL_EXPRESS_ACCOUNT i DHL_EXPRESS_ENV, potem Redeploy.
           </p>
         )}
         {status?.configured && (
           <p className="text-xs text-inksoft">
-            Połączenie skonfigurowane, środowisko: <span className={`font-semibold ${status.env === "production" ? "text-rust" : "text-teal"}`}>{status.env === "production" ? "PRODUKCYJNE" : "testowe"}</span>.
-            To sprawdzenie tylko odczytuje dostępne produkty — nic nie nadaje i nic nie kosztuje.
+            Środowisko: <span className={`font-semibold ${status.env === "production" ? "text-rust" : "text-teal"}`}>{status.env === "production" ? "PRODUKCYJNE — przesyłki są prawdziwe i płatne" : "testowe — przesyłki nie są prawdziwe"}</span>.
+            {settings && <> Nadawca: {settings.shipper_company}, {settings.street}, {settings.postal_code} {settings.city}.</>}
           </p>
         )}
+        {status?.configured && !settings && <p className="text-xs text-rust mt-1">Brak danych nadawcy — uruchom supabase/shipping.sql.</p>}
       </div>
 
-      {status?.configured && (
-        <div className="border border-line bg-white p-4 mb-6">
-          <h2 className="text-xs font-semibold text-inksoft mb-3">TRASA I PACZKA</h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
-            <div>
-              <label className="text-xs font-semibold text-inksoft block mb-1">Miasto nadania (Polska) *</label>
-              <input value={origin.city} onChange={(e) => setOrigin({ ...origin, city: e.target.value })} placeholder="np. Warszawa" className={inputCls} />
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-inksoft block mb-1">Kod pocztowy nadania</label>
-              <input value={origin.postal} onChange={(e) => setOrigin({ ...origin, postal: e.target.value })} placeholder="00-001" className={inputCls} />
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-inksoft block mb-1">Kraj docelowy *</label>
-              <select value={form.country} onChange={(e) => setForm({ ...form, country: e.target.value })} className={inputCls}>
-                <optgroup label="Unia Europejska">
-                  {EU.filter((c) => c !== "PL").map((c) => <option key={c} value={c}>{COUNTRY_NAME[c]} ({c})</option>)}
-                </optgroup>
-                <optgroup label="Poza UE (odprawa celna)">
-                  {NON_EU.map((c) => <option key={c} value={c}>{COUNTRY_NAME[c]} ({c})</option>)}
-                </optgroup>
-              </select>
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-inksoft block mb-1">Miasto docelowe *</label>
-              <input value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} placeholder="np. Berlin" className={inputCls} />
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-inksoft block mb-1">Kod pocztowy docelowy</label>
-              <input value={form.postal} onChange={(e) => setForm({ ...form, postal: e.target.value })} placeholder="10115" className={inputCls} />
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-inksoft block mb-1">Waga (kg) *</label>
-              <input value={form.weight} onChange={(e) => setForm({ ...form, weight: e.target.value })} inputMode="decimal" className={inputCls} />
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-inksoft block mb-1">Wymiary cm (dł. × szer. × wys.) *</label>
-              <div className="flex gap-1">
-                <input value={form.length} onChange={(e) => setForm({ ...form, length: e.target.value })} inputMode="decimal" className={inputCls} />
-                <input value={form.width} onChange={(e) => setForm({ ...form, width: e.target.value })} inputMode="decimal" className={inputCls} />
-                <input value={form.height} onChange={(e) => setForm({ ...form, height: e.target.value })} inputMode="decimal" className={inputCls} />
-              </div>
-            </div>
-          </div>
-          <button onClick={check} disabled={checking} className="bg-ink text-paper px-4 py-2 rounded text-sm font-semibold disabled:opacity-50">
-            {checking ? "Pytanie DHL…" : "Sprawdź dostępne produkty"}
-          </button>
-          {error && <p className="text-rust text-xs mt-3">{error}</p>}
-        </div>
-      )}
+      {error && <p className="text-rust text-xs mb-4">{error}</p>}
 
-      {result && (
-        <div>
-          <div className={`border p-3 mb-3 text-sm ${economy.length > 0 ? "border-teal bg-tealsoft text-teal" : "border-rust bg-rustsoft text-rust"} font-semibold`}>
-            {economy.length > 0
-              ? `Economy Select jest dostępny na trasie PL → ${result.country} (kod ${economy.map((p) => p.code).join(", ")}): ${economy
-                  .map((p) => [fmtMoney(p.billing), p.local && p.billing?.currency !== p.local.currency ? `≈ ${fmtMoney(p.local)}` : null, p.transitDays !== null ? `${p.transitDays} dni` : null].filter(Boolean).join(" · "))
-                  .join("; ")}.`
-              : `Economy Select NIE jest dostępny na trasie PL → ${result.country} na tym koncie (albo dla tych parametrów paczki).`}
+      {status?.configured && settings && (
+        <>
+          {/* wynik nadania */}
+          {done && (
+            <div className={`border p-4 mb-6 ${done.saved ? "border-teal bg-tealsoft" : "border-rust bg-rustsoft"}`}>
+              <div className="font-semibold mb-1">
+                Przesyłka nadana{done.env !== "production" && " (TEST — nieprawdziwa)"}: {done.trackingUrl ? <a href={done.trackingUrl} target="_blank" rel="noreferrer" className="underline font-mono">{done.trackingNumber}</a> : <span className="font-mono">{done.trackingNumber}</span>}
+              </div>
+              <div className="text-sm mb-2">Cena wg cennika: {done.price}</div>
+              {done.error && <p className="text-rust text-sm font-semibold mb-2">{done.error}</p>}
+              <div className="flex gap-2">
+                <button onClick={() => openLabel(done.id, done.labelBase64)} className={btnPrimary}>Otwórz etykietę (PDF)</button>
+                <button onClick={reset} className={btnGhost}>Nowa przesyłka</button>
+              </div>
+              <p className="text-xs text-inksoft mt-2">Wydrukuj etykietę na Zebrze: w oknie druku wybierz drukarkę i rozmiar strony 100 × 150 mm, skala 100%.</p>
+            </div>
+          )}
+
+          {/* formularz */}
+          <div className="border border-line bg-white p-4 mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-xs font-semibold text-inksoft">NOWA PRZESYŁKA{order ? ` — zamówienie ${order.externalId}` : ""}</h2>
+              <button onClick={reset} className="text-xs font-semibold text-teal hover:underline">Wyczyść formularz</button>
+            </div>
+            <h3 className="text-xs font-semibold text-inksoft mb-2">Odbiorca</h3>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
+              <div><label className={label}>Imię i nazwisko *</label><input value={form.name} onChange={(e) => setField("name", e.target.value)} className={inputCls} /></div>
+              <div><label className={label}>Firma (opcjonalnie)</label><input value={form.company} onChange={(e) => setField("company", e.target.value)} className={inputCls} /></div>
+              <div className="md:col-span-2"><label className={label}>Ulica i numer *</label><input value={form.street} onChange={(e) => setField("street", e.target.value)} className={inputCls} /></div>
+              <div><label className={label}>Kod pocztowy *</label><input value={form.postalCode} onChange={(e) => setField("postalCode", e.target.value)} className={inputCls} /></div>
+              <div><label className={label}>Miasto *</label><input value={form.city} onChange={(e) => setField("city", e.target.value)} className={inputCls} /></div>
+              <div>
+                <label className={label}>Kraj (UE) *</label>
+                <select value={form.countryCode} onChange={(e) => setField("countryCode", e.target.value)} className={inputCls}>
+                  {DHL_EU_COUNTRIES.map((c) => <option key={c} value={c}>{COUNTRY_NAMES[c]} ({c})</option>)}
+                </select>
+              </div>
+              <div><label className={label}>Telefon odbiorcy *</label><input value={form.phone} onChange={(e) => setField("phone", e.target.value)} className={inputCls} /></div>
+              <div className="md:col-span-2"><label className={label}>E-mail odbiorcy (opcjonalnie)</label><input value={form.email} onChange={(e) => setField("email", e.target.value)} className={inputCls} /></div>
+              <div><label className={label}>Numer zamówienia (referencja)</label><input value={form.reference} onChange={(e) => setField("reference", e.target.value)} className={inputCls} /></div>
+            </div>
+
+            <h3 className="text-xs font-semibold text-inksoft mb-2">Paczka</h3>
+            <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-3">
+              <div>
+                <label className={label}>Szablon</label>
+                <select value={form.template} onChange={(e) => applyTemplate(e.target.value)} className={inputCls}>
+                  <option value="">— ręcznie —</option>
+                  {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+              </div>
+              <div><label className={label}>Waga (kg) *</label><input value={form.weight} onChange={(e) => setField("weight", e.target.value)} inputMode="decimal" className={inputCls} /></div>
+              <div><label className={label}>Długość (cm) *</label><input value={form.length} onChange={(e) => setField("length", e.target.value)} inputMode="decimal" className={inputCls} /></div>
+              <div><label className={label}>Szerokość (cm) *</label><input value={form.width} onChange={(e) => setField("width", e.target.value)} inputMode="decimal" className={inputCls} /></div>
+              <div><label className={label}>Wysokość (cm) *</label><input value={form.height} onChange={(e) => setField("height", e.target.value)} inputMode="decimal" className={inputCls} /></div>
+              <div><label className={label}>Data nadania</label><input type="date" value={plannedDate} onChange={(e) => { setPlannedDate(e.target.value); setQuote(null); setChosen(null); }} className={inputCls} /></div>
+              <div className="col-span-2 md:col-span-6"><label className={label}>Opis zawartości</label><input value={form.description} onChange={(e) => setField("description", e.target.value)} placeholder={settings.default_description} className={inputCls} /></div>
+            </div>
+            <button onClick={getQuote} disabled={quoting || !formReady} className={btnPrimary}>{quoting ? "Pytanie DHL…" : "Wyceń i pokaż produkty"}</button>
           </div>
-          <div className="border border-line bg-white overflow-x-auto">
+
+          {/* wycena i wybór produktu */}
+          {quote && (
+            <div className="mb-6">
+              <div className="border border-line bg-white overflow-x-auto mb-3">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs text-inksoft border-b border-line">
+                      <th className="p-3"></th>
+                      <th className="p-3">Kod</th>
+                      <th className="p-3">Produkt</th>
+                      <th className="p-3 text-right">Cena</th>
+                      <th className="p-3 text-right">Cena (PLN)</th>
+                      <th className="p-3 text-right">Waga taryfowa</th>
+                      <th className="p-3 text-right">Dni</th>
+                      <th className="p-3">Szacowana dostawa</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {quote.products.length === 0 && <tr><td colSpan={8} className="p-6 text-center text-inksoft text-sm">DHL nie zwrócił produktów dla tej trasy.</td></tr>}
+                    {quote.products.map((p) => (
+                      <Fragment key={p.code + p.name}>
+                        <tr className={`border-b border-line last:border-b-0 cursor-pointer ${chosen === p.code ? "bg-tealsoft" : "hover:bg-paper"} ${isEconomySelect(p) ? "font-semibold" : ""}`} onClick={() => setChosen(p.code)}>
+                          <td className="p-3"><input type="radio" checked={chosen === p.code} onChange={() => setChosen(p.code)} /></td>
+                          <td className="p-3 font-mono">{p.code}</td>
+                          <td className="p-3">
+                            {p.name}
+                            {p.breakdown.length > 0 && (
+                              <button onClick={(e) => { e.stopPropagation(); setExpanded(expanded === p.code ? null : p.code); }} className="ml-2 text-xs font-semibold text-teal hover:underline">
+                                {expanded === p.code ? "ukryj składniki" : "składniki ceny"}
+                              </button>
+                            )}
+                          </td>
+                          <td className="p-3 text-right font-mono whitespace-nowrap">{fmtMoney(p.billing)}</td>
+                          <td className="p-3 text-right font-mono whitespace-nowrap">{fmtMoney(p.local)}</td>
+                          <td className="p-3 text-right font-mono whitespace-nowrap">{p.chargeableWeight !== null ? `${p.chargeableWeight} kg` : "—"}</td>
+                          <td className="p-3 text-right font-mono">{p.transitDays ?? "—"}</td>
+                          <td className="p-3 text-xs whitespace-nowrap">{fmtDateTime(p.estimatedDelivery)}</td>
+                        </tr>
+                        {expanded === p.code && (
+                          <tr className="border-b border-line bg-paper">
+                            <td colSpan={8} className="p-3 text-xs">
+                              <ul className="space-y-0.5 max-w-md">
+                                {p.breakdown.map((b, i) => (
+                                  <li key={i} className="flex justify-between"><span>{b.name}</span><span className="font-mono">{b.price.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></li>
+                                ))}
+                              </ul>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {quote.warnings.length > 0 && <p className="text-xs text-inksoft mb-2">Ostrzeżenia DHL: {quote.warnings.join("; ")}</p>}
+              <button onClick={create} disabled={creating || !chosen} className={btnPrimary}>{creating ? "Nadawanie…" : "Nadaj przesyłkę i wygeneruj etykietę"}</button>
+              <p className="text-xs text-inksoft mt-2">
+                Cena to wycena wg cennika konta; ostateczną kwotę (opłaty dodatkowe, VAT) potwierdza faktura DHL.
+                {status.env === "production" ? " Nadanie jest prawdziwe i płatne — DHL Express nie pozwala anulować przesyłki przez API." : " Środowisko testowe: nadanie nie jest prawdziwe."}
+              </p>
+            </div>
+          )}
+
+          {/* nadane przesyłki */}
+          <h2 className="text-xs font-semibold text-inksoft mb-2">NADANE PRZESYŁKI</h2>
+          <div className="border border-line bg-white overflow-x-auto mb-8">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs text-inksoft border-b border-line">
-                  <th className="p-3">Kod</th>
+                  <th className="p-3">Nadano</th>
+                  <th className="p-3">Numer przesyłki</th>
+                  <th className="p-3">Odbiorca</th>
                   <th className="p-3">Produkt</th>
-                  <th className="p-3">Typ sieci</th>
-                  <th className="p-3">Tylko w umowie</th>
                   <th className="p-3 text-right">Cena</th>
-                  <th className="p-3 text-right">Cena (PLN)</th>
-                  <th className="p-3 text-right">Waga taryfowa</th>
-                  <th className="p-3 text-right">Dni w drodze</th>
-                  <th className="p-3">Szacowana dostawa</th>
-                  <th className="p-3">Odbiór do godz.</th>
+                  <th className="p-3">Zamówienie</th>
+                  <th className="p-3">Nadał</th>
+                  <th className="p-3"></th>
                 </tr>
               </thead>
               <tbody>
-                {result.products.length === 0 && (
-                  <tr><td colSpan={10} className="p-6 text-center text-inksoft text-sm">DHL nie zwrócił żadnych produktów dla tej trasy.</td></tr>
-                )}
-                {result.products.map((p) => (
-                  <Fragment key={p.code + p.name}>
-                    <tr className={`border-b border-line last:border-b-0 ${isEconomySelect(p) ? "bg-tealsoft font-semibold" : ""}`}>
-                      <td className="p-3 font-mono">{p.code}</td>
-                      <td className="p-3">
-                        {p.name}
-                        {p.breakdown.length > 0 && (
-                          <button onClick={() => setExpanded(expanded === p.code ? null : p.code)} className="ml-2 text-xs font-semibold text-teal hover:underline">
-                            {expanded === p.code ? "ukryj składniki" : "składniki ceny"}
-                          </button>
-                        )}
+                {shipments.length === 0 && <tr><td colSpan={8} className="p-6 text-center text-inksoft text-sm">Brak nadanych przesyłek.</td></tr>}
+                {shipments.map((s) => {
+                  const charge = s.charges?.find((c) => c.currencyType === "BILLC") ?? s.charges?.[0];
+                  return (
+                    <tr key={s.id} className="border-b border-line last:border-b-0 hover:bg-paper align-top">
+                      <td className="p-3 text-xs text-inksoft whitespace-nowrap">
+                        {fmtDateTime(s.created_at)}
+                        {s.environment !== "production" && <div className="text-amber font-semibold">TEST</div>}
                       </td>
-                      <td className="p-3">{p.networkType || "—"}</td>
-                      <td className="p-3">{p.customerAgreement ? "tak" : "nie"}</td>
-                      <td className="p-3 text-right font-mono whitespace-nowrap">{fmtMoney(p.billing)}</td>
-                      <td className="p-3 text-right font-mono whitespace-nowrap">{fmtMoney(p.local)}</td>
-                      <td className="p-3 text-right font-mono whitespace-nowrap" title={p.volumetricWeight !== null ? `waga objętościowa: ${p.volumetricWeight} kg` : undefined}>
-                        {p.chargeableWeight !== null ? `${p.chargeableWeight} kg` : "—"}
+                      <td className="p-3 font-mono whitespace-nowrap">
+                        {s.tracking_url ? <a href={s.tracking_url} target="_blank" rel="noreferrer" className="text-teal hover:underline">{s.tracking_number}</a> : s.tracking_number}
                       </td>
-                      <td className="p-3 text-right font-mono">{p.transitDays ?? "—"}</td>
-                      <td className="p-3 text-xs whitespace-nowrap">{fmtDateTime(p.estimatedDelivery)}</td>
-                      <td className="p-3 text-xs whitespace-nowrap">{fmtDateTime(p.pickupCutoff)}</td>
+                      <td className="p-3 text-xs">{s.receiver?.name}<div className="text-inksoft">{s.receiver?.city}, {s.receiver?.countryCode}</div></td>
+                      <td className="p-3 text-xs whitespace-nowrap">{s.product_name || s.product_code}</td>
+                      <td className="p-3 text-right font-mono text-xs whitespace-nowrap">{charge ? fmtMoney({ price: charge.price, currency: charge.priceCurrency }) : "—"}</td>
+                      <td className="p-3 text-xs font-mono">{s.order_external_id || "—"}</td>
+                      <td className="p-3 text-xs">{s.created_by_email || "—"}</td>
+                      <td className="p-3"><button onClick={() => openLabel(s.id)} className="text-xs font-semibold text-teal hover:underline">Etykieta</button></td>
                     </tr>
-                    {expanded === p.code && (
-                      <tr className="border-b border-line bg-paper">
-                        <td colSpan={10} className="p-3 text-xs">
-                          <div className="font-semibold text-inksoft mb-1">Składniki ceny ({p.billing?.currency ?? "waluta rozliczeniowa"})</div>
-                          <ul className="space-y-0.5">
-                            {p.breakdown.map((b, i) => (
-                              <li key={i} className="flex justify-between max-w-md">
-                                <span>{b.name}</span>
-                                <span className="font-mono">{b.price.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
-          {result.warnings.length > 0 && <p className="text-xs text-inksoft mt-2">Ostrzeżenia DHL: {result.warnings.join("; ")}</p>}
-          <p className="text-xs text-inksoft mt-2">
-            Środowisko: {result.env === "production" ? "produkcyjne" : "testowe"}. Wynik dotyczy jednej paczki o podanych parametrach. Cena to wycena wg cennika konta —
-            nie jest to zobowiązanie, a ostateczną kwotę (opłaty dodatkowe, podatek VAT) potwierdza faktura DHL.
-            {result.env !== "production" && " Środowisko testowe może zwracać inne stawki niż produkcyjne — porównaj po przełączeniu na produkcję (wycena niczego nie tworzy i nie kosztuje)."}
-          </p>
+
+          <TemplatesPanel templates={templates} isAdmin={isAdmin} session={session} settings={settings} onChanged={loadTemplates} onError={setError} />
+          {isAdmin && <SenderPanel settings={settings} onSaved={loadSettings} onError={setError} />}
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ---------------- szablony paczek ---------------- */
+
+function TemplatesPanel({
+  templates,
+  isAdmin,
+  session,
+  settings,
+  onChanged,
+  onError,
+}: {
+  templates: Template[];
+  isAdmin: boolean;
+  session: Session;
+  settings: Settings;
+  onChanged: () => Promise<void>;
+  onError: (msg: string) => void;
+}) {
+  const [f, setF] = useState({ name: "", weight: "", length: "", width: "", height: "", description: "" });
+  const [saving, setSaving] = useState(false);
+
+  async function add() {
+    onError("");
+    const nums = [f.weight, f.length, f.width, f.height].map((v) => Number(v.replace(",", ".")));
+    if (!f.name.trim() || nums.some((n) => !(n > 0))) return onError("Szablon: podaj nazwę oraz wagę i wymiary (liczby większe od zera).");
+    setSaving(true);
+    const { error } = await supabase.from("shipping_templates").insert({
+      name: f.name.trim(),
+      weight_kg: nums[0],
+      length_cm: nums[1],
+      width_cm: nums[2],
+      height_cm: nums[3],
+      description: f.description.trim() || null,
+      created_by_email: session.user.email,
+    });
+    setSaving(false);
+    if (error) return onError(error.code === "23505" ? `Szablon „${f.name.trim()}” już istnieje.` : `Nie udało się zapisać szablonu: ${error.message}`);
+    setF({ name: "", weight: "", length: "", width: "", height: "", description: "" });
+    await onChanged();
+  }
+
+  async function remove(t: Template) {
+    if (!confirm(`Usunąć szablon „${t.name}”?`)) return;
+    const { data, error } = await supabase.from("shipping_templates").delete().eq("id", t.id).select("id");
+    if (error) onError(`Nie udało się usunąć: ${error.message}`);
+    else if (!data?.length) onError("Nie usunięto — szablony może usuwać tylko Admin.");
+    else await onChanged();
+  }
+
+  return (
+    <div className="mb-8">
+      <h2 className="text-xs font-semibold text-inksoft mb-2">SZABLONY PACZEK</h2>
+      <div className="border border-line bg-white overflow-x-auto mb-3">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-inksoft border-b border-line">
+              <th className="p-3">Nazwa</th><th className="p-3 text-right">Waga</th><th className="p-3">Wymiary (cm)</th><th className="p-3">Opis zawartości</th><th className="p-3"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {templates.length === 0 && <tr><td colSpan={5} className="p-6 text-center text-inksoft text-sm">Brak szablonów — dodaj pierwszy poniżej.</td></tr>}
+            {templates.map((t) => (
+              <tr key={t.id} className="border-b border-line last:border-b-0">
+                <td className="p-3 font-semibold">{t.name}</td>
+                <td className="p-3 text-right font-mono">{t.weight_kg} kg</td>
+                <td className="p-3 font-mono">{t.length_cm} × {t.width_cm} × {t.height_cm}</td>
+                <td className="p-3 text-xs text-inksoft">{t.description || `(domyślny: ${settings.default_description})`}</td>
+                <td className="p-3 text-right">{isAdmin && <button onClick={() => remove(t)} className="text-xs font-semibold text-rust hover:underline">Usuń</button>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-7 gap-2 items-end">
+        <div><label className={label}>Nazwa</label><input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="np. xbox" className={inputCls} /></div>
+        <div><label className={label}>Waga (kg)</label><input value={f.weight} onChange={(e) => setF({ ...f, weight: e.target.value })} inputMode="decimal" className={inputCls} /></div>
+        <div><label className={label}>Dł. (cm)</label><input value={f.length} onChange={(e) => setF({ ...f, length: e.target.value })} inputMode="decimal" className={inputCls} /></div>
+        <div><label className={label}>Szer. (cm)</label><input value={f.width} onChange={(e) => setF({ ...f, width: e.target.value })} inputMode="decimal" className={inputCls} /></div>
+        <div><label className={label}>Wys. (cm)</label><input value={f.height} onChange={(e) => setF({ ...f, height: e.target.value })} inputMode="decimal" className={inputCls} /></div>
+        <div><label className={label}>Opis zawartości</label><input value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} placeholder="Used game console" className={inputCls} /></div>
+        <button onClick={add} disabled={saving} className={btnPrimary}>{saving ? "Zapisywanie…" : "Dodaj szablon"}</button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- dane nadawcy (Admin) ---------------- */
+
+function SenderPanel({ settings, onSaved, onError }: { settings: Settings; onSaved: () => Promise<void>; onError: (msg: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [f, setF] = useState(settings);
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    onError("");
+    if (!f.shipper_company.trim() || !f.shipper_name.trim() || !f.street.trim() || !f.postal_code.trim() || !f.city.trim() || !f.phone.trim()) {
+      return onError("Dane nadawcy: uzupełnij firmę, imię i nazwisko, adres i telefon.");
+    }
+    setSaving(true);
+    const { error, data } = await supabase
+      .from("shipping_settings")
+      .update({
+        shipper_company: f.shipper_company.trim(),
+        shipper_name: f.shipper_name.trim(),
+        street: f.street.trim(),
+        postal_code: f.postal_code.trim(),
+        city: f.city.trim(),
+        phone: f.phone.trim(),
+        email: f.email?.trim() || null,
+        default_description: f.default_description.trim() || "Used electronics",
+      })
+      .eq("id", 1)
+      .select("id");
+    setSaving(false);
+    if (error) return onError(`Nie udało się zapisać: ${error.message}`);
+    if (!data?.length) return onError("Nie zapisano — dane nadawcy może zmieniać tylko Admin.");
+    setOpen(false);
+    await onSaved();
+  }
+
+  return (
+    <div className="mb-8">
+      <button onClick={() => { setF(settings); setOpen((o) => !o); }} className="text-xs font-semibold text-teal hover:underline">{open ? "Zamknij dane nadawcy" : "Zmień dane nadawcy (Admin)"}</button>
+      {open && (
+        <div className="border border-line bg-white p-4 mt-2">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3">
+            <div><label className={label}>Firma</label><input value={f.shipper_company} onChange={(e) => setF({ ...f, shipper_company: e.target.value })} className={inputCls} /></div>
+            <div><label className={label}>Osoba kontaktowa</label><input value={f.shipper_name} onChange={(e) => setF({ ...f, shipper_name: e.target.value })} className={inputCls} /></div>
+            <div className="md:col-span-2"><label className={label}>Ulica i numer</label><input value={f.street} onChange={(e) => setF({ ...f, street: e.target.value })} className={inputCls} /></div>
+            <div><label className={label}>Kod pocztowy</label><input value={f.postal_code} onChange={(e) => setF({ ...f, postal_code: e.target.value })} className={inputCls} /></div>
+            <div><label className={label}>Miasto</label><input value={f.city} onChange={(e) => setF({ ...f, city: e.target.value })} className={inputCls} /></div>
+            <div><label className={label}>Telefon</label><input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} className={inputCls} /></div>
+            <div><label className={label}>E-mail</label><input value={f.email ?? ""} onChange={(e) => setF({ ...f, email: e.target.value })} className={inputCls} /></div>
+            <div className="md:col-span-4"><label className={label}>Domyślny opis zawartości</label><input value={f.default_description} onChange={(e) => setF({ ...f, default_description: e.target.value })} className={inputCls} /></div>
+          </div>
+          <button onClick={save} disabled={saving} className={btnPrimary}>{saving ? "Zapisywanie…" : "Zapisz dane nadawcy"}</button>
         </div>
       )}
     </div>
