@@ -122,6 +122,13 @@ const num = (v: unknown): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
+// Kod kraju odbiorcy (adres dostawy) do jednolitej postaci: 2 litery, wielkie, bez spacji. Niepełne/dziwne
+// wartości (np. pełna nazwa kraju zamiast kodu) zostają odrzucone zamiast pokazywać coś mylącego.
+const normCountry = (v: unknown): string | null => {
+  const s = typeof v === "string" ? v.trim().toUpperCase() : "";
+  return /^[A-Z]{2}$/.test(s) ? s : null;
+};
+
 // Odpowiedź GET /ws/orders (jedno zamówienie) -> wiersz surowej tabeli bm_orders.
 export function mapBmOrder(o: any) {
   return {
@@ -177,6 +184,7 @@ export function mapBmToSales(o: any) {
     status: bmDerivedStatus(o),
     sku: skus.length > 0 ? skus.join(", ") : null,
     tracking_number: o.tracking_number || null,
+    country_code: normCountry(o.shipping_address?.country),
     synced_at: new Date().toISOString(),
   };
 }
@@ -237,6 +245,7 @@ export function mapRefurbedToSales(o: any) {
     status: String(o.state ?? "UNSPECIFIED"),
     sku: skus.length > 0 ? skus.join(", ") : null,
     tracking_number: refurbedTracking(o),
+    country_code: normCountry(o.shipping_address?.country_code),
     synced_at: new Date().toISOString(),
   };
 }
@@ -288,6 +297,7 @@ export function mapErliToSales(o: any) {
     status: o.status === "purchased" && o.delivery?.cod === true ? "purchased_cod" : String(o.status ?? "pending"),
     sku: skus.length > 0 ? skus.join(", ") : null,
     tracking_number: (tr?.trackingNumber && String(tr.trackingNumber).trim()) || (tr?.trackingUrl && String(tr.trackingUrl).trim()) || null,
+    country_code: normCountry(o.user?.deliveryAddress?.country),
     synced_at: new Date().toISOString(),
   };
 }
@@ -353,6 +363,7 @@ export function mapAllegroToSales(o: any) {
     status: o.status === "READY_FOR_PROCESSING" && o.payment?.type === "CASH_ON_DELIVERY" ? "READY_FOR_PROCESSING_COD" : String(o.status ?? "BOUGHT"),
     sku: skus.length > 0 ? skus.join(", ") : null,
     tracking_number: waybill || null,
+    country_code: normCountry(o.delivery?.address?.countryCode),
     synced_at: new Date().toISOString(),
   };
 }
@@ -450,6 +461,15 @@ const octopiaTracking = (o: any): string | null => {
   return null;
 };
 
+// Kraj odbiorcy: Octopia nie ma adresu na poziomie zamówienia, tylko na każdej pozycji — bierzemy pierwszą, która go ma.
+const octopiaCountry = (o: any): string | null => {
+  for (const l of (o.lines as any[]) || []) {
+    const c = normCountry(l?.shippingAddress?.countryCode);
+    if (c) return c;
+  }
+  return null;
+};
+
 export function mapOctopiaToSales(o: any) {
   const skus = Array.from(new Set(((o.lines as any[]) || []).map((l) => (typeof l?.offer?.sellerProductId === "string" ? l.offer.sellerProductId.trim() : "")).filter(Boolean)));
   return {
@@ -459,6 +479,7 @@ export function mapOctopiaToSales(o: any) {
     status: String(o.status ?? "Processing"),
     sku: skus.length > 0 ? skus.join(", ") : null,
     tracking_number: octopiaTracking(o),
+    country_code: octopiaCountry(o),
     synced_at: new Date().toISOString(),
   };
 }
@@ -515,6 +536,8 @@ export function mapApiloToSales(o: any, statusName: string | null) {
     status: statusName ?? String(o.status ?? ""),
     sku: skus.length > 0 ? skus.join(", ") : null,
     tracking_number: null, // wymagałoby osobnego zapytania o przesyłkę na każde zamówienie — pominięte w tym moście
+    // Apilo w liście zamówień udostępnia tylko adres klienta (addressCustomer), nie adres dostawy (addressDelivery) — przybliżenie.
+    country_code: normCountry(o.addressCustomer?.country),
     synced_at: new Date().toISOString(),
   };
 }
@@ -561,6 +584,7 @@ export function mapAmazonToSales(o: any) {
     order_date: o.PurchaseDate ?? null,
     status: String(o.OrderStatus ?? "Pending"),
     tracking_number: null, // numer przesyłki nie jest częścią odpowiedzi zamówienia w tym API
+    country_code: normCountry(o.ShippingAddress?.CountryCode),
     synced_at: new Date().toISOString(),
   };
 }

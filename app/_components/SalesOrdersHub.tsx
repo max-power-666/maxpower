@@ -395,11 +395,12 @@ type SalesRow = {
   status: string;
   sku: string | null;
   tracking_number: string | null;
+  country_code: string | null;
   our_status: OurStatus;
   sales_order_items: SalesItem[];
 };
 const SALES_COLUMNS =
-  "marketplace, external_id, order_date, status, sku, tracking_number, our_status, sales_order_items(item_key, position, sku, serial_number, pads, pad_serials)";
+  "marketplace, external_id, order_date, status, sku, tracking_number, country_code, our_status, sales_order_items(item_key, position, sku, serial_number, pads, pad_serials)";
 const rowKey = (r: { marketplace: string; external_id: string }) => `${r.marketplace}:${r.external_id}`;
 
 // Back Market daje numer przesyłki, refurbed tylko link śledzenia — link pokazujemy jako klikalne "śledzenie".
@@ -665,6 +666,7 @@ function OrdersList({
               <th className="p-3">Nr zamówienia</th>
               <th className="p-3">Data zamówienia</th>
               <th className="p-3">Status</th>
+              <th className="p-3">Kraj</th>
               <th className="p-3">Nr przesyłki</th>
               <th className="p-3">SKU</th>
               <th className="p-3">Numer seryjny</th>
@@ -675,7 +677,7 @@ function OrdersList({
           </thead>
           <tbody>
             {!loading && rows.length === 0 && (
-              <tr><td colSpan={10} className="p-6 text-center text-inksoft text-sm">{search ? "Nic nie znaleziono dla tego numeru." : "Brak zamówień — kliknij Odśwież, żeby pobrać je z Back Market."}</td></tr>
+              <tr><td colSpan={11} className="p-6 text-center text-inksoft text-sm">{search ? "Nic nie znaleziono dla tego numeru." : "Brak zamówień — kliknij Odśwież, żeby pobrać je z Back Market."}</td></tr>
             )}
             {rows.map((r) => {
               // Zamówienie bez pozycji (jeszcze nie zsynchronizowane) pokazujemy jednym wierszem z samym SKU.
@@ -706,6 +708,7 @@ function OrdersList({
                           {salesStatusLabel(r.marketplace, r.status)}
                         </span>
                       </td>
+                      <td rowSpan={items.length} className="p-3 text-xs font-mono whitespace-nowrap">{r.country_code || "—"}</td>
                       <td rowSpan={items.length} className="p-3 font-mono whitespace-nowrap">
                         <TrackingCell value={r.tracking_number} />
                       </td>

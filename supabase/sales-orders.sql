@@ -163,6 +163,7 @@ create table if not exists sales_orders (
   status text not null,                      -- surowy status kanału (Back Market: kod stanu "1", "3", "9"...)
   sku text,                                  -- SKU-i wszystkich pozycji po przecinku (podsumowanie; szczegóły w sales_order_items)
   tracking_number text,                      -- numer przesyłki z API (Back Market: tracking_number zamówienia)
+  country_code text,                         -- kod kraju ODBIORCY (adres dostawy), 2 litery ISO 3166-1 gdzie kanał to udostępnia
   synced_at timestamptz not null default now(),
   -- Nasz wewnętrzny status realizacji (niezależny od statusu kanału): nowe | w_realizacji | wyslane
   our_status text not null default 'nowe' check (our_status in ('nowe', 'w_realizacji', 'wyslane')),
@@ -172,6 +173,7 @@ create table if not exists sales_orders (
 alter table sales_orders add column if not exists history jsonb not null default '[]'::jsonb;
 alter table sales_orders add column if not exists tracking_number text;
 alter table sales_orders add column if not exists our_status text not null default 'nowe';
+alter table sales_orders add column if not exists country_code text;
 do $$
 begin
   if not exists (select 1 from pg_constraint where conname = 'sales_orders_our_status_check') then
@@ -333,8 +335,8 @@ begin
        new.marketplace is distinct from old.marketplace or new.external_id is distinct from old.external_id
        or new.order_date is distinct from old.order_date or new.status is distinct from old.status
        or new.sku is distinct from old.sku or new.tracking_number is distinct from old.tracking_number
-       or new.synced_at is distinct from old.synced_at) then
-    raise exception 'Pola pochodzące z marketplace (numer, data, status, SKU, przesyłka) zmienia tylko synchronizacja.' using errcode = '42501';
+       or new.country_code is distinct from old.country_code or new.synced_at is distinct from old.synced_at) then
+    raise exception 'Pola pochodzące z marketplace (numer, data, status, SKU, przesyłka, kraj) zmienia tylko synchronizacja.' using errcode = '42501';
   end if;
   return new;
 end $$;
