@@ -36,8 +36,28 @@ type Settings = {
   default_description: string;
 };
 type Template = { id: number; name: string; weight_kg: number; length_cm: number; width_cm: number; height_cm: number; description: string | null };
+type Carrier = "parcel" | "express";
+const CARRIER_LABEL: Record<Carrier, string> = { parcel: "DHL Parcel", express: "DHL Express" };
+
+// Wspólny kształt wiersza wyceny dla obu przewoźników (tabela wyboru produktu).
+type QuoteRow = {
+  code: string;
+  name: string;
+  billing: DhlMoney | null;
+  local: DhlMoney | null;
+  chargeableWeight: number | null;
+  transitDays: number | null;
+  estimatedDelivery: string | null;
+  breakdown: { name: string; price: number }[];
+  unavailable?: string; // powód, dla którego produktu nie da się wybrać (np. niedostępny na trasie)
+  economy?: boolean;
+};
+
 type ShipmentRow = {
   id: number;
+  carrier: string;
+  cancelled_at: string | null;
+  has_label?: boolean;
   created_at: string;
   created_by_email: string | null;
   environment: string;
@@ -51,7 +71,7 @@ type ShipmentRow = {
   charges: { currencyType: string; priceCurrency: string; price: number }[] | null;
 };
 
-const EMPTY_FORM = { name: "", company: "", street: "", postalCode: "", city: "", countryCode: "DE", phone: "", email: "", template: "", weight: "", length: "", width: "", height: "", description: "", reference: "" };
+const EMPTY_FORM = { name: "", company: "", street: "", houseNumber: "", apartment: "", postalCode: "", city: "", countryCode: "DE", phone: "", email: "", template: "", weight: "", length: "", width: "", height: "", description: "", reference: "" };
 
 export default function ShippingView({
   session,
@@ -65,7 +85,9 @@ export default function ShippingView({
   onPrefillUsed: () => void;
 }) {
   const auth = { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" };
-  const [status, setStatus] = useState<{ configured: boolean; env: string | null } | null>(null);
+  const [express, setExpress] = useState<{ configured: boolean; env: string | null } | null>(null);
+  const [parcel, setParcel] = useState<{ configured: boolean; sandbox: boolean; version: string | null } | null>(null);
+  const [carrier, setCarrier] = useState<Carrier>("parcel");
   const [settings, setSettings] = useState<Settings | null>(null);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [shipments, setShipments] = useState<ShipmentRow[]>([]);
@@ -75,18 +97,22 @@ export default function ShippingView({
   const [order, setOrder] = useState<{ marketplace: string; externalId: string } | null>(null);
   const [plannedDate, setPlannedDate] = useState(defaultShippingDate());
   const [quoting, setQuoting] = useState(false);
-  const [quote, setQuote] = useState<{ products: DhlProduct[]; warnings: string[] } | null>(null);
+  const [quote, setQuote] = useState<{ carrier: Carrier; products: QuoteRow[]; warnings: string[] } | null>(null);
   const [chosen, setChosen] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const [done, setDone] = useState<{ trackingNumber: string; trackingUrl: string | null; price: string; env: string; saved: boolean; labelBase64?: string | null; id?: number; error?: string } | null>(null);
+  const [done, setDone] = useState<{ trackingNumber: string; trackingUrl: string | null; price: string; env: string; saved: boolean; labelBase64?: string | null; id?: number; error?: string; carrier: Carrier } | null>(null);
   const requestId = useRef<string>(crypto.randomUUID());
 
   useEffect(() => {
     fetch("/api/shipping/dhl-express/check", { headers: auth })
       .then((r) => r.json())
-      .then((d) => setStatus({ configured: !!d.configured, env: d.env ?? null }))
-      .catch(() => setStatus(null));
+      .then((d) => setExpress({ configured: !!d.configured, env: d.env ?? null }))
+      .catch(() => setExpress({ configured: false, env: null }));
+    fetch("/api/shipping/dhl-parcel/check", { headers: auth })
+      .then((r) => r.json())
+      .then((d) => setParcel({ configured: !!d.configured, sandbox: !!d.sandbox, version: d.version ?? null }))
+      .catch(() => setParcel({ configured: false, sandbox: false, version: null }));
     loadSettings();
     loadTemplates();
     loadShipments();
@@ -96,7 +122,7 @@ export default function ShippingView({
   // Wejście z karty zamówienia: adres odbiorcy i numer zamówienia wypełniają formularz.
   useEffect(() => {
     if (!prefill) return;
-    setForm({ ...EMPTY_FORM, name: prefill.name, company: prefill.company, street: prefill.street, postalCode: prefill.postalCode, city: prefill.city, countryCode: prefill.countryCode, phone: prefill.phone, email: prefill.email, reference: prefill.externalId });
+    setForm({ ...EMPTY_FORM, name: prefill.name, company: prefill.company, street: prefill.street, houseNumber: prefill.houseNumber, apartment: prefill.apartment, postalCode: prefill.postalCode, city: prefill.city, countryCode: prefill.countryCode, phone: prefill.phone, email: prefill.email, reference: prefill.externalId });
     setOrder({ marketplace: prefill.marketplace, externalId: prefill.externalId });
     setQuote(null);
     setChosen(null);
@@ -117,11 +143,11 @@ export default function ShippingView({
   async function loadShipments() {
     const { data, error: err } = await supabase
       .from("shipments")
-      .select("id, created_at, created_by_email, environment, marketplace, order_external_id, product_code, product_name, tracking_number, tracking_url, receiver, charges")
+      .select("id, created_at, carrier, cancelled_at, label_format, created_by_email, environment, marketplace, order_external_id, product_code, product_name, tracking_number, tracking_url, receiver, charges")
       .order("created_at", { ascending: false })
       .limit(50);
     if (err) setError(`Nie udało się wczytać przesyłek: ${err.message}`);
-    else setShipments((data as ShipmentRow[]) || []);
+    else setShipments(((data as (ShipmentRow & { label_format: string | null })[]) || []).map((r) => ({ ...r, has_label: !!r.label_format })));
   }
 
   function setField(k: keyof typeof EMPTY_FORM, v: string) {
@@ -155,6 +181,19 @@ export default function ShippingView({
     template: templates.find((t) => String(t.id) === form.template)?.name ?? null,
   });
 
+  const receiverPayload = () => ({
+    name: form.name,
+    company: form.company,
+    street: form.street,
+    houseNumber: form.houseNumber,
+    apartment: form.apartment,
+    postalCode: form.postalCode,
+    city: form.city,
+    countryCode: form.countryCode,
+    phone: form.phone,
+    email: form.email,
+  });
+
   async function getQuote() {
     setError("");
     setQuote(null);
@@ -163,10 +202,14 @@ export default function ShippingView({
     setQuoting(true);
     try {
       const p = packagePayload();
-      const res = await fetch("/api/shipping/dhl-express/check", {
+      const res = await fetch(`/api/shipping/${carrier === "parcel" ? "dhl-parcel" : "dhl-express"}/check`, {
         method: "POST",
         headers: auth,
         body: JSON.stringify({
+          receiver: receiverPayload(),
+          package: p,
+          plannedDate,
+          // pola płaskie dla wyceny DHL Express (route sprawdza połączenie po tej trasie)
           destinationCountryCode: form.countryCode,
           destinationCityName: form.city,
           destinationPostalCode: form.postalCode,
@@ -174,15 +217,34 @@ export default function ShippingView({
           length: p.length,
           width: p.width,
           height: p.height,
-          plannedDate,
           isCustomsDeclarable: false,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Nie udało się wycenić przesyłki.");
-      setQuote({ products: data.products, warnings: data.warnings || [] });
-      const eco = (data.products as DhlProduct[]).find(isEconomySelect);
-      if (eco) setChosen(eco.code); // Economy Select jest domyślnym wyborem
+      let rows: QuoteRow[];
+      let warnings: string[] = [];
+      if (carrier === "parcel") {
+        rows = (data.quotes as { product: string; name: string; ok: boolean; price: number | null; fuelSurcharge: number | null; error?: string }[]).map((q) => ({
+          code: q.product,
+          name: `${q.name} (${q.product})`,
+          billing: q.price !== null ? { price: q.price, currency: "PLN" } : null,
+          local: q.price !== null ? { price: q.price, currency: "PLN" } : null,
+          chargeableWeight: null,
+          transitDays: null,
+          estimatedDelivery: null,
+          breakdown: q.fuelSurcharge ? [{ name: "w tym dopłata paliwowa", price: q.fuelSurcharge }] : [],
+          unavailable: q.ok ? undefined : q.error || "niedostępny na tej trasie",
+        }));
+      } else {
+        rows = (data.products as DhlProduct[]).map((p2) => ({ ...p2, economy: isEconomySelect(p2) }));
+        warnings = data.warnings || [];
+      }
+      setQuote({ carrier, products: rows, warnings });
+      // Domyślny wybór: Economy Select (Express) albo najtańszy dostępny produkt (Parcel)
+      const eco = rows.find((r) => r.economy);
+      const cheapest = rows.filter((r) => !r.unavailable && r.billing).sort((x, y) => (x.billing!.price - y.billing!.price))[0];
+      setChosen(eco?.code ?? cheapest?.code ?? null);
     } catch (e: any) {
       setError(e.message || "Nie udało się wycenić przesyłki.");
     } finally {
@@ -192,16 +254,22 @@ export default function ShippingView({
 
   async function create() {
     const product = quote?.products.find((p) => p.code === chosen);
-    if (!product) return;
-    const env = status?.env === "production" ? "PRODUKCYJNE" : "TESTOWE";
+    if (!product || !quote) return;
+    const isParcel = quote.carrier === "parcel";
+    const prod = isParcel && parcel?.sandbox === false;
+    const env = isParcel ? (parcel?.sandbox ? "TESTOWE" : "PRODUKCYJNE") : express?.env === "production" ? "PRODUKCYJNE" : "TESTOWE";
     const ok = confirm(
-      `NADANIE PRZESYŁKI DHL EXPRESS (środowisko ${env})\\n\\n` +
-        `Produkt: ${product.name} (${product.code})\\nCena wg cennika: ${fmtMoney(product.billing)}\\n` +
-        `Odbiorca: ${form.name}, ${form.street}, ${form.postalCode} ${form.city}, ${form.countryCode}\\n` +
-        `Paczka: ${form.weight} kg, ${form.length}×${form.width}×${form.height} cm\\n\\n` +
-        (status?.env === "production"
-          ? "To PRAWDZIWA przesyłka — obciąży konto DHL. DHL Express nie pozwala jej anulować przez API (tylko w panelu DHL).\\n\\n"
-          : "Środowisko testowe: przesyłka nie jest prawdziwa i nie obciąża konta.\\n\\n") +
+      `NADANIE PRZESYŁKI ${CARRIER_LABEL[quote.carrier].toUpperCase()} (środowisko ${env})\n\n` +
+        `Produkt: ${product.name}\nCena wg cennika: ${fmtMoney(product.billing)}\n` +
+        `Odbiorca: ${form.name}, ${form.street} ${form.houseNumber}${form.apartment ? "/" + form.apartment : ""}, ${form.postalCode} ${form.city}, ${form.countryCode}\n` +
+        `Paczka: ${form.weight} kg, ${form.length}×${form.width}×${form.height} cm\n\n` +
+        (isParcel
+          ? prod
+            ? "To PRAWDZIWA przesyłka (DHL Parcel nie ma środowiska testowego) — obciąży konto DHL. Możesz ją anulować na liście przesyłek, dopóki nie zamówisz po nią kuriera.\n\n"
+            : "Środowisko testowe: przesyłka nie jest prawdziwa.\n\n"
+          : express?.env === "production"
+            ? "To PRAWDZIWA przesyłka — obciąży konto DHL. DHL Express nie pozwala jej anulować przez API (tylko w panelu DHL).\n\n"
+            : "Środowisko testowe: przesyłka nie jest prawdziwa i nie obciąża konta.\n\n") +
         "Nadać przesyłkę i wygenerować etykietę?"
     );
     if (!ok) return;
@@ -209,7 +277,7 @@ export default function ShippingView({
     setError("");
     setCreating(true);
     try {
-      const res = await fetch("/api/shipping/dhl-express/create", {
+      const res = await fetch(`/api/shipping/${isParcel ? "dhl-parcel" : "dhl-express"}/create`, {
         method: "POST",
         headers: auth,
         body: JSON.stringify({
@@ -218,7 +286,7 @@ export default function ShippingView({
           productCode: product.code,
           productName: product.name,
           plannedDate,
-          receiver: { name: form.name, company: form.company, street: form.street, postalCode: form.postalCode, city: form.city, countryCode: form.countryCode, phone: form.phone, email: form.email },
+          receiver: receiverPayload(),
           package: packagePayload(),
           reference: form.reference,
           order,
@@ -230,11 +298,12 @@ export default function ShippingView({
         trackingNumber: data.trackingNumber,
         trackingUrl: data.trackingUrl ?? null,
         price: fmtMoney(product.billing),
-        env: data.environment ?? status?.env ?? "test",
+        env: data.environment ?? "test",
         saved: data.saved !== false,
         labelBase64: data.labelBase64 ?? null,
         id: data.id,
-        error: data.saved === false ? data.error : undefined,
+        error: data.saved === false ? data.error : data.labelError ? `Przesyłka nadana, ale nie udało się pobrać etykiety: ${data.labelError}. Kliknij „Otwórz etykietę”, aby spróbować ponownie.` : undefined,
+        carrier: quote.carrier,
       });
       requestId.current = crypto.randomUUID(); // kolejna przesyłka = nowy klucz
       setQuote(null);
@@ -247,13 +316,31 @@ export default function ShippingView({
     }
   }
 
+  // Anulowanie przesyłki DHL Parcel (DHL Express nie udostępnia tego w API).
+  async function cancelShipment(s: ShipmentRow) {
+    if (!confirm(`Anulować przesyłkę ${s.tracking_number}?\n\nDHL pozwala na to tylko wtedy, gdy nie zamówiono po nią kuriera.`)) return;
+    setError("");
+    const res = await fetch("/api/shipping/dhl-parcel/cancel", { method: "POST", headers: auth, body: JSON.stringify({ id: s.id, confirm: true }) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return setError(data?.error || "Nie udało się anulować przesyłki.");
+    await loadShipments();
+  }
+
   async function openLabel(id: number | undefined, base64?: string | null) {
     setError("");
     let data = base64 ?? null;
     if (!data && id !== undefined) {
-      const { data: row, error: err } = await supabase.from("shipments").select("label_data").eq("id", id).maybeSingle();
+      const { data: row, error: err } = await supabase.from("shipments").select("label_data, carrier").eq("id", id).maybeSingle();
       if (err) return setError(`Nie udało się wczytać etykiety: ${err.message}`);
       data = (row?.label_data as string | null) ?? null;
+      // DHL Parcel: gdy etykiety nie udało się pobrać przy nadaniu, pobieramy ją teraz od DHL i zapisujemy.
+      if (!data && row?.carrier === "dhl_parcel") {
+        const res = await fetch("/api/shipping/dhl-parcel/label", { method: "POST", headers: auth, body: JSON.stringify({ id }) });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok) return setError(j?.error || "Nie udało się pobrać etykiety.");
+        data = j.labelBase64 ?? null;
+        await loadShipments();
+      }
     }
     if (!data) return setError("Brak etykiety dla tej przesyłki.");
     window.open(base64ToBlobUrl(data), "_blank"); // PDF 10x15 — drukuj (Ctrl+P) na Zebrze, rozmiar strony 100×150 mm
@@ -270,31 +357,47 @@ export default function ShippingView({
   }
 
   const formReady =
-    form.name.trim() && form.street.trim() && form.postalCode.trim() && form.city.trim() && form.phone.trim() && Number(form.weight.replace(",", ".")) > 0 && form.length && form.width && form.height;
+    form.name.trim() && form.street.trim() && form.houseNumber.trim() && form.postalCode.trim() && form.city.trim() && form.phone.trim() && Number(form.weight.replace(",", ".")) > 0 && form.length && form.width && form.height;
 
   return (
     <div>
       {/* połączenie */}
       <div className="border border-line bg-white p-4 mb-6">
-        <h2 className="text-xs font-semibold text-inksoft mb-2">DHL EXPRESS</h2>
-        {status === null && <p className="text-xs text-inksoft">Sprawdzanie konfiguracji…</p>}
-        {status && !status.configured && (
-          <p className="text-xs text-rust">
-            DHL Express nie jest skonfigurowany. Ustaw w Vercel: DHL_EXPRESS_API_KEY, DHL_EXPRESS_API_SECRET, DHL_EXPRESS_ACCOUNT i DHL_EXPRESS_ENV, potem Redeploy.
+        <h2 className="text-xs font-semibold text-inksoft mb-2">PRZEWOŹNICY</h2>
+        {(express === null || parcel === null) && <p className="text-xs text-inksoft">Sprawdzanie konfiguracji…</p>}
+        {parcel && (
+          <p className="text-xs mb-1">
+            <span className="font-semibold">DHL Parcel:</span>{" "}
+            {parcel.configured ? (
+              <span className="text-inksoft">
+                skonfigurowany{parcel.version ? ` (usługa odpowiada, wersja ${parcel.version})` : " (usługa DHL chwilowo nie odpowiedziała)"}.{" "}
+                <span className={`font-semibold ${parcel.sandbox ? "text-teal" : "text-rust"}`}>{parcel.sandbox ? "Środowisko testowe." : "Środowisko PRODUKCYJNE — przesyłki są prawdziwe i płatne (można je anulować)."}</span>
+              </span>
+            ) : (
+              <span className="text-rust">nie skonfigurowany — ustaw w Vercel DHL_PARCEL_USERNAME, DHL_PARCEL_PASSWORD i DHL_PARCEL_SAP, potem Redeploy.</span>
+            )}
           </p>
         )}
-        {status?.configured && (
-          <p className="text-xs text-inksoft">
-            Środowisko: <span className={`font-semibold ${status.env === "production" ? "text-rust" : "text-teal"}`}>{status.env === "production" ? "PRODUKCYJNE — przesyłki są prawdziwe i płatne" : "testowe — przesyłki nie są prawdziwe"}</span>.
-            {settings && <> Nadawca: {settings.shipper_company}, {settings.street}, {settings.postal_code} {settings.city}.</>}
+        {express && (
+          <p className="text-xs">
+            <span className="font-semibold">DHL Express:</span>{" "}
+            {express.configured ? (
+              <span className="text-inksoft">
+                skonfigurowany,{" "}
+                <span className={`font-semibold ${express.env === "production" ? "text-rust" : "text-teal"}`}>{express.env === "production" ? "środowisko PRODUKCYJNE — przesyłki są prawdziwe i płatne (nie da się ich anulować przez API)" : "środowisko testowe — przesyłki nie są prawdziwe"}</span>.
+              </span>
+            ) : (
+              <span className="text-rust">nie skonfigurowany — ustaw DHL_EXPRESS_API_KEY, DHL_EXPRESS_API_SECRET, DHL_EXPRESS_ACCOUNT i DHL_EXPRESS_ENV.</span>
+            )}
           </p>
         )}
-        {status?.configured && !settings && <p className="text-xs text-rust mt-1">Brak danych nadawcy — uruchom supabase/shipping.sql.</p>}
+        {settings && <p className="text-xs text-inksoft mt-1">Nadawca: {settings.shipper_company}, {settings.street}, {settings.postal_code} {settings.city}.</p>}
+        {!settings && (parcel?.configured || express?.configured) && <p className="text-xs text-rust mt-1">Brak danych nadawcy — uruchom supabase/shipping.sql.</p>}
       </div>
 
       {error && <p className="text-rust text-xs mb-4">{error}</p>}
 
-      {status?.configured && settings && (
+      {(parcel?.configured || express?.configured) && settings && (
         <>
           {/* wynik nadania */}
           {done && (
@@ -318,11 +421,32 @@ export default function ShippingView({
               <h2 className="text-xs font-semibold text-inksoft">NOWA PRZESYŁKA{order ? ` — zamówienie ${order.externalId}` : ""}</h2>
               <button onClick={reset} className="text-xs font-semibold text-teal hover:underline">Wyczyść formularz</button>
             </div>
+            <div className="flex items-center gap-2 mb-4">
+              <span className="text-xs font-semibold text-inksoft mr-1">Przewoźnik:</span>
+              {(["parcel", "express"] as Carrier[]).map((c) => {
+                const on = c === "parcel" ? parcel?.configured : express?.configured;
+                return (
+                  <button
+                    key={c}
+                    onClick={() => { setCarrier(c); setQuote(null); setChosen(null); }}
+                    disabled={!on}
+                    title={on ? undefined : "Nie skonfigurowany"}
+                    className={`px-3 py-1.5 rounded-full text-sm font-semibold border disabled:opacity-40 ${carrier === c ? "bg-ink text-paper border-ink" : "bg-white border-line"}`}
+                  >
+                    {CARRIER_LABEL[c]}
+                  </button>
+                );
+              })}
+            </div>
             <h3 className="text-xs font-semibold text-inksoft mb-2">Odbiorca</h3>
             <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
               <div><label className={label}>Imię i nazwisko *</label><input value={form.name} onChange={(e) => setField("name", e.target.value)} className={inputCls} /></div>
               <div><label className={label}>Firma (opcjonalnie)</label><input value={form.company} onChange={(e) => setField("company", e.target.value)} className={inputCls} /></div>
-              <div className="md:col-span-2"><label className={label}>Ulica i numer *</label><input value={form.street} onChange={(e) => setField("street", e.target.value)} className={inputCls} /></div>
+              <div><label className={label}>Ulica *</label><input value={form.street} onChange={(e) => setField("street", e.target.value)} className={inputCls} /></div>
+              <div className="grid grid-cols-2 gap-2">
+                <div><label className={label}>Nr domu *</label><input value={form.houseNumber} onChange={(e) => setField("houseNumber", e.target.value)} className={inputCls} /></div>
+                <div><label className={label}>Nr lokalu</label><input value={form.apartment} onChange={(e) => setField("apartment", e.target.value)} className={inputCls} /></div>
+              </div>
               <div><label className={label}>Kod pocztowy *</label><input value={form.postalCode} onChange={(e) => setField("postalCode", e.target.value)} className={inputCls} /></div>
               <div><label className={label}>Miasto *</label><input value={form.city} onChange={(e) => setField("city", e.target.value)} className={inputCls} /></div>
               <div>
@@ -352,7 +476,7 @@ export default function ShippingView({
               <div><label className={label}>Data nadania</label><input type="date" value={plannedDate} onChange={(e) => { setPlannedDate(e.target.value); setQuote(null); setChosen(null); }} className={inputCls} /></div>
               <div className="col-span-2 md:col-span-6"><label className={label}>Opis zawartości</label><input value={form.description} onChange={(e) => setField("description", e.target.value)} placeholder={settings.default_description} className={inputCls} /></div>
             </div>
-            <button onClick={getQuote} disabled={quoting || !formReady} className={btnPrimary}>{quoting ? "Pytanie DHL…" : "Wyceń i pokaż produkty"}</button>
+            <button onClick={getQuote} disabled={quoting || !formReady || !(carrier === "parcel" ? parcel?.configured : express?.configured)} className={btnPrimary}>{quoting ? "Pytanie DHL…" : `Wyceń (${CARRIER_LABEL[carrier]})`}</button>
           </div>
 
           {/* wycena i wybór produktu */}
@@ -376,8 +500,11 @@ export default function ShippingView({
                     {quote.products.length === 0 && <tr><td colSpan={8} className="p-6 text-center text-inksoft text-sm">DHL nie zwrócił produktów dla tej trasy.</td></tr>}
                     {quote.products.map((p) => (
                       <Fragment key={p.code + p.name}>
-                        <tr className={`border-b border-line last:border-b-0 cursor-pointer ${chosen === p.code ? "bg-tealsoft" : "hover:bg-paper"} ${isEconomySelect(p) ? "font-semibold" : ""}`} onClick={() => setChosen(p.code)}>
-                          <td className="p-3"><input type="radio" checked={chosen === p.code} onChange={() => setChosen(p.code)} /></td>
+                        <tr
+                          className={`border-b border-line last:border-b-0 ${p.unavailable ? "text-inksoft" : "cursor-pointer"} ${chosen === p.code ? "bg-tealsoft" : p.unavailable ? "" : "hover:bg-paper"} ${p.economy ? "font-semibold" : ""}`}
+                          onClick={() => !p.unavailable && setChosen(p.code)}
+                        >
+                          <td className="p-3"><input type="radio" checked={chosen === p.code} disabled={!!p.unavailable} onChange={() => setChosen(p.code)} /></td>
                           <td className="p-3 font-mono">{p.code}</td>
                           <td className="p-3">
                             {p.name}
@@ -387,10 +514,16 @@ export default function ShippingView({
                               </button>
                             )}
                           </td>
-                          <td className="p-3 text-right font-mono whitespace-nowrap">{fmtMoney(p.billing)}</td>
-                          <td className="p-3 text-right font-mono whitespace-nowrap">{fmtMoney(p.local)}</td>
-                          <td className="p-3 text-right font-mono whitespace-nowrap">{p.chargeableWeight !== null ? `${p.chargeableWeight} kg` : "—"}</td>
-                          <td className="p-3 text-right font-mono">{p.transitDays ?? "—"}</td>
+                          {p.unavailable ? (
+                            <td colSpan={4} className="p-3 text-xs">niedostępny: {p.unavailable}</td>
+                          ) : (
+                            <>
+                              <td className="p-3 text-right font-mono whitespace-nowrap">{fmtMoney(p.billing)}</td>
+                              <td className="p-3 text-right font-mono whitespace-nowrap">{fmtMoney(p.local)}</td>
+                              <td className="p-3 text-right font-mono whitespace-nowrap">{p.chargeableWeight !== null ? `${p.chargeableWeight} kg` : "—"}</td>
+                              <td className="p-3 text-right font-mono">{p.transitDays ?? "—"}</td>
+                            </>
+                          )}
                           <td className="p-3 text-xs whitespace-nowrap">{fmtDateTime(p.estimatedDelivery)}</td>
                         </tr>
                         {expanded === p.code && (
@@ -410,10 +543,16 @@ export default function ShippingView({
                 </table>
               </div>
               {quote.warnings.length > 0 && <p className="text-xs text-inksoft mb-2">Ostrzeżenia DHL: {quote.warnings.join("; ")}</p>}
-              <button onClick={create} disabled={creating || !chosen} className={btnPrimary}>{creating ? "Nadawanie…" : "Nadaj przesyłkę i wygeneruj etykietę"}</button>
+              <button onClick={create} disabled={creating || !chosen} className={btnPrimary}>{creating ? "Nadawanie…" : `Nadaj przesyłkę (${CARRIER_LABEL[quote.carrier]}) i wygeneruj etykietę`}</button>
               <p className="text-xs text-inksoft mt-2">
-                Cena to wycena wg cennika konta; ostateczną kwotę (opłaty dodatkowe, VAT) potwierdza faktura DHL.
-                {status.env === "production" ? " Nadanie jest prawdziwe i płatne — DHL Express nie pozwala anulować przesyłki przez API." : " Środowisko testowe: nadanie nie jest prawdziwe."}
+                Cena to wycena wg cennika konta (DHL Parcel: w PLN, sprawdź czy netto, czy brutto); ostateczną kwotę (opłaty dodatkowe, VAT) potwierdza faktura DHL.
+                {quote.carrier === "parcel"
+                  ? parcel?.sandbox
+                    ? " Środowisko testowe: nadanie nie jest prawdziwe."
+                    : " Nadanie jest prawdziwe i płatne — możesz je anulować na liście przesyłek, dopóki nie zamówisz kuriera."
+                  : express?.env === "production"
+                    ? " Nadanie jest prawdziwe i płatne — DHL Express nie pozwala anulować przesyłki przez API."
+                    : " Środowisko testowe: nadanie nie jest prawdziwe."}
               </p>
             </div>
           )}
@@ -425,6 +564,7 @@ export default function ShippingView({
               <thead>
                 <tr className="text-left text-xs text-inksoft border-b border-line">
                   <th className="p-3">Nadano</th>
+                  <th className="p-3">Przewoźnik</th>
                   <th className="p-3">Numer przesyłki</th>
                   <th className="p-3">Odbiorca</th>
                   <th className="p-3">Produkt</th>
@@ -435,15 +575,16 @@ export default function ShippingView({
                 </tr>
               </thead>
               <tbody>
-                {shipments.length === 0 && <tr><td colSpan={8} className="p-6 text-center text-inksoft text-sm">Brak nadanych przesyłek.</td></tr>}
+                {shipments.length === 0 && <tr><td colSpan={9} className="p-6 text-center text-inksoft text-sm">Brak nadanych przesyłek.</td></tr>}
                 {shipments.map((s) => {
                   const charge = s.charges?.find((c) => c.currencyType === "BILLC") ?? s.charges?.[0];
                   return (
-                    <tr key={s.id} className="border-b border-line last:border-b-0 hover:bg-paper align-top">
+                    <tr key={s.id} className={`border-b border-line last:border-b-0 hover:bg-paper align-top ${s.cancelled_at ? "text-inksoft line-through" : ""}`}>
                       <td className="p-3 text-xs text-inksoft whitespace-nowrap">
                         {fmtDateTime(s.created_at)}
                         {s.environment !== "production" && <div className="text-amber font-semibold">TEST</div>}
                       </td>
+                      <td className="p-3 text-xs whitespace-nowrap">{s.carrier === "dhl_parcel" ? "DHL Parcel" : "DHL Express"}{s.cancelled_at && <div className="text-rust font-semibold no-underline">ANULOWANA</div>}</td>
                       <td className="p-3 font-mono whitespace-nowrap">
                         {s.tracking_url ? <a href={s.tracking_url} target="_blank" rel="noreferrer" className="text-teal hover:underline">{s.tracking_number}</a> : s.tracking_number}
                       </td>
@@ -452,7 +593,12 @@ export default function ShippingView({
                       <td className="p-3 text-right font-mono text-xs whitespace-nowrap">{charge ? fmtMoney({ price: charge.price, currency: charge.priceCurrency }) : "—"}</td>
                       <td className="p-3 text-xs font-mono">{s.order_external_id || "—"}</td>
                       <td className="p-3 text-xs">{s.created_by_email || "—"}</td>
-                      <td className="p-3"><button onClick={() => openLabel(s.id)} className="text-xs font-semibold text-teal hover:underline">Etykieta</button></td>
+                      <td className="p-3 whitespace-nowrap text-right">
+                        {!s.cancelled_at && <button onClick={() => openLabel(s.id)} className="text-xs font-semibold text-teal hover:underline">{s.has_label === false ? "Pobierz etykietę" : "Etykieta"}</button>}
+                        {!s.cancelled_at && s.carrier === "dhl_parcel" && (
+                          <button onClick={() => cancelShipment(s)} className="ml-3 text-xs font-semibold text-rust hover:underline">Anuluj</button>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}

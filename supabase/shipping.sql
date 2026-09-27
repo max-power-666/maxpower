@@ -4,7 +4,7 @@
 --
 --  * shipping_settings  — dane nadawcy widoczne na etykiecie (jeden wiersz), zmienia je Admin,
 --  * shipping_templates — szablony paczek (nazwa, waga, wymiary, opis zawartości), np. "ps4",
---  * shipments          — nadane przesyłki wraz z etykietą (PDF w base64) i opłatami. Zapisuje wyłącznie serwer (service_role);
+--  * shipments          — nadane przesyłki (DHL Express i DHL Parcel) wraz z etykietą (PDF w base64) i opłatami. Zapisuje wyłącznie serwer (service_role);
 --                         czytać mogą tylko Admin i Manager (są tam adresy odbiorców).
 
 -- Admin albo Manager: SECURITY DEFINER, żeby polityki mogły sprawdzić rolę w members bez uprawnień do niej.
@@ -66,8 +66,10 @@ create table if not exists shipments (
   package jsonb not null,                             -- waga, wymiary, opis, szablon
   charges jsonb,                                      -- opłaty zwrócone przez DHL (shipmentCharges)
   label_format text,                                  -- pdf
-  label_data text                                     -- etykieta w base64 (pobierana osobno, nie na liście)
+  label_data text,                                    -- etykieta w base64 (pobierana osobno, nie na liście)
+  cancelled_at timestamptz                            -- anulowano przez API (tylko DHL Parcel); wiersz zostaje jako zapis księgowy
 );
+alter table shipments add column if not exists cancelled_at timestamptz;
 create index if not exists shipments_created_idx on shipments (created_at desc);
 create index if not exists shipments_order_idx on shipments (marketplace, order_external_id);
 

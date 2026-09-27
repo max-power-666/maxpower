@@ -27,7 +27,7 @@ numerach seryjnych, wielokanałowa synchronizacja stanów, naprawy, auto-wycena)
   `ServiceView.tsx` (Serwis), `TestsView.tsx` (Testy), `ProductCardDrawer.tsx` (karta produktu), `TradeInHub.tsx` + `TradeInOrdersView.tsx` (Trade-in),
   `TradeInView.tsx` (Bidder), `SalesOrdersHub.tsx` (Zamówienia).
 - `app/api/*/route.ts` — endpointy serwerowe (sekrety tylko tu, nigdy w przeglądarce):
-  `fakturownia/sync`, `tradein/bidder`, `tradein/competitors`, `tradein/orders-sync`, `tradein/validate`, `orders/bm-sync`, `orders/refurbed-sync`, `orders/erli-sync`, `orders/allegro-sync`, `orders/allegro-auth`, `orders/allegro-callback`, `shipping/dhl-express/check`.
+  `fakturownia/sync`, `tradein/bidder`, `tradein/competitors`, `tradein/orders-sync`, `tradein/validate`, `orders/bm-sync`, `orders/refurbed-sync`, `orders/erli-sync`, `orders/allegro-sync`, `orders/allegro-auth`, `orders/allegro-callback`, `shipping/dhl-express/{check,create}`, `shipping/dhl-parcel/{check,create,label,cancel}`.
 - `lib/` — `supabaseClient.ts`, `buyback.ts` (logika biddera + `isAuthorized`),
   `displayName.ts` (skrócone imię: "Maksymilian J."), `workLog.ts` (interwały Dziś/7/30 dni,
   liczenie czasu i **etykiety typów czynności/statusów** — jedno źródło dla list i karty produktu),
@@ -193,8 +193,8 @@ Usuwa załącznik jego autor albo Admin; kolejność usuwania to **najpierw plik
 usuwa też jego pliki ze Storage (wiersze znikają kaskadowo, ale pliki same by zostały). Dodanie/usunięcie załącznika trafia do logu zadania. Storage na
 darmowym planie Supabase ma łącznie 1 GB — warto go pilnować.
 
-**Wysyłka** (`ShippingView.tsx`, `lib/dhlExpress.ts`, `lib/shipping.ts`, `shipping.sql`, `app/api/shipping/dhl-express/{check,create}`) — nadawanie przesyłek
-**DHL Express** (MyDHL API REST, OpenAPI 3.3.1, nagłówek `x-version: 3.3.1`); dostęp tylko Admin i Manager (`lib/serverAuth.ts` `requireRole`, polityki `is_admin_or_manager()`).
+**Wysyłka** (`ShippingView.tsx`, `lib/dhlExpress.ts`, `lib/dhlParcel.ts`, `lib/shipping.ts`, `lib/shipmentInput.ts`, `shipping.sql`, `app/api/shipping/*`) — nadawanie przesyłek
+przez **dwóch przewoźników** (wybór w formularzu; domyślnie DHL Parcel) — najpierw opis **DHL Express** (MyDHL API REST, OpenAPI 3.3.1, nagłówek `x-version: 3.3.1`); dostęp tylko Admin i Manager (`lib/serverAuth.ts` `requireRole`, polityki `is_admin_or_manager()`).
 Logowanie Basic: API Key (Username / site ID) : API Secret (Password) z aplikacji MyDHL na developer.dhl.com — ta sama para dla testu i produkcji; środowisko wybiera
 adres (`express.api.dhl.com/mydhlapi/test` vs `/mydhlapi`), **domyślnie testowe**, produkcja tylko przy `DHL_EXPRESS_ENV=production`. Numer konta i klucze tylko w env.
 Przepływ: formularz (odbiorca z zamówienia albo ręcznie, paczka z **szablonu** albo ręcznie, data nadania) → **wycena** `GET /rates` (produkty na naszym koncie z ceną
@@ -208,6 +208,16 @@ są w bazie. Z karty zamówienia (Back Market, Refurbed, kraj UE) przycisk "Nada
 spacjach, za długi adres = czytelny błąd, nie ucinanie). **Ograniczenia DHL Express:** środowisko testowe ma limit 500 wywołań dziennie; API **nie pozwala anulować przesyłki**
 (tylko w panelu DHL); Economy Select zależy od trasy i umowy; kuriera nie zamawiamy z aplikacji (`pickup.isRequested: false`). Wcześniej rozważane DHL Parcel Polska (DHL24 WebAPI2, SOAP)
 — porzucone (dokumentacja niedostępna, umowa jest na Express). Nie testowane na żywym API do nadawania — zweryfikowane na atrapie `fetch` wg specyfikacji.
+
+**DHL Parcel** (`lib/dhlParcel.ts`, DHL24 WebAPI2, **SOAP**, WSDL `https://dhl24.com.pl/webapi2?wsdl`, endpoint `https://dhl24.com.pl/webapi2/provider/service.html?ws=1`): koperta
+document/literal składana ręcznie (`el()` — UWAGA: zagnieżdżone elementy podawać jako tablicę, tekst jest escapowany), odpowiedź czytana `fast-xml-parser`. Logowanie: `authData` (klucz
+użytkownika = "klucz APIv2" + hasło) w każdej metodzie oprócz `getVersion`; płatnik po numerze SAP (BANK_TRANSFER, SHIPPER). Produkty międzynarodowe **EK (Connect)** i **PI (International)**;
+wycena `getPrice` (cena w PLN + dopłata paliwowa; produkt niedostępny na trasie = wiersz "niedostępny: <powód>"), tworzenie `createShipments`, etykieta `getLabels` **BLP = PDF**
+(ZBLP = ZPL dla Zebry, nieużywany), anulowanie `deleteShipments` (**możliwe przez API**, dopóki nie zamówiono kuriera; wiersz w `shipments` dostaje `cancelled_at`). **DHL Parcel nie ma
+środowiska testowego dostępnego dla nas** — każde nadanie jest prawdziwe, więc test = nadaj + od razu anuluj. Adres w DHL24 wymaga ulicy i numeru domu w OSOBNYCH polach oraz limitów:
+miejscowość max **17** znaków, ulica 35, nazwa 60, telefon 20 (za długie = czytelny błąd, nie ucinanie; opis zawartości ucinany do 30). Nadawcę rozdziela `loadShipper`
+(`lib/parcelServer.ts`, kod pocztowy bez myślnika). Wspólna serwerowa walidacja formularza: `lib/shipmentInput.ts` (`parseShipmentBody`, numer domu wyciągany z ulicy przez
+`splitStreet`). Numer przesyłki DHL24 (shipmentId) = numer do śledzenia. Nie testowane na żywym API — zweryfikowane na atrapie `fetch` wg WSDL.
 
 **Serwis** (`ServiceView.tsx`, `service_log`). Rejestr napraw wg tabeli z regulaminu:
 Joy-Con para 15 pkt, kontroler PS4 25, Xbox One 35, PS5 12, czyszczenie konsoli 45.
@@ -288,7 +298,7 @@ Ważne przy Bidderze: zmienia ceny na żywym Back Markecie, więc to pierwszy ka
 
 `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`,
 `CRON_SECRET`, `FAKTUROWNIA_DOMAIN` (sama subdomena, np. `recoo`), `FAKTUROWNIA_API_TOKEN`,
-`BACKMARKET_AUTH`, `BACKMARKET_LANG`, `BACKMARKET_UA`, `BACKMARKET_BASE_URL`, `REFURBED_API_TOKEN` (z supplier.refurbed.com; bez niego sync refurbed jest pomijany; nieużywany wygasa po 2 miesiącach), `REFURBED_UA`, `ERLI_API_KEY` (panel Erli: Metoda integracji > Własna integracja po API; bez niego sync Erli jest pomijany), `ERLI_UA`, `ALLEGRO_CLIENT_ID`, `ALLEGRO_CLIENT_SECRET` (aplikacja z apps.developer.allegro.pl), `ALLEGRO_REDIRECT_URI` (opcjonalny, sztywny adres przekierowania), `DHL_EXPRESS_API_KEY`, `DHL_EXPRESS_API_SECRET`, `DHL_EXPRESS_ACCOUNT` (numer konta nadawcy DHL Express — tylko w env, nie w repo), `DHL_EXPRESS_ENV` (`test` domyślnie / `production`), `DHL_EXPRESS_LABEL_TEMPLATE` (opcjonalnie, domyślnie `ECOM26_64_001`), `ALLEGRO_UA` (**wymagany**, bez wartości domyślnej: User-Agent z generatora w panelu aplikacji — Allegro blokuje klucz przy nieprawidłowym; bez niego sync Allegro jest pomijany).
+`BACKMARKET_AUTH`, `BACKMARKET_LANG`, `BACKMARKET_UA`, `BACKMARKET_BASE_URL`, `REFURBED_API_TOKEN` (z supplier.refurbed.com; bez niego sync refurbed jest pomijany; nieużywany wygasa po 2 miesiącach), `REFURBED_UA`, `ERLI_API_KEY` (panel Erli: Metoda integracji > Własna integracja po API; bez niego sync Erli jest pomijany), `ERLI_UA`, `ALLEGRO_CLIENT_ID`, `ALLEGRO_CLIENT_SECRET` (aplikacja z apps.developer.allegro.pl), `ALLEGRO_REDIRECT_URI` (opcjonalny, sztywny adres przekierowania), `DHL_PARCEL_USERNAME` (klucz APIv2 z panelu DHL24), `DHL_PARCEL_PASSWORD`, `DHL_PARCEL_SAP` (numer klienta SAP, 7 cyfr; tylko w env), `DHL_EXPRESS_API_KEY`, `DHL_EXPRESS_API_SECRET`, `DHL_EXPRESS_ACCOUNT` (numer konta nadawcy DHL Express — tylko w env, nie w repo), `DHL_EXPRESS_ENV` (`test` domyślnie / `production`), `DHL_EXPRESS_LABEL_TEMPLATE` (opcjonalnie, domyślnie `ECOM26_64_001`), `ALLEGRO_UA` (**wymagany**, bez wartości domyślnej: User-Agent z generatora w panelu aplikacji — Allegro blokuje klucz przy nieprawidłowym; bez niego sync Allegro jest pomijany).
 Zmiana zmiennej na Vercelu wymaga nowego deployu. W Supabase (Authentication → URL
 Configuration) musi być aktualny adres produkcyjny, inaczej magic link nie zadziała.
 

@@ -8,7 +8,9 @@ export type ShipPrefill = {
   externalId: string;
   name: string;
   company: string;
-  street: string;
+  street: string; // sama ulica (bez numeru domu)
+  houseNumber: string;
+  apartment: string; // numer lokalu / dodatek adresu
   postalCode: string;
   city: string;
   countryCode: string;
@@ -17,6 +19,17 @@ export type ShipPrefill = {
 };
 
 const clean = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+
+// Rozdziela "ulica numer" na ulicę i numer domu (DHL Parcel wymaga osobnych pól). Obsługuje numer na końcu ("Hauptstr. 5", "Rue X, 12b")
+// i na początku ("12 Rue de la Paix"); gdy nie da się rozpoznać numeru, całość zostaje ulicą, a numer pusty (użytkownik uzupełnia w formularzu).
+export function splitStreet(text: string): { street: string; houseNumber: string } {
+  const t = clean(text);
+  const trailing = /^(.*\D)[\s,]+(\d+[A-Za-z]?(?:[/-]\d+[A-Za-z]?)?)$/.exec(t);
+  if (trailing) return { street: trailing[1].replace(/[\s,]+$/, ""), houseNumber: trailing[2] };
+  const leading = /^(\d+[A-Za-z]?(?:[/-]\d+[A-Za-z]?)?)[\s,]+(\D.*)$/.exec(t);
+  if (leading) return { street: leading[2], houseNumber: leading[1] };
+  return { street: t, houseNumber: "" };
+}
 
 // Adres odbiorcy z surowego zamówienia. Zwraca null, gdy zamówienie nie nadaje się do przesyłki zagranicznej (brak adresu albo kraj
 // spoza obsługiwanych, w tym Polska — krajowe zamówienia z Allegro i Erli realizujemy inaczej).
@@ -28,7 +41,8 @@ export function buildShipPrefill(marketplace: string, externalId: string, raw: a
       p = {
         name: [clean(a.firstName), clean(a.lastName)].filter(Boolean).join(" "),
         company: clean(a.company),
-        street: [clean(a.street), clean(a.street2)].filter(Boolean).join(", "),
+        ...splitStreet(clean(a.street)),
+        apartment: clean(a.street2), // druga linia adresu Back Market (piętro, lokal) trafia do numeru lokalu
         postalCode: clean(a.postalCode),
         city: clean(a.city),
         countryCode: clean(a.country).toUpperCase(),
@@ -42,7 +56,10 @@ export function buildShipPrefill(marketplace: string, externalId: string, raw: a
       p = {
         name: [clean(a.first_name), clean(a.family_name)].filter(Boolean).join(" "),
         company: clean(a.company_name),
-        street: [[clean(a.street_name), clean(a.house_no)].filter(Boolean).join(" "), clean(a.supplement)].filter(Boolean).join(", "),
+        // Refurbed podaje numer domu osobno; dodatek adresu ("3. OG") trafia do numeru lokalu.
+        street: clean(a.street_name),
+        houseNumber: clean(a.house_no),
+        apartment: clean(a.supplement),
         postalCode: clean(a.post_code),
         city: clean(a.town),
         countryCode: clean(a.country_code).toUpperCase(),
