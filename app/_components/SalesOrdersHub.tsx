@@ -704,7 +704,7 @@ function OrdersList({
                       </td>
                       <td rowSpan={items.length} className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDateTime(r.order_date)}</td>
                       <td rowSpan={items.length} className="p-3">
-                        <span className={`text-xs font-semibold px-2 py-1 rounded-full ${statusStyle(r.marketplace, r.status)}`}>
+                        <span className={`text-xs font-semibold px-2 py-1 rounded-full whitespace-nowrap ${statusStyle(r.marketplace, r.status)}`}>
                           {salesStatusLabel(r.marketplace, r.status)}
                         </span>
                       </td>
