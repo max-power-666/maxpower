@@ -185,6 +185,79 @@ update sales_orders s set tracking_number = o.tracking_number
   from bm_orders o
  where s.marketplace = 'backmarket' and o.order_id::text = s.external_id
    and s.tracking_number is distinct from o.tracking_number;
+
+-- Uzupełnienie kraju odbiorcy dla zamówień pobranych zanim ta kolumna powstała — z już zapisanych surowych danych
+-- (przyrostowa synchronizacja rusza tylko zmienione zamówienia, więc stare wiersze same by go nie dostały).
+-- Te same ścieżki co w mapXToSales (lib/salesOrders.ts); powtórne uruchomienie nadpisuje tą samą wartością.
+update sales_orders s set country_code = c.cc
+  from (
+    select o.order_id::text as external_id,
+           case when upper(btrim(o.shipping_address->>'country')) ~ '^[A-Z]{2}$'
+                then upper(btrim(o.shipping_address->>'country')) end as cc
+      from bm_orders o
+  ) c
+ where s.marketplace = 'backmarket' and s.external_id = c.external_id and c.cc is not null and s.country_code is distinct from c.cc;
+
+update sales_orders s set country_code = c.cc
+  from (
+    select o.id as external_id,
+           case when upper(btrim(o.raw->'shipping_address'->>'country_code')) ~ '^[A-Z]{2}$'
+                then upper(btrim(o.raw->'shipping_address'->>'country_code')) end as cc
+      from refurbed_orders o
+  ) c
+ where s.marketplace = 'refurbed' and s.external_id = c.external_id and c.cc is not null and s.country_code is distinct from c.cc;
+
+update sales_orders s set country_code = c.cc
+  from (
+    select o.id as external_id,
+           case when upper(btrim(o.raw->'user'->'deliveryAddress'->>'country')) ~ '^[A-Z]{2}$'
+                then upper(btrim(o.raw->'user'->'deliveryAddress'->>'country')) end as cc
+      from erli_orders o
+  ) c
+ where s.marketplace = 'erli' and s.external_id = c.external_id and c.cc is not null and s.country_code is distinct from c.cc;
+
+update sales_orders s set country_code = c.cc
+  from (
+    select o.id as external_id,
+           case when upper(btrim(o.raw->'delivery'->'address'->>'countryCode')) ~ '^[A-Z]{2}$'
+                then upper(btrim(o.raw->'delivery'->'address'->>'countryCode')) end as cc
+      from allegro_orders o
+  ) c
+ where s.marketplace = 'allegro' and s.external_id = c.external_id and c.cc is not null and s.country_code is distinct from c.cc;
+
+-- Octopia: adres jest tylko per pozycja, nie na zamówieniu — bierzemy pierwszą (w kolejności z API), która go ma.
+update sales_orders s set country_code = c.cc
+  from (
+    select o.id as external_id,
+           (select case when upper(btrim(l->'shippingAddress'->>'countryCode')) ~ '^[A-Z]{2}$'
+                        then upper(btrim(l->'shippingAddress'->>'countryCode')) end
+              from jsonb_array_elements(case when jsonb_typeof(o.raw->'lines') = 'array' then o.raw->'lines' else '[]'::jsonb end)
+                   with ordinality as t(l, n)
+             where upper(btrim(l->'shippingAddress'->>'countryCode')) ~ '^[A-Z]{2}$'
+             order by n limit 1) as cc
+      from octopia_orders o
+  ) c
+ where s.marketplace = 'octopia' and s.external_id = c.external_id and c.cc is not null and s.country_code is distinct from c.cc;
+
+-- Apilo: lista zamówień ma tylko adres klienta (addressCustomer), nie adres dostawy — przybliżenie, jak w mapApiloToSales.
+update sales_orders s set country_code = c.cc
+  from (
+    select o.id as external_id,
+           case when upper(btrim(o.raw->'addressCustomer'->>'country')) ~ '^[A-Z]{2}$'
+                then upper(btrim(o.raw->'addressCustomer'->>'country')) end as cc
+      from apilo_orders o
+  ) c
+ where s.marketplace = 'apilo' and s.external_id = c.external_id and c.cc is not null and s.country_code is distinct from c.cc;
+
+update sales_orders s set country_code = c.cc
+  from (
+    select o.id as external_id,
+           case when upper(btrim(o.raw->'ShippingAddress'->>'CountryCode')) ~ '^[A-Z]{2}$'
+                then upper(btrim(o.raw->'ShippingAddress'->>'CountryCode')) end as cc
+      from amazon_orders o
+  ) c
+ where s.marketplace = 'amazon' and s.external_id = c.external_id and c.cc is not null and s.country_code is distinct from c.cc;
+
 create index if not exists sales_orders_date_idx on sales_orders (order_date desc);
 
 -- Pozycje zamówienia: jedna sztuka = jeden wiersz. Zamówienie może mieć kilka pozycji (i pozycję z ilością > 1
