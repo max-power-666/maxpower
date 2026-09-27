@@ -54,6 +54,7 @@ Rola jest zwykłym tekstem w `members.role` — dodanie roli nie wymaga SQL.
 | Zamówienia | `sales` | Admin, Manager |
 | Backlog | `backlog` | wszyscy (każda rola) |
 | Wysyłka | `shipping` | Admin, Manager |
+| RCP | `rcp` | wszyscy (każda rola) |
 | Zespół | `team` | Admin (edycja), Manager (tylko odczyt) |
 | Serwis | `service` | Admin, Manager, Serwis |
 | Testy | `tests` | Admin, Manager, Testy |
@@ -218,6 +219,9 @@ wycena `getPrice` (cena w PLN + dopłata paliwowa; produkt niedostępny na trasi
 miejscowość max **17** znaków, ulica 35, nazwa 60, telefon 20 (za długie = czytelny błąd, nie ucinanie; opis zawartości ucinany do 30). Nadawcę rozdziela `loadShipper`
 (`lib/parcelServer.ts`, kod pocztowy bez myślnika). Wspólna serwerowa walidacja formularza: `lib/shipmentInput.ts` (`parseShipmentBody`, numer domu wyciągany z ulicy przez
 `splitStreet`). Numer przesyłki DHL24 (shipmentId) = numer do śledzenia. Nie testowane na żywym API — zweryfikowane na atrapie `fetch` wg WSDL.
+
+**RCP** (`RcpView.tsx`) — rejestracja czasu pracy; **na razie tylko pusta zakładka-szkielet**, widoczna dla wszystkich ról. Docelowo z niej ma wyjść ewidencja godzin
+potrzebna do wydajności (punkty na godzinę) i premii z regulaminu (plan rozwoju, punkt 8).
 
 **Serwis** (`ServiceView.tsx`, `service_log`). Rejestr napraw wg tabeli z regulaminu:
 Joy-Con para 15 pkt, kontroler PS4 25, Xbox One 35, PS5 12, czyszczenie konsoli 45.

@@ -8,6 +8,7 @@ import TradeInHub from "./_components/TradeInHub";
 import SalesOrdersHub from "./_components/SalesOrdersHub";
 import BacklogView from "./_components/BacklogView";
 import ShippingView from "./_components/ShippingView";
+import RcpView from "./_components/RcpView";
 import type { ShipPrefill } from "@/lib/shipping";
 import ServiceView from "./_components/ServiceView";
 import TestsView from "./_components/TestsView";
@@ -16,7 +17,7 @@ import { displayNameForEmail } from "@/lib/displayName";
 
 const ROLES = ["Admin", "Manager", "Magazyn", "Serwis", "Testy", "Bidder"];
 
-type ViewKey = "overview" | "inventory" | "sales" | "team" | "service" | "tests" | "tradein" | "orders" | "backlog" | "shipping";
+type ViewKey = "overview" | "inventory" | "sales" | "team" | "service" | "tests" | "tradein" | "orders" | "backlog" | "shipping" | "rcp";
 
 const TABS: { key: ViewKey; label: string }[] = [
   { key: "overview", label: "Przegląd" },
@@ -29,6 +30,7 @@ const TABS: { key: ViewKey; label: string }[] = [
   { key: "orders", label: "Trade-in" },
   { key: "backlog", label: "Backlog" },
   { key: "shipping", label: "Wysyłka" },
+  { key: "rcp", label: "RCP" },
 ];
 
 // Kto widzi jaką zakładkę — rola = zakładka, Admin ma dostęp do wszystkiego,
@@ -39,12 +41,12 @@ const TABS: { key: ViewKey; label: string }[] = [
 // "orders" (zakładka Trade-in — podgląd zamówień BuyBack) na razie tylko dla Admina,
 // dopóki nie ustalimy docelowej roli dla osoby przetwarzającej zamówienia.
 const ROLE_ACCESS: Record<string, ViewKey[]> = {
-  Admin: ["overview", "inventory", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping"],
-  Manager: ["overview", "inventory", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping"], // wszystko; Zespół tylko do odczytu, usuwa tylko Admin
-  Magazyn: ["overview", "inventory", "backlog"],
-  Serwis: ["overview", "service", "backlog"],
-  Testy: ["overview", "tests", "backlog"],
-  Bidder: ["overview", "tradein", "backlog"],
+  Admin: ["overview", "inventory", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "rcp"],
+  Manager: ["overview", "inventory", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "rcp"], // wszystko; Zespół tylko do odczytu, usuwa tylko Admin
+  Magazyn: ["overview", "inventory", "backlog", "rcp"],
+  Serwis: ["overview", "service", "backlog", "rcp"],
+  Testy: ["overview", "tests", "backlog", "rcp"],
+  Bidder: ["overview", "tradein", "backlog", "rcp"],
 };
 
 type Member = { user_id: string; role: string; email: string; name: string };
@@ -417,6 +419,8 @@ export default function Home() {
           {view === "shipping" && (
             <ShippingView session={session} isAdmin={role === "Admin"} prefill={shipPrefill} onPrefillUsed={() => setShipPrefill(null)} />
           )}
+
+          {view === "rcp" && <RcpView />}
 
           {view === "backlog" && <BacklogView session={session} members={members} isAdmin={role === "Admin"} />}
 
