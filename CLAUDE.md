@@ -18,7 +18,7 @@ numerach seryjnych, wielokanałowa synchronizacja stanów, naprawy, auto-wycena)
   tylko raz dziennie). Deploy automatyczny po `git push` na `main`.
 - Repo: `github.com/max-power-666/maxpower`
 - Cron w `vercel.json` (Vercel liczy w UTC): sync Fakturowni `0 23 * * *`, bidder `* * * * *`,
-  sync zamówień BuyBack `*/15 * * * *`, sync zamówień sprzedaży Back Market, refurbed, Erli, Allegro, Octopia i Apilo `*/15 * * * *` (osobne route'y). Autoryzacja crona: nagłówek `Bearer CRON_SECRET`.
+  sync zamówień BuyBack `*/15 * * * *`, sync zamówień sprzedaży Back Market, refurbed, Erli, Allegro, Octopia, Apilo i Amazon `*/15 * * * *` (osobne route'y). Autoryzacja crona: nagłówek `Bearer CRON_SECRET`.
 
 ## Struktura kodu
 
@@ -27,7 +27,7 @@ numerach seryjnych, wielokanałowa synchronizacja stanów, naprawy, auto-wycena)
   `ServiceView.tsx` (Serwis), `TestsView.tsx` (Testy), `ProductCardDrawer.tsx` (karta produktu), `TradeInHub.tsx` + `TradeInOrdersView.tsx` (Trade-in),
   `TradeInView.tsx` (Bidder), `SalesOrdersHub.tsx` (Zamówienia).
 - `app/api/*/route.ts` — endpointy serwerowe (sekrety tylko tu, nigdy w przeglądarce):
-  `fakturownia/sync`, `tradein/bidder`, `tradein/competitors`, `tradein/orders-sync`, `tradein/validate`, `orders/bm-sync`, `orders/refurbed-sync`, `orders/erli-sync`, `orders/allegro-sync`, `orders/allegro-auth`, `orders/allegro-callback`, `orders/octopia-sync`, `orders/apilo-sync`, `orders/apilo-connect`, `shipping/dhl-express/{check,create}`, `shipping/dhl-parcel/{check,create,label,cancel}`.
+  `fakturownia/sync`, `tradein/bidder`, `tradein/competitors`, `tradein/orders-sync`, `tradein/validate`, `orders/bm-sync`, `orders/refurbed-sync`, `orders/erli-sync`, `orders/allegro-sync`, `orders/allegro-auth`, `orders/allegro-callback`, `orders/octopia-sync`, `orders/apilo-sync`, `orders/apilo-connect`, `orders/amazon-sync`, `shipping/dhl-express/{check,create}`, `shipping/dhl-parcel/{check,create,label,cancel}`.
 - `lib/` — `supabaseClient.ts`, `buyback.ts` (logika biddera + `isAuthorized`),
   `displayName.ts` (skrócone imię: "Maksymilian J."), `workLog.ts` (interwały Dziś/7/30 dni,
   liczenie czasu i **etykiety typów czynności/statusów** — jedno źródło dla list i karty produktu),
@@ -35,7 +35,7 @@ numerach seryjnych, wielokanałowa synchronizacja stanów, naprawy, auto-wycena)
   zamówień Back Market z budżetem czasu i kursorem).
 - `supabase/*.sql` — schemat, każdy plik idempotentny: `schema.sql` (units, members,
   cache Fakturowni), `tradein.sql` (bidder), `buyback-orders.sql` (zamówienia + obsługa
-  paczek), `backlog.sql` (zakładka Backlog), `shipping.sql` (Wysyłka: nadawca, szablony, przesyłki), `sales-orders.sql` (zamówienia sprzedaży Back Market, refurbed, Erli, Allegro, Octopia i Apilo; tokeny OAuth), `service.sql` (rejestr napraw), `tests.sql` (rejestr testów).
+  paczek), `backlog.sql` (zakładka Backlog), `shipping.sql` (Wysyłka: nadawca, szablony, przesyłki), `sales-orders.sql` (zamówienia sprzedaży Back Market, refurbed, Erli, Allegro, Octopia, Apilo i Amazon; tokeny OAuth), `service.sql` (rejestr napraw), `tests.sql` (rejestr testów).
 - `scripts/import-buyback.mjs` — jednorazowy import ze starego programu Buyback Bidder.
 
 ## Zakładki i role
@@ -187,8 +187,25 @@ każde zapytanie. Zapytania do danych niosą `Authorization: Bearer <token>` i `
 etykiety w `OCTOPIA_ORDER_STATES`), SKU = `lines[].offer.sellerProductId`; pozycja z `quantity` > 1 rozbijana na sztuki jak w pozostałych kanałach. Numer
 przesyłki = pierwszy `parcels[].parcelNumber` znaleziony w dowolnej pozycji. Nie testowane na żywym API (brak danych dostępowych w środowisku asystenta) —
 zweryfikowane na atrapie `fetch` wg specyfikacji OpenAPI (developer.octopia-io.net).
+**Amazon** (`marketplace = 'amazon'`, `lib/amazon.ts`, `app/api/orders/amazon-sync`, surowe dane w `amazon_orders`) — **bezpośrednia integracja
+z Amazon Selling Partner API (SP-API)**, docelowa (zastępuje most przez Apilo, patrz niżej). Amazon dzieli sprzedawców na REGIONY (EU/NA/FE), nie kraje —
+konto zarejestrowane w Europie obsługuje wszystkie rynki UE (PL, DE, FR, ES, IT, BE, NL, IE, SE — pełna lista `AMAZON_EU_MARKETPLACE_IDS`) jednym
+zestawem danych; `AMAZON_MARKETPLACE_IDS` (kody krajów po przecinku) pozwala zawęzić, domyślnie wszystkie. **Rejestracja i autoryzacja:** aplikacja
+PRYWATNA (Seller Central → Apps and Services → Develop Apps), self-authorization (Apps and Services → Develop Apps → Authorize) daje jeden,
+**długotrwały, NIEROTUJĄCY refresh token** — wystarczy wkleić go raz do env, żadnego "Połącz z…" w aplikacji nie ma. Od 2023 SP-API nie wymaga już
+podpisu AWS SigV4 — autoryzacja to tylko nagłówek `x-amz-access-token` (LWA access token, ważny 1h, wymieniany z refresh tokena przy każdym przebiegu
+synchronizacji — nie trzymamy go w bazie, w odróżnieniu od Allegro/Apilo). **Limity szybkości są bardzo restrykcyjne i RÓŻNE dla dwóch operacji**, dlatego
+synchronizacja ma DWIE fazy w jednym przebiegu: FAZA 1 `GET /orders/v0/orders` (0,0167 req/s, czyli ~1 zapytanie na 60 s, zapas 20) pobiera zamówienia
+BEZ SKU — `mapAmazonToSales` celowo nie ustawia pola `sku` wcale, żeby upsert nigdy nie nadpisał go pustą wartością; kursor to prawdziwy `NextToken` z API
+(`sales_orders_sync_meta.scan_cursor`, prefiks `NT:`). FAZA 2 `GET /orders/v0/orders/{id}/orderItems` (0,5 req/s) dogania SKU i pozycje dla zamówień, które
+go jeszcze nie mają (`sales_orders.sku is null`), do `ITEMS_MAX_PER_RUN` (60) na przebieg — reszta poczeka na kolejny cron (15 min). Przez ciasny limit fazy 1
+**pełne pobranie historii może zająć wiele godzin/dni cronów** — to oczekiwane, nie błąd; pierwszy przebieg zaczyna od 1 stycznia bieżącego roku. Retry na 429
+honoruje nagłówek `Retry-After`. Nie testowane na żywym API (brak zarejestrowanej aplikacji w środowisku asystenta) — zweryfikowane na atrapie `fetch` wg
+oficjalnego modelu OpenAPI (github.com/amzn/selling-partner-api-models, orders-api-model).
+
 **Apilo** (`marketplace = 'apilo'`, `lib/apilo.ts`, `lib/apiloServer.ts`, `app/api/orders/apilo-{sync,connect}`, surowe dane w `apilo_orders`) —
-**most TYMCZASOWY do Amazon**, dopóki nie ma bezpośredniej integracji z Amazon SP-API (patrz plan rozwoju, punkt 9). Amazon dzieli sprzedawców na
+most do Amazon zbudowany PRZED integracją SP-API powyżej; zostaje w kodzie jako zapasowe źródło (Amazon ma teraz własną, bezpośrednią integrację, więc
+ten most nie jest już potrzebny w normalnej pracy — można go wyłączyć niepodawaniem `APILO_*`, sync po prostu się pomija). Amazon dzieli sprzedawców na
 regiony (EU/NA/FE), nie kraje — konto Recoo ma wszystkie rynki UE (PL, DE, BE, ES, FR, IE, IT, NL, SE...) pod JEDNYM połączonym kontem w Apilo
 (`platformAccountId`, znajdowany automatycznie po prefiksie klucza `PLATFORM_AMAZON_` z `/orders/platform/map/`) — jedna integracja wystarcza.
 Apilo jest white-label: każdy klient ma własną subdomenę (`APILO_BASE_URL`, u nas `https://recoo.apilo.com`). Autoryzacja: token dostępowy 21 dni,
@@ -325,7 +342,7 @@ Ważne przy Bidderze: zmienia ceny na żywym Back Markecie, więc to pierwszy ka
 
 `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`,
 `CRON_SECRET`, `FAKTUROWNIA_DOMAIN` (sama subdomena, np. `recoo`), `FAKTUROWNIA_API_TOKEN`,
-`BACKMARKET_AUTH`, `BACKMARKET_LANG`, `BACKMARKET_UA`, `BACKMARKET_BASE_URL`, `REFURBED_API_TOKEN` (z supplier.refurbed.com; bez niego sync refurbed jest pomijany; nieużywany wygasa po 2 miesiącach), `REFURBED_UA`, `ERLI_API_KEY` (panel Erli: Metoda integracji > Własna integracja po API; bez niego sync Erli jest pomijany), `ERLI_UA`, `ALLEGRO_CLIENT_ID`, `ALLEGRO_CLIENT_SECRET` (aplikacja z apps.developer.allegro.pl), `ALLEGRO_REDIRECT_URI` (opcjonalny, sztywny adres przekierowania), `DHL_PARCEL_USERNAME` (klucz APIv2 z panelu DHL24), `DHL_PARCEL_PASSWORD`, `DHL_PARCEL_SAP` (numer klienta SAP, 7 cyfr; tylko w env), `DHL_EXPRESS_API_KEY`, `DHL_EXPRESS_API_SECRET`, `DHL_EXPRESS_ACCOUNT` (numer konta nadawcy DHL Express — tylko w env, nie w repo), `DHL_EXPRESS_ENV` (`test` domyślnie / `production`), `DHL_EXPRESS_LABEL_TEMPLATE` (opcjonalnie, domyślnie `ECOM26_64_001`), `ALLEGRO_UA` (**wymagany**, bez wartości domyślnej: User-Agent z generatora w panelu aplikacji — Allegro blokuje klucz przy nieprawidłowym; bez niego sync Allegro jest pomijany)`, `OCTOPIA_CLIENT_ID`, `OCTOPIA_CLIENT_SECRET`, `OCTOPIA_SELLER_ID` (marketplace'y typu Cdiscount; bez nich sync Octopia jest pomijany), `APILO_BASE_URL` (subdomena Apilo, np. https://recoo.apilo.com), `APILO_CLIENT_ID`, `APILO_CLIENT_SECRET` (TYMCZASOWY most do Amazon — patrz niżej).
+`BACKMARKET_AUTH`, `BACKMARKET_LANG`, `BACKMARKET_UA`, `BACKMARKET_BASE_URL`, `REFURBED_API_TOKEN` (z supplier.refurbed.com; bez niego sync refurbed jest pomijany; nieużywany wygasa po 2 miesiącach), `REFURBED_UA`, `ERLI_API_KEY` (panel Erli: Metoda integracji > Własna integracja po API; bez niego sync Erli jest pomijany), `ERLI_UA`, `ALLEGRO_CLIENT_ID`, `ALLEGRO_CLIENT_SECRET` (aplikacja z apps.developer.allegro.pl), `ALLEGRO_REDIRECT_URI` (opcjonalny, sztywny adres przekierowania), `DHL_PARCEL_USERNAME` (klucz APIv2 z panelu DHL24), `DHL_PARCEL_PASSWORD`, `DHL_PARCEL_SAP` (numer klienta SAP, 7 cyfr; tylko w env), `DHL_EXPRESS_API_KEY`, `DHL_EXPRESS_API_SECRET`, `DHL_EXPRESS_ACCOUNT` (numer konta nadawcy DHL Express — tylko w env, nie w repo), `DHL_EXPRESS_ENV` (`test` domyślnie / `production`), `DHL_EXPRESS_LABEL_TEMPLATE` (opcjonalnie, domyślnie `ECOM26_64_001`), `ALLEGRO_UA` (**wymagany**, bez wartości domyślnej: User-Agent z generatora w panelu aplikacji — Allegro blokuje klucz przy nieprawidłowym; bez niego sync Allegro jest pomijany)`, `OCTOPIA_CLIENT_ID`, `OCTOPIA_CLIENT_SECRET`, `OCTOPIA_SELLER_ID` (marketplace'y typu Cdiscount; bez nich sync Octopia jest pomijany), `APILO_BASE_URL` (subdomena Apilo, np. https://recoo.apilo.com), `APILO_CLIENT_ID`, `APILO_CLIENT_SECRET` (most tymczasowy, patrz niżej), `AMAZON_CLIENT_ID`, `AMAZON_CLIENT_SECRET`, `AMAZON_REFRESH_TOKEN` (bezpośrednia integracja SP-API — docelowa, patrz niżej), `AMAZON_MARKETPLACE_IDS` (opcjonalnie), `AMAZON_ENDPOINT`/`AMAZON_USER_AGENT` (opcjonalnie).
 Zmiana zmiennej na Vercelu wymaga nowego deployu. W Supabase (Authentication → URL
 Configuration) musi być aktualny adres produkcyjny, inaczej magic link nie zadziała.
 

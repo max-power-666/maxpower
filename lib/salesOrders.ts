@@ -8,6 +8,7 @@ export const MARKETPLACES = [
   { key: "erli", label: "Erli" },
   { key: "allegro", label: "Allegro" },
   { key: "octopia", label: "Octopia" },
+  { key: "amazon", label: "Amazon" },
   { key: "apilo", label: "Amazon (Apilo)" },
 ] as const;
 
@@ -93,12 +94,25 @@ export const OCTOPIA_ORDER_STATES: Record<string, string> = {
   Rejected: "Odrzucone (kontrola)",
 };
 
+// Stany zamówienia Amazon (OrderStatus).
+export const AMAZON_ORDER_STATES: Record<string, string> = {
+  Pending: "Oczekuje na płatność",
+  Unshipped: "Do wysyłki",
+  PartiallyShipped: "Częściowo wysłane",
+  Shipped: "Wysłane",
+  Canceled: "Anulowane",
+  Unfulfillable: "Niemożliwe do zrealizowania",
+  InvoiceUnconfirmed: "Faktura niepotwierdzona",
+  PendingAvailability: "Oczekuje na dostępność",
+};
+
 export function salesStatusLabel(marketplace: string, status: string): string {
   if (marketplace === "backmarket") return BM_ORDER_STATES[status] ?? `Stan ${status}`;
   if (marketplace === "refurbed") return REFURBED_ORDER_STATES[status] ?? status;
   if (marketplace === "erli") return ERLI_ORDER_STATES[status] ?? status;
   if (marketplace === "allegro") return ALLEGRO_ORDER_STATES[status] ?? status;
   if (marketplace === "octopia") return OCTOPIA_ORDER_STATES[status] ?? status;
+  if (marketplace === "amazon") return AMAZON_ORDER_STATES[status] ?? status;
   return status;
 }
 
@@ -519,4 +533,49 @@ export function mapApiloItems(o: any) {
       }
     });
   return items;
+}
+
+/* ---------------- Amazon (bezpośrednia integracja SP-API) ---------------- */
+
+// Zamówienie Amazon -> wiersz surowej tabeli amazon_orders.
+export function mapAmazonOrder(o: any) {
+  return {
+    id: String(o.AmazonOrderId),
+    status: o.OrderStatus ?? "Pending",
+    marketplace_id: o.MarketplaceId ?? null,
+    purchase_date: o.PurchaseDate ?? null,
+    last_update_date: o.LastUpdateDate ?? null,
+    order_total: Number.isFinite(Number(o.OrderTotal?.Amount)) ? Number(o.OrderTotal.Amount) : null,
+    currency_code: o.OrderTotal?.CurrencyCode ?? null,
+    raw: o,
+    synced_at: new Date().toISOString(),
+  };
+}
+
+// Bez "sku" — pozycje (i SKU) dochodzą osobną fazą synchronizacji (GET .../orderItems), bo mają inny limit szybkości
+// niż lista zamówień. Dzięki temu faza listy zamówień nigdy nie nadpisuje SKU pustą wartością (patrz orders/amazon-sync).
+export function mapAmazonToSales(o: any) {
+  return {
+    marketplace: "amazon",
+    external_id: String(o.AmazonOrderId),
+    order_date: o.PurchaseDate ?? null,
+    status: String(o.OrderStatus ?? "Pending"),
+    tracking_number: null, // numer przesyłki nie jest częścią odpowiedzi zamówienia w tym API
+    synced_at: new Date().toISOString(),
+  };
+}
+
+// Pozycje jednego zamówienia (z osobnego zapytania GET orderItems) -> wiersze sales_order_items. Ilość > 1 rozbijamy
+// jak w pozostałych kanałach; klucz to OrderItemId (stały, nie zależy od kolejności w odpowiedzi).
+export function mapAmazonItems(orderId: string, items: any[]) {
+  const rows: { marketplace: string; external_id: string; item_key: string; position: number; sku: string | null }[] = [];
+  items.forEach((it, i) => {
+    const qty = Math.max(Number.isFinite(Number(it?.QuantityOrdered)) ? Math.trunc(Number(it.QuantityOrdered)) : 1, 1);
+    const base = String(it?.OrderItemId ?? i + 1);
+    const sku = typeof it?.SellerSKU === "string" && it.SellerSKU.trim() ? it.SellerSKU.trim() : null;
+    for (let k = 1; k <= qty; k++) {
+      rows.push({ marketplace: "amazon", external_id: orderId, item_key: k > 1 ? `${base}-${k}` : base, position: rows.length + 1, sku });
+    }
+  });
+  return rows;
 }

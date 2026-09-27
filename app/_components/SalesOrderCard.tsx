@@ -251,6 +251,27 @@ type ApiloOrder = {
   };
 };
 
+// Zamówienie Amazon (bezpośrednia integracja SP-API) — czytamy z kolumny raw tabeli amazon_orders.
+type AmazonOrder = {
+  id: string;
+  status: string;
+  marketplace_id: string | null;
+  purchase_date: string | null;
+  last_update_date: string | null;
+  order_total: number | null;
+  currency_code: string | null;
+  raw: {
+    FulfillmentChannel?: string;
+    SalesChannel?: string;
+    ShipServiceLevel?: string;
+    NumberOfItemsShipped?: number;
+    NumberOfItemsUnshipped?: number;
+    ShippingAddress?: { Name?: string; AddressLine1?: string; PostalCode?: string; City?: string; CountryCode?: string; Phone?: string };
+    BuyerInfo?: { BuyerEmail?: string; BuyerName?: string };
+    orderItems?: { Title?: string; SellerSKU?: string; QuantityOrdered?: number; ItemPrice?: { Amount?: string; CurrencyCode?: string } }[];
+  };
+};
+
 function fmtDateTime(iso: string | null) {
   if (!iso) return null;
   return new Date(iso).toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -295,6 +316,7 @@ export default function SalesOrderCard({
   const [al, setAl] = useState<AllegroOrder | null>(null);
   const [oc, setOc] = useState<OctopiaOrder | null>(null);
   const [ap, setAp] = useState<ApiloOrder | null>(null);
+  const [az, setAz] = useState<AmazonOrder | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
 
@@ -308,7 +330,7 @@ export default function SalesOrderCard({
   }, [marketplace, externalId]);
 
   async function load() {
-    const [{ data: w, error: wErr }, itemsRes, bmRes, rfRes, erRes, alRes, ocRes, apRes] = await Promise.all([
+    const [{ data: w, error: wErr }, itemsRes, bmRes, rfRes, erRes, alRes, ocRes, apRes, azRes] = await Promise.all([
       supabase.from("sales_orders").select("*").eq("marketplace", marketplace).eq("external_id", externalId).maybeSingle(),
       supabase
         .from("sales_order_items")
@@ -334,8 +356,11 @@ export default function SalesOrderCard({
       marketplace === "apilo"
         ? supabase.from("apilo_orders").select("*").eq("id", externalId).maybeSingle()
         : Promise.resolve({ data: null, error: null }),
+      marketplace === "amazon"
+        ? supabase.from("amazon_orders").select("*").eq("id", externalId).maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
     ]);
-    const firstError = wErr || itemsRes.error || bmRes.error || rfRes.error || erRes.error || alRes.error || ocRes.error || apRes.error;
+    const firstError = wErr || itemsRes.error || bmRes.error || rfRes.error || erRes.error || alRes.error || ocRes.error || apRes.error || azRes.error;
     if (firstError) setError(firstError.message);
     setWorker((w as WorkerData) ?? null);
     setItems((itemsRes.data as SalesItem[]) || []);
@@ -345,6 +370,7 @@ export default function SalesOrderCard({
     setAl((alRes.data as AllegroOrder) ?? null);
     setOc((ocRes.data as OctopiaOrder) ?? null);
     setAp((apRes.data as ApiloOrder) ?? null);
+    setAz((azRes.data as AmazonOrder) ?? null);
     setLoaded(true);
   }
 
@@ -542,6 +568,16 @@ export default function SalesOrderCard({
                   <Row label="Podatki" value={fmtMoney(bm?.sales_taxes, bm?.currency)} />
                 </>
               )}
+              {marketplace === "amazon" && (
+                <>
+                  <Row label="Rynek" value={az?.marketplace_id} />
+                  <Row label="Kanał realizacji" value={az?.raw.FulfillmentChannel === "AFN" ? "Amazon (FBA)" : az?.raw.FulfillmentChannel === "MFN" ? "Sprzedawca" : az?.raw.FulfillmentChannel} />
+                  <Row label="Poziom wysyłki" value={az?.raw.ShipServiceLevel} />
+                  <Row label="Suma zamówienia" value={fmtMoney(az?.order_total, az?.currency_code)} />
+                  <Row label="Sztuk wysłanych / do wysłania" value={az ? `${az.raw.NumberOfItemsShipped ?? 0} / ${az.raw.NumberOfItemsUnshipped ?? 0}` : null} />
+                  <Row label="E-mail klienta (proxy)" value={az?.raw.BuyerInfo?.BuyerEmail} />
+                </>
+              )}
               {marketplace === "apilo" && (
                 <>
                   <Row label="Status (wewnętrzny, Apilo)" value={ap?.status_name} />
@@ -595,8 +631,42 @@ export default function SalesOrderCard({
               )}
             </div>
 
-            {((marketplace === "backmarket" && !bm) || (marketplace === "refurbed" && !rf) || (marketplace === "erli" && !er) || (marketplace === "allegro" && !al) || (marketplace === "octopia" && !oc) || (marketplace === "apilo" && !ap)) && (
+            {((marketplace === "backmarket" && !bm) || (marketplace === "refurbed" && !rf) || (marketplace === "erli" && !er) || (marketplace === "allegro" && !al) || (marketplace === "octopia" && !oc) || (marketplace === "apilo" && !ap) || (marketplace === "amazon" && !az)) && (
               <p className="text-inksoft text-xs mb-6">Brak surowych danych z API dla tego zamówienia.</p>
+            )}
+
+            {az && (
+              <>
+                {!!az.raw.orderItems?.length ? (
+                  <>
+                    <h3 className="text-xs font-semibold text-inksoft mb-2">POZYCJE</h3>
+                    {az.raw.orderItems.map((l, i) => (
+                      <div key={i} className="border border-line bg-white mb-2">
+                        <Row label="Produkt" value={l.Title} />
+                        <Row label="SKU" value={l.SellerSKU} mono />
+                        <Row label="Ilość" value={l.QuantityOrdered === undefined ? null : String(l.QuantityOrdered)} />
+                        <Row label="Cena" value={fmtMoney(l.ItemPrice?.Amount, l.ItemPrice?.CurrencyCode)} />
+                      </div>
+                    ))}
+                    <div className="mb-4" />
+                  </>
+                ) : (
+                  <p className="text-xs text-inksoft mb-4">Pozycje (SKU) jeszcze nie dotarły — dogania je osobna, wolniejsza faza synchronizacji (limit API Amazon), spróbuj ponownie za chwilę.</p>
+                )}
+
+                <h3 className="text-xs font-semibold text-inksoft mb-2">DATY</h3>
+                <div className="border border-line bg-white mb-6">
+                  <Row label="Zakupiono" value={fmtDateTime(az.purchase_date)} />
+                  <Row label="Zmieniono" value={fmtDateTime(az.last_update_date)} />
+                </div>
+
+                <h3 className="text-xs font-semibold text-inksoft mb-2">KLIENT (ADRES DOSTAWY)</h3>
+                <div className="border border-line bg-white mb-6">
+                  <Row label="Imię i nazwisko" value={az.raw.ShippingAddress?.Name} />
+                  <Row label="Telefon" value={az.raw.ShippingAddress?.Phone} />
+                  <Row label="Adres" value={[az.raw.ShippingAddress?.AddressLine1, [az.raw.ShippingAddress?.PostalCode, az.raw.ShippingAddress?.City].filter(Boolean).join(" "), az.raw.ShippingAddress?.CountryCode].filter(Boolean).join(", ")} />
+                </div>
+              </>
             )}
 
             {ap && (

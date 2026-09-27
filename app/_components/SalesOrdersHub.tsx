@@ -193,6 +193,7 @@ export default function SalesOrdersHub({
       { label: "Refurbed", url: "/api/orders/refurbed-sync" },
       { label: "Erli", url: "/api/orders/erli-sync" },
       { label: "Allegro", url: "/api/orders/allegro-sync" },
+      { label: "Amazon", url: "/api/orders/amazon-sync" },
       { label: "Apilo (Amazon)", url: "/api/orders/apilo-sync" },
       { label: "Octopia", url: "/api/orders/octopia-sync" },
     ];
@@ -418,6 +419,7 @@ const MARKETPLACE_STYLE: Record<string, string> = {
   allegro: "bg-[#fde3d3] text-[#c2410c]",
   octopia: "bg-[#dcf5e3] text-[#1a7a3d]",
   apilo: "bg-[#fdecc8] text-[#a15c00]",
+  amazon: "bg-[#2a2a2a] text-[#ff9900]",
 };
 
 const OUR_STATUS_STYLE: Record<OurStatus, string> = {
@@ -439,6 +441,10 @@ function statusStyle(marketplace: string, status: string) {
   if (marketplace === "allegro") {
     if (status === "READY_FOR_PROCESSING") return "bg-ambersoft text-amber"; // opłacone — do obsłużenia
     if (status === "READY_FOR_PROCESSING_COD") return "bg-rustsoft text-rust font-bold"; // za pobraniem — nie mylić z opłaconym
+  }
+  if (marketplace === "amazon") {
+    if (status === "Unshipped" || status === "PartiallyShipped" || status === "Pending") return "bg-ambersoft text-amber";
+    if (status === "Shipped") return "bg-tealsoft text-teal";
   }
   if (marketplace === "octopia") {
     if (status === "WaitingAcceptance" || status === "Accepted" || status === "InPreparation") return "bg-ambersoft text-amber";

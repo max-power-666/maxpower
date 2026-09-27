@@ -9,8 +9,9 @@
 --  * erli_orders — surowe zamówienia Erli (POST /orders/_search); pełna odpowiedź w kolumnie raw.
 --  * allegro_orders — surowe zamówienia Allegro (GET /order/checkout-forms); oauth_tokens — tokeny OAuth (tylko serwer).
 --  * octopia_orders — surowe zamówienia Octopia (GET /orders, np. Cdiscount); pełna odpowiedź w kolumnie raw.
---  * apilo_orders — surowe zamówienia Apilo (TYMCZASOWY most do Amazon, dopóki nie ma bezpośredniej integracji SP-API).
---  * sales_orders — wspólna lista zamówień ze wszystkich marketplace'ów (dziś Back Market, refurbed, Erli, Allegro, Octopia i Apilo/Amazon;
+--  * amazon_orders — surowe zamówienia Amazon (bezpośrednia integracja SP-API, patrz lib/amazon.ts).
+--  * apilo_orders — surowe zamówienia innych kanałów Apilo (jeśli kiedyś dojdą — Amazon ma już bezpośrednią integrację powyżej).
+--  * sales_orders — wspólna lista zamówień ze wszystkich marketplace'ów (dziś Back Market, refurbed, Erli, Allegro, Octopia, Apilo i Amazon (bezpośrednio);
 --                   Allegro/eBay dojdą jako kolejne wartości `marketplace`). Zapisuje ją ten sam
 --                   serwer, który wypełnia surową tabelę danego kanału.
 -- Dane z API zapisuje wyłącznie serwer (service_role, poza RLS); zespół czyta wszystko, a edytuje tylko
@@ -140,6 +141,21 @@ create table if not exists apilo_orders (
 );
 create index if not exists apilo_orders_updated_idx on apilo_orders (updated_at desc);
 
+-- Surowe zamówienia Amazon (SP-API, GET /orders/v0/orders + /orderItems). Pozycje (orderItems) dochodzą osobną fazą
+-- synchronizacji (limit szybkości dla obu operacji jest inny — patrz lib/amazon.ts) i zapisujemy je do kolumny raw.
+create table if not exists amazon_orders (
+  id text primary key,                       -- AmazonOrderId (format 3-7-7)
+  status text not null,                      -- OrderStatus (Pending/Unshipped/PartiallyShipped/Shipped/Canceled/Unfulfillable...)
+  marketplace_id text,
+  purchase_date timestamptz,
+  last_update_date timestamptz,
+  order_total numeric,
+  currency_code text,
+  raw jsonb not null,                        -- odpowiedź Order + doklejone orderItems (gdy już pobrane)
+  synced_at timestamptz not null default now()
+);
+create index if not exists amazon_orders_updated_idx on amazon_orders (last_update_date desc);
+
 create table if not exists sales_orders (
   marketplace text not null,                 -- 'backmarket' (kolejne kanały później)
   external_id text not null,                 -- numer zamówienia w danym kanale
@@ -256,7 +272,7 @@ update sales_orders s set status = 'purchased_cod'
    and e.status = 'purchased' and e.raw->'delivery'->>'cod' = 'true'
    and s.status <> 'purchased_cod';
 
-insert into sales_orders_sync_meta (marketplace) values ('backmarket'), ('refurbed'), ('erli'), ('allegro'), ('octopia'), ('apilo') on conflict (marketplace) do nothing;
+insert into sales_orders_sync_meta (marketplace) values ('backmarket'), ('refurbed'), ('erli'), ('allegro'), ('octopia'), ('apilo'), ('amazon') on conflict (marketplace) do nothing;
 
 alter table bm_orders enable row level security;
 alter table refurbed_orders enable row level security;
@@ -264,6 +280,7 @@ alter table erli_orders enable row level security;
 alter table allegro_orders enable row level security;
 alter table octopia_orders enable row level security;
 alter table apilo_orders enable row level security;
+alter table amazon_orders enable row level security;
 alter table sales_orders enable row level security;
 alter table sales_order_items enable row level security;
 alter table sales_orders_sync_meta enable row level security;
@@ -285,6 +302,9 @@ create policy "authenticated read octopia_orders" on octopia_orders
   for select using (auth.role() = 'authenticated');
 drop policy if exists "authenticated read apilo_orders" on apilo_orders;
 create policy "authenticated read apilo_orders" on apilo_orders
+  for select using (auth.role() = 'authenticated');
+drop policy if exists "authenticated read amazon_orders" on amazon_orders;
+create policy "authenticated read amazon_orders" on amazon_orders
   for select using (auth.role() = 'authenticated');
 drop policy if exists "authenticated read sales_orders" on sales_orders;
 create policy "authenticated read sales_orders" on sales_orders
@@ -380,4 +400,5 @@ begin
   begin alter publication supabase_realtime add table allegro_orders; exception when duplicate_object then null; end;
   begin alter publication supabase_realtime add table octopia_orders; exception when duplicate_object then null; end;
   begin alter publication supabase_realtime add table apilo_orders; exception when duplicate_object then null; end;
+  begin alter publication supabase_realtime add table amazon_orders; exception when duplicate_object then null; end;
 end $$;
