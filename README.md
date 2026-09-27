@@ -5,7 +5,7 @@ Wewnętrzny system firmy do obsługi magazynu, napraw i skupu elektroniki. Modu�
 - **Magazyn** — stan z Fakturowni: podsumowanie (liczba, wartość, wykres per kategoria) i lista sztuk z wyszukiwaniem po numerze seryjnym
 - **Wysyłka** — nadawanie przesyłek DHL Parcel i DHL Express (wycena, etykieta PDF, anulowanie DHL Parcel, szablony paczek)
 - **Backlog** — wspólna lista zadań i pomysłów zespołu (priorytet, status, kryteria akceptacji, załączniki i zrzuty ekranu, log zmian)
-- **Zamówienia** — sprzedaż z marketplace'ów (Back Market, refurbed, Erli, Allegro, Octopia): lista i podgląd surowych danych z API
+- **Zamówienia** — sprzedaż z marketplace'ów (Back Market, refurbed, Erli, Allegro, Octopia, Apilo/Amazon): lista i podgląd surowych danych z API
 - **Zespół** — użytkownicy, role i dostęp do zakładek (rolę nadaje Admin)
 - **Serwis** — rejestr napraw z punktacją wg regulaminu premiowania
 - **Testy** — rejestr testów urządzeń z punktacją wg regulaminu
@@ -88,7 +88,7 @@ zalogowały się choć raz.
   się samo co 15 minut, a przycisk mówi, ile zostało. Potem synchronizacja jest przyrostowa. Back Market najpewniej
   filtruje po adresie IP, więc to działa z Vercela lub z komputera właściciela, nie z każdego
   środowiska.
-- **Zamówienia sprzedaży (Back Market, refurbed, Erli, Allegro i Octopia)** — zakładka Zamówienia → **Odśwież**. Działa jak synchronizacja zamówień
+- **Zamówienia sprzedaży (Back Market, refurbed, Erli, Allegro, Octopia i Apilo/Amazon)** — zakładka Zamówienia → **Odśwież**. Działa jak synchronizacja zamówień
   BuyBack: pierwszy raz pobiera zamówienia od 1 stycznia bieżącego roku w porcjach, potem przyrostowo (cron co
   15 minut). Back Market wymaga `BACKMARKET_AUTH` (ten sam klucz co bidder), refurbed — `REFURBED_API_TOKEN` (token API
   z supplier.refurbed.com; dopisz go w `.env.local` i w Vercel → Settings → Environment Variables, potem nowy deploy). Bez tokena
@@ -99,6 +99,9 @@ zalogowały się choć raz.
   `ALLEGRO_CLIENT_SECRET` i `ALLEGRO_UA` (User-Agent z generatora w panelu aplikacji Allegro — bez prawidłowego Allegro blokuje klucz) dopisz w `.env.local` i w Vercelu (potem nowy deploy), 3) Admin klika w Zamówieniach **Połącz z Allegro** i zgadza się
   na odczyt zamówień. Zgoda działa do 3 miesięcy bez użycia — cron odnawia ją sam; po jej utracie kliknij „Połącz ponownie”.
   Octopia (marketplace'y typu Cdiscount) — dane aplikacji z panelu Octopia jako `OCTOPIA_CLIENT_ID`, `OCTOPIA_CLIENT_SECRET` i `OCTOPIA_SELLER_ID`.
+  Apilo (**most tymczasowy do Amazon**, dopóki nie zbudujemy integracji z Amazon SP-API) — `APILO_BASE_URL` to Twoja subdomena Apilo
+  (np. `https://recoo.apilo.com`), `APILO_CLIENT_ID`/`APILO_CLIENT_SECRET` z aplikacji utworzonej w panelu Apilo (Administracja → API Apilo).
+  Po ich ustawieniu Admin musi jeszcze wkleić w Zamówieniach kod autoryzacyjny pokazany w tym samym panelu ("Połącz z Apilo") — sam klucz nie wystarcza.
 - **Bidder** — `node scripts/import-buyback.mjs` przenosi SKU, ceny max i ostatnie ceny ze
   starego programu (`~/Documents/Buyback Bidder 2`). Włącznik jest domyślnie wyłączony:
   wyłącz stary program, potem w zakładce Bidder kliknij "włącz". Dwa biddery naraz

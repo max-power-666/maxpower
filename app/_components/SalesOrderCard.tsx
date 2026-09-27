@@ -235,6 +235,22 @@ type OctopiaOrder = {
   };
 };
 
+// Zamówienie Apilo (TYMCZASOWY most do Amazon) — czytamy z kolumny raw tabeli apilo_orders.
+type ApiloOrder = {
+  id: string;
+  id_external: string | null;
+  status_name: string | null;
+  platform_account_id: number | null;
+  created_at: string | null;
+  updated_at: string | null;
+  raw: {
+    originalCurrency?: string;
+    paymentType?: number;
+    addressCustomer?: { name?: string; phone?: string; email?: string; streetName?: string; streetNumber?: string; city?: string; zipCode?: string; country?: string };
+    orderItems?: { id?: number; type?: string; sku?: string; originalName?: string; quantity?: number; originalPriceWithTax?: string }[];
+  };
+};
+
 function fmtDateTime(iso: string | null) {
   if (!iso) return null;
   return new Date(iso).toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -278,6 +294,7 @@ export default function SalesOrderCard({
   const [er, setEr] = useState<ErliOrder | null>(null);
   const [al, setAl] = useState<AllegroOrder | null>(null);
   const [oc, setOc] = useState<OctopiaOrder | null>(null);
+  const [ap, setAp] = useState<ApiloOrder | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
 
@@ -291,7 +308,7 @@ export default function SalesOrderCard({
   }, [marketplace, externalId]);
 
   async function load() {
-    const [{ data: w, error: wErr }, itemsRes, bmRes, rfRes, erRes, alRes, ocRes] = await Promise.all([
+    const [{ data: w, error: wErr }, itemsRes, bmRes, rfRes, erRes, alRes, ocRes, apRes] = await Promise.all([
       supabase.from("sales_orders").select("*").eq("marketplace", marketplace).eq("external_id", externalId).maybeSingle(),
       supabase
         .from("sales_order_items")
@@ -314,8 +331,11 @@ export default function SalesOrderCard({
       marketplace === "octopia"
         ? supabase.from("octopia_orders").select("*").eq("id", externalId).maybeSingle()
         : Promise.resolve({ data: null, error: null }),
+      marketplace === "apilo"
+        ? supabase.from("apilo_orders").select("*").eq("id", externalId).maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
     ]);
-    const firstError = wErr || itemsRes.error || bmRes.error || rfRes.error || erRes.error || alRes.error || ocRes.error;
+    const firstError = wErr || itemsRes.error || bmRes.error || rfRes.error || erRes.error || alRes.error || ocRes.error || apRes.error;
     if (firstError) setError(firstError.message);
     setWorker((w as WorkerData) ?? null);
     setItems((itemsRes.data as SalesItem[]) || []);
@@ -324,6 +344,7 @@ export default function SalesOrderCard({
     setEr((erRes.data as ErliOrder) ?? null);
     setAl((alRes.data as AllegroOrder) ?? null);
     setOc((ocRes.data as OctopiaOrder) ?? null);
+    setAp((apRes.data as ApiloOrder) ?? null);
     setLoaded(true);
   }
 
@@ -521,6 +542,14 @@ export default function SalesOrderCard({
                   <Row label="Podatki" value={fmtMoney(bm?.sales_taxes, bm?.currency)} />
                 </>
               )}
+              {marketplace === "apilo" && (
+                <>
+                  <Row label="Status (wewnętrzny, Apilo)" value={ap?.status_name} />
+                  <Row label="Numer zamówienia na Amazon" value={ap?.id_external} mono />
+                  <Row label="Waluta" value={ap?.raw.originalCurrency} />
+                  <Row label="E-mail klienta" value={ap?.raw.addressCustomer?.email} />
+                </>
+              )}
               {marketplace === "octopia" && (
                 <>
                   <Row label="Kanał sprzedaży" value={oc?.sales_channel_name} />
@@ -566,8 +595,43 @@ export default function SalesOrderCard({
               )}
             </div>
 
-            {((marketplace === "backmarket" && !bm) || (marketplace === "refurbed" && !rf) || (marketplace === "erli" && !er) || (marketplace === "allegro" && !al) || (marketplace === "octopia" && !oc)) && (
+            {((marketplace === "backmarket" && !bm) || (marketplace === "refurbed" && !rf) || (marketplace === "erli" && !er) || (marketplace === "allegro" && !al) || (marketplace === "octopia" && !oc) || (marketplace === "apilo" && !ap)) && (
               <p className="text-inksoft text-xs mb-6">Brak surowych danych z API dla tego zamówienia.</p>
+            )}
+
+            {ap && (
+              <>
+                <p className="text-xs text-inksoft mb-2">
+                  Dane pochodzą z Apilo (tymczasowy most do Amazon) — status i data to informacje z Apilo, nie oryginalne dane z Amazon.
+                </p>
+                {!!ap.raw.orderItems?.length && (
+                  <>
+                    <h3 className="text-xs font-semibold text-inksoft mb-2">POZYCJE</h3>
+                    {ap.raw.orderItems.filter((l) => String(l.type ?? "1") === "1").map((l, i) => (
+                      <div key={l.id ?? i} className="border border-line bg-white mb-2">
+                        <Row label="Produkt" value={l.originalName} />
+                        <Row label="SKU" value={l.sku} mono />
+                        <Row label="Ilość" value={l.quantity === undefined ? null : String(l.quantity)} />
+                        <Row label="Cena (z VAT)" value={fmtMoney(l.originalPriceWithTax, ap.raw.originalCurrency)} />
+                      </div>
+                    ))}
+                    <div className="mb-4" />
+                  </>
+                )}
+
+                <h3 className="text-xs font-semibold text-inksoft mb-2">DATY</h3>
+                <div className="border border-line bg-white mb-6">
+                  <Row label="Utworzono w Apilo" value={fmtDateTime(ap.created_at)} />
+                  <Row label="Zmieniono w Apilo" value={fmtDateTime(ap.updated_at)} />
+                </div>
+
+                <h3 className="text-xs font-semibold text-inksoft mb-2">KLIENT</h3>
+                <div className="border border-line bg-white mb-6">
+                  <Row label="Imię i nazwisko" value={ap.raw.addressCustomer?.name} />
+                  <Row label="Telefon" value={ap.raw.addressCustomer?.phone} />
+                  <Row label="Adres" value={[[ap.raw.addressCustomer?.streetName, ap.raw.addressCustomer?.streetNumber].filter(Boolean).join(" "), [ap.raw.addressCustomer?.zipCode, ap.raw.addressCustomer?.city].filter(Boolean).join(" "), ap.raw.addressCustomer?.country].filter(Boolean).join(", ")} />
+                </div>
+              </>
             )}
 
             {oc && (

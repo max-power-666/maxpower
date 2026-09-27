@@ -8,6 +8,7 @@ export const MARKETPLACES = [
   { key: "erli", label: "Erli" },
   { key: "allegro", label: "Allegro" },
   { key: "octopia", label: "Octopia" },
+  { key: "apilo", label: "Amazon (Apilo)" },
 ] as const;
 
 // Nasz wewnętrzny status realizacji zamówienia (niezależny od statusu kanału) — kolumna sales_orders.our_status.
@@ -459,5 +460,63 @@ export function mapOctopiaItems(o: any) {
       items.push({ marketplace: "octopia", external_id: String(o.orderId), item_key: k > 1 ? `${base}-${k}` : base, position: items.length + 1, sku });
     }
   });
+  return items;
+}
+
+/* ---------------- Apilo (most do Amazon) ---------------- */
+
+// Zamówienie Apilo -> wiersz surowej tabeli apilo_orders. statusName jest dociągany osobno (mapa statusów konta),
+// dlatego mapper przyjmuje go jako drugi argument zamiast czytać z samego zamówienia.
+export function mapApiloOrder(o: any, statusName: string | null) {
+  return {
+    id: String(o.id),
+    id_external: o.idExternal ?? null,
+    status_id: Number.isFinite(Number(o.status)) ? Number(o.status) : null,
+    status_name: statusName,
+    platform_account_id: Number.isFinite(Number(o.platformAccountId)) ? Number(o.platformAccountId) : null,
+    created_at: o.createdAt ?? null,
+    updated_at: o.updatedAt ?? null,
+    raw: o,
+    synced_at: new Date().toISOString(),
+  };
+}
+
+// UWAGA: to status WEWNĘTRZNY z Apilo (np. "Nowy", "W realizacji" — skonfigurowany przez sprzedawcę), NIE status
+// zamówienia na Amazon. Apilo nie udostępnia w tym API oryginalnego statusu marketplace'u.
+export function mapApiloToSales(o: any, statusName: string | null) {
+  // Tylko pozycje typu "1" (Produkt) — pomijamy przesyłkę/usługę (typ 2/3), tak samo jak mapApiloItems.
+  const skus = Array.from(
+    new Set(
+      ((o.orderItems as any[]) || [])
+        .filter((l) => String(l?.type ?? "1") === "1")
+        .map((l) => (typeof l?.sku === "string" ? l.sku.trim() : ""))
+        .filter(Boolean)
+    )
+  );
+  return {
+    marketplace: "apilo",
+    external_id: String(o.id),
+    // Apilo nie zwraca w liście daty złożenia zamówienia na Amazon (orderedAt) — tylko datę utworzenia w Apilo.
+    order_date: o.createdAt ?? null,
+    status: statusName ?? String(o.status ?? ""),
+    sku: skus.length > 0 ? skus.join(", ") : null,
+    tracking_number: null, // wymagałoby osobnego zapytania o przesyłkę na każde zamówienie — pominięte w tym moście
+    synced_at: new Date().toISOString(),
+  };
+}
+
+// Pozycje typu "1" (Produkt) — pomijamy wpisy przesyłki/usługi (typ 2/3); ilość > 1 rozbijamy jak w pozostałych kanałach.
+export function mapApiloItems(o: any) {
+  const items: { marketplace: string; external_id: string; item_key: string; position: number; sku: string | null }[] = [];
+  ((o.orderItems as any[]) || [])
+    .filter((l) => String(l?.type ?? "1") === "1")
+    .forEach((l, i) => {
+      const qty = Math.max(Number.isFinite(Number(l?.quantity)) ? Math.trunc(Number(l.quantity)) : 1, 1);
+      const base = String(l?.id ?? i + 1);
+      const sku = typeof l?.sku === "string" && l.sku.trim() ? l.sku.trim() : null;
+      for (let k = 1; k <= qty; k++) {
+        items.push({ marketplace: "apilo", external_id: String(o.id), item_key: k > 1 ? `${base}-${k}` : base, position: items.length + 1, sku });
+      }
+    });
   return items;
 }
