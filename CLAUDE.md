@@ -248,7 +248,11 @@ celnych (opis, wartość, kod HS) — do zrobienia. Nadawca (`shipping_settings`
 są w bazie. Z karty zamówienia (Back Market, Refurbed, kraj UE) przycisk "Nadaj przesyłkę DHL" wypełnia formularz. Linie adresu DHL to max 3 x 45 znaków (`splitAddressLines` łamie na
 spacjach, za długi adres = czytelny błąd, nie ucinanie). **Po nadaniu numer przesyłki wraca do marketplace'u**
 (`lib/shipmentMarketplaceSync.ts`, wołane z obu route'ów `create`, obojętnie który przewoźnik): dla Back Market
-`POST /ws/orders/{id}` (`lib/backmarket.ts`, `new_state: 9` "wysłane" + `tracking_number`/`tracking_url`/`shipper`;
+`POST /ws/orders/{id}` (`lib/backmarket.ts`, `new_state: 3` "Do wysyłki" + `tracking_number`/`tracking_url`/`shipper` —
+**`new_state: 9` ("wysłane") zwraca błąd 400 na produkcji** (`"new_state 9 must be in 2,3,4,5,6"`), mimo że schema
+`OrderState` wymienia 9 jako wartość w ogóle dopuszczalną — to tylko stan, jaki BM może zwrócić przy odczycie, nie
+który wolno ustawić tym zapytaniem; najwyraźniej Back Market sam przestawia zamówienie na 9, gdy zweryfikuje
+przesyłkę u przewoźnika;
 bez SKU w body, więc wszystkie pozycje zamówienia przechodzą naraz — jedna przesyłka = całe zamówienie), dla refurbed
 `OrderItemService/BatchUpdateOrderItemsState` (stan `SHIPPED` na każdej pozycji zamówienia — pozycje dochodzą z
 `sales_order_items`, `parcel_tracking_url` jest tam wymagany; nazwa przewoźnika przez `ShippingProfileService/ListAvailableCarriers`
@@ -270,9 +274,10 @@ pozycje (refurbed nie rozbija ilości > 1, każda pozycja to zawsze jedna sztuka
 `marketplace_sync_error` z osobnym opisem. To zgłoszenie **nigdy nie failuje samego nadania** (przesyłka w DHL już
 istnieje i jest płatna): wynik zapisuje się w
 `shipments.marketplace_synced_at`/`marketplace_sync_error`, UI pokazuje ostrzeżenie z przyciskiem "Ponów"
-(`POST /api/shipping/sync-marketplace`). Nie testowane na żywym API (brak danych dostępowych w środowisku asystenta;
-Back Market dodatkowo filtruje po IP) — zweryfikowane na atrapie `fetch` wg dokumentacji (api.backmarket.dev,
-gitlab.com/refurbed-community/public-apis). **Ograniczenia DHL Express:** środowisko testowe ma limit 500 wywołań dziennie; API **nie pozwala anulować przesyłki**
+(`POST /api/shipping/sync-marketplace`). Zweryfikowane w produkcji na Back Markecie (na atrapie `fetch` wg
+dokumentacji sam błąd `new_state: 9` się nie ujawnił — realny test na żywym API był potrzebny, żeby go złapać;
+asystent nie ma dostępu do kluczy Back Market/refurbed, więc testuje tylko na atrapie `fetch`, a właściciel na
+produkcji). **Ograniczenia DHL Express:** środowisko testowe ma limit 500 wywołań dziennie; API **nie pozwala anulować przesyłki**
 (tylko w panelu DHL); Economy Select zależy od trasy i umowy; kuriera nie zamawiamy z aplikacji (`pickup.isRequested: false`). Wcześniej rozważane DHL Parcel Polska (DHL24 WebAPI2, SOAP)
 — porzucone (dokumentacja niedostępna, umowa jest na Express). Nie testowane na żywym API do nadawania — zweryfikowane na atrapie `fetch` wg specyfikacji.
 

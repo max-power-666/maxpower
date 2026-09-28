@@ -2,7 +2,12 @@
 // Dokumentacja: https://api.backmarket.dev, sekcja Orders → "Update a specific order" (POST /ws/orders/{order_id}).
 // Bez SKU w body wszystkie pozycje zamówienia przechodzą do podanego stanu naraz (BM traktuje całe zamówienie
 // jako jedną paczkę) — dokładnie to nam odpowiada, bo nadajemy zawsze jedną przesyłkę na całe zamówienie.
-// new_state = 9 ("wysłane", patrz BM_ORDER_STATES w lib/salesOrders.ts).
+// new_state = 3 ("Do wysyłki" — merchant-facing akcja "wysyłam to"; dokumentacja BM wprost opisuje przejście do
+// stanu 3 jako sposób na zgłoszenie wysyłki). UWAGA: new_state = 9 ("wysłane") NIE DZIAŁA — API realnie zwraca
+// 400 "new_state 9 must be in 2,3,4,5,6" (sprawdzone na produkcji, mimo że schema OrderState wymienia 9 jako
+// wartość dopuszczalną w ogóle — to tylko stan, jaki BM może zwrócić przy odczycie, nie który wolno ustawić tym
+// zapytaniem). Najwyraźniej Back Market sam przestawia zamówienie na 9 po swojej stronie, gdy zweryfikuje
+// przesyłkę u przewoźnika — nie jest to coś, co merchant ustawia ręcznie.
 
 export type BmShipConfig = { baseUrl: string; auth: string; lang: string; userAgent: string; fetchImpl?: typeof fetch; timeoutMs?: number };
 
@@ -27,7 +32,8 @@ export class BmShipError extends Error {
 // Back Marketu wygląda to źle, popraw tę mapę (np. na "Other").
 export const BM_SHIPPER_BY_CARRIER = { dhl_express: "DHL Express", dhl_parcel: "DHL" } as const;
 
-// POST /ws/orders/{order_id}: zgłasza numer przesyłki i przestawia zamówienie na "wysłane" (9). imei/serial_number
+// POST /ws/orders/{order_id}: zgłasza numer przesyłki i przestawia zamówienie na "Do wysyłki" (3, patrz uwaga
+// wyżej — 9 nie jest dopuszczalne w tym zapytaniu). imei/serial_number
 // dołączamy tu tylko dla zamówień z JEDNĄ pozycją (bez sku ten sam numer trafiłby myląco do wszystkich pozycji) —
 // przy kilku pozycjach służy do tego osobne wywołanie bmSetOrderlineIdentifier per pozycja.
 export async function bmMarkOrderShipped(
@@ -47,7 +53,7 @@ export async function bmMarkOrderShipped(
     },
     body: JSON.stringify({
       order_id: Number.isFinite(orderIdNum) ? orderIdNum : opts.orderId,
-      new_state: 9,
+      new_state: 3,
       tracking_number: opts.trackingNumber.slice(0, 200),
       ...(opts.trackingUrl ? { tracking_url: opts.trackingUrl.slice(0, 300) } : {}),
       shipper: opts.shipper.slice(0, 200),
