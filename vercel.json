@@ -33,10 +33,6 @@
       "schedule": "*/15 * * * *"
     },
     {
-      "path": "/api/orders/apilo-sync",
-      "schedule": "*/15 * * * *"
-    },
-    {
       "path": "/api/orders/amazon-sync",
       "schedule": "*/15 * * * *"
     }

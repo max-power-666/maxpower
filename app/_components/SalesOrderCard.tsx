@@ -236,7 +236,7 @@ type OctopiaOrder = {
   };
 };
 
-// Zamówienie Apilo (TYMCZASOWY most do Amazon) — czytamy z kolumny raw tabeli apilo_orders.
+// Zamówienie Apilo (dawny most do Amazon, integracja wycofana — zostaje tylko podgląd historycznych zamówień) — czytamy z kolumny raw tabeli apilo_orders.
 type ApiloOrder = {
   id: string;
   id_external: string | null;
@@ -679,7 +679,7 @@ export default function SalesOrderCard({
             {ap && (
               <>
                 <p className="text-xs text-inksoft mb-2">
-                  Dane pochodzą z Apilo (tymczasowy most do Amazon) — status i data to informacje z Apilo, nie oryginalne dane z Amazon.
+                  Dane pochodzą z Apilo (dawny most do Amazon, integracja wycofana) — status i data to informacje historyczne z Apilo, nie oryginalne dane z Amazon.
                 </p>
                 {!!ap.raw.orderItems?.length && (
                   <>

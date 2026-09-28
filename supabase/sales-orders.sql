@@ -10,8 +10,9 @@
 --  * allegro_orders — surowe zamówienia Allegro (GET /order/checkout-forms); oauth_tokens — tokeny OAuth (tylko serwer).
 --  * octopia_orders — surowe zamówienia Octopia (GET /orders, np. Cdiscount); pełna odpowiedź w kolumnie raw.
 --  * amazon_orders — surowe zamówienia Amazon (bezpośrednia integracja SP-API, patrz lib/amazon.ts).
---  * apilo_orders — surowe zamówienia innych kanałów Apilo (jeśli kiedyś dojdą — Amazon ma już bezpośrednią integrację powyżej).
---  * sales_orders — wspólna lista zamówień ze wszystkich marketplace'ów (dziś Back Market, refurbed, Erli, Allegro, Octopia, Apilo i Amazon (bezpośrednio);
+--  * apilo_orders — surowe zamówienia z dawnego mostu Apilo do Amazon; integracja WYCOFANA (kod usunięty, Amazon ma
+--                   bezpośrednią integrację SP-API powyżej) — tabela zostaje tylko jako archiwum historycznych zamówień.
+--  * sales_orders — wspólna lista zamówień ze wszystkich marketplace'ów (dziś Back Market, refurbed, Erli, Allegro, Octopia i Amazon (bezpośrednio), plus historyczne z Apilo;
 --                   Allegro/eBay dojdą jako kolejne wartości `marketplace`). Zapisuje ją ten sam
 --                   serwer, który wypełnia surową tabelę danego kanału.
 -- Dane z API zapisuje wyłącznie serwer (service_role, poza RLS); zespół czyta wszystko, a edytuje tylko
@@ -126,8 +127,8 @@ create table if not exists octopia_orders (
 );
 create index if not exists octopia_orders_updated_idx on octopia_orders (updated_at desc);
 
--- Surowe zamówienia Apilo (GET /rest/api/orders/, tylko konto Amazon — filtr platformAccountId). Status jest już nazwą
--- (nie numerem) — mapujemy go przy zapisie przez /rest/api/orders/status/map/, bo lista statusów jest własna dla konta Apilo.
+-- Surowe zamówienia z dawnego mostu Apilo do Amazon. Integracja WYCOFANA (28.09.2026, kod usunięty — Amazon ma
+-- bezpośrednią integrację SP-API powyżej); tabela i wiersze zostają jako archiwum, nic już do niej nie pisze.
 create table if not exists apilo_orders (
   id text primary key,                       -- Apilo order id
   id_external text,                           -- numer zamówienia na Amazon
