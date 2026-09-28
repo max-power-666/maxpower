@@ -128,6 +128,10 @@ const pieceXml = (p: ParcelPackage) =>
 
 /* ---------------- wycena ---------------- */
 
+// UWAGA: "price" to cena BAZOWA (bez dopłaty paliwowej), a "fuelSurcharge" to PROCENT (np. 25.5 = 25,5%), NIE kwota
+// w PLN — mimo że obie wartości to xsd:float w WSDL, więc nic tego nie odróżnia po stronie typów. Potwierdzone na
+// żywo: dla tej samej trasy panel DHL24 pokazuje dokładnie ten sam procent, a "Cena netto" = price * (1 + fuelSurcharge/100).
+// Cenę doliczoną razem z dopłatą liczy dopiero UI (ShippingView.tsx) — tu zostaje surowa odpowiedź API.
 export type ParcelQuote = { product: string; ok: boolean; price: number | null; fuelSurcharge: number | null; error?: string };
 
 // getPrice dla jednego produktu (EK albo PI). Gdy produkt nie jest dostępny na trasie, DHL zwraca błąd — oddajemy go jako wynik

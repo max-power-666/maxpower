@@ -251,17 +251,34 @@ export default function ShippingView({
       let rows: QuoteRow[];
       let warnings: string[] = [];
       if (carrier === "parcel") {
-        rows = (data.quotes as { product: string; name: string; ok: boolean; price: number | null; fuelSurcharge: number | null; error?: string }[]).map((q) => ({
-          code: q.product,
-          name: `${q.name} (${q.product})`,
-          billing: q.price !== null ? { price: q.price, currency: "PLN" } : null,
-          local: q.price !== null ? { price: q.price, currency: "PLN" } : null,
-          chargeableWeight: null,
-          transitDays: null,
-          estimatedDelivery: null,
-          breakdown: q.fuelSurcharge ? [{ name: "w tym dopłata paliwowa", price: q.fuelSurcharge }] : [],
-          unavailable: q.ok ? undefined : q.error || "niedostępny na tej trasie",
-        }));
+        // DHL24 getPrice zwraca "price" jako cenę BAZOWĄ (bez dopłaty) i "fuelSurcharge" jako PROCENT (nie kwotę w PLN!
+        // np. 25.5 = 25,5%) — potwierdzone na żywo (panel DHL24 dla tej samej trasy pokazuje dokładnie "25.5%"). Wcześniej
+        // traktowaliśmy tę liczbę jak złotówki i nie doliczaliśmy jej wcale do pokazywanej ceny — całość wychodziła
+        // zaniżona o ~20-25%. Teraz cena na liście to już suma z dopłatą (jak "Cena netto" w panelu DHL24), a rozwinięcie
+        // "składniki ceny" pokazuje bazę i dopłatę osobno, z procentem w nazwie.
+        rows = (data.quotes as { product: string; name: string; ok: boolean; price: number | null; fuelSurcharge: number | null; error?: string }[]).map((q) => {
+          const base = q.price;
+          const pct = q.fuelSurcharge;
+          const surchargeAmount = base !== null && pct ? Math.round(base * pct) / 100 : 0;
+          const total = base !== null ? Math.round((base + surchargeAmount) * 100) / 100 : null;
+          return {
+            code: q.product,
+            name: `${q.name} (${q.product})`,
+            billing: total !== null ? { price: total, currency: "PLN" } : null,
+            local: total !== null ? { price: total, currency: "PLN" } : null,
+            chargeableWeight: null,
+            transitDays: null,
+            estimatedDelivery: null,
+            breakdown:
+              base !== null
+                ? [
+                    { name: "Cena bazowa", price: base },
+                    ...(pct ? [{ name: `Dopłata paliwowa (${pct.toLocaleString("pl-PL")}%)`, price: surchargeAmount }] : []),
+                  ]
+                : [],
+            unavailable: q.ok ? undefined : q.error || "niedostępny na tej trasie",
+          };
+        });
       } else {
         rows = (data.products as DhlProduct[]).map((p2) => ({ ...p2, economy: isEconomySelect(p2) }));
         warnings = data.warnings || [];

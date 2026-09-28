@@ -301,7 +301,12 @@ z tych list osobno trzymanych w obu route'ach, więc nie dało się go wybrać).
 paletach). Connect Plus w DHL24 obsługuje przesyłki wieloelementowe (do 15 sztuk), ale nasza integracja zawsze
 wysyła jedną paczkę — to i tak działa (przesyłka jednoelementowa jest prawidłowym przypadkiem tego produktu), tylko
 nie wykorzystuje jego przewagi nad Connect/International;
-wycena `getPrice` (cena w PLN + dopłata paliwowa; produkt niedostępny na trasie = wiersz "niedostępny: <powód>"), tworzenie `createShipments`, etykieta `getLabels` **BLP = PDF**
+wycena `getPrice` (`price` to cena BAZOWA w PLN, **`fuelSurcharge` to PROCENT, nie kwota w PLN** — mimo że w WSDL oba
+pola to `xsd:float`, nic tego nie odróżnia; do 28.09.2026 kod traktował ją jak złotówki i wcale nie doliczał do
+pokazywanej ceny, więc cena na liście wychodziła zaniżona o ~20-25% — poprawione w `ShippingView.tsx`: cena na
+liście to już `price * (1 + fuelSurcharge/100)`, "składniki ceny" pokazują bazę i dopłatę osobno, z procentem w
+nazwie; zweryfikowane na żywo, matematyka zgadza się co do grosza z panelem DHL24 dla tej samej trasy; produkt
+niedostępny na trasie = wiersz "niedostępny: <powód>"), tworzenie `createShipments`, etykieta `getLabels` **BLP = PDF**
 (ZBLP = ZPL dla Zebry, nieużywany), anulowanie `deleteShipments` (**możliwe przez API**, dopóki nie zamówiono kuriera; wiersz w `shipments` dostaje `cancelled_at`). **DHL Parcel nie ma
 środowiska testowego dostępnego dla nas** — każde nadanie jest prawdziwe, więc test = nadaj + od razu anuluj. Adres w DHL24 wymaga ulicy i numeru domu w OSOBNYCH polach oraz limitów:
 miejscowość max **17** znaków (potwierdzone wprost w ich dokumentacji, struktura Address), ulica 35, nazwa 60, telefon 20, **suma numeru domu i numeru lokalu razem max 15 znaków** (osobny limit od 10 znaków każdego pola z osobna) — za długie = czytelny błąd, nie ucinanie; opis zawartości ucinany do 30. Nadawcę rozdziela `loadShipper`
