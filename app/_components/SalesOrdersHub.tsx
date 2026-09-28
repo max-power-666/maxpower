@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { MARKETPLACES, OUR_STATUSES, salesStatusLabel, startOfYesterdayIso, summarizeDays, type DayCount, type OurStatus } from "@/lib/salesOrders";
@@ -18,6 +18,9 @@ import PadSerialsCell, { MAX_PADS } from "./PadSerialsCell";
 
 const pill = (active: boolean) =>
   `px-3 py-1.5 rounded-full text-sm font-semibold border ${active ? "bg-ink text-paper border-ink" : "bg-white border-line"}`;
+// Mniejsza wersja — filtry w pasku ponad listą (np. "Nasz status"), obok "Pokaż"/"strona X z Y", nie sam przełącznik podstron.
+const smallPill = (active: boolean) =>
+  `px-2.5 py-1 rounded-full text-xs font-semibold border whitespace-nowrap ${active ? "bg-ink text-paper border-ink" : "bg-white border-line text-inksoft"}`;
 const PAGE_SIZES = [10, 20, 50];
 
 function fmtDateTime(iso: string | null) {
@@ -36,16 +39,18 @@ function Pager({
   total,
   onPage,
   onPageSize,
+  middle,
 }: {
   page: number;
   pageSize: number;
   total: number | null;
   onPage: (p: number) => void;
   onPageSize: (n: number) => void;
+  middle?: ReactNode; // np. filtr statusu w Zamówieniach — puste dla list bez takiego filtra
 }) {
   const pages = total === null ? 1 : Math.max(1, Math.ceil(total / pageSize));
   return (
-    <div className="flex items-center justify-between mb-3">
+    <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
       <div className="flex items-center gap-3">
         <label className="text-xs text-inksoft">Pokaż</label>
         <select
@@ -59,6 +64,7 @@ function Pager({
         </select>
         <span className="text-xs text-inksoft">{total !== null ? `z ${total} zamówień łącznie` : ""}</span>
       </div>
+      {middle}
       <div className="flex items-center gap-2">
         <button onClick={() => onPage(page - 1)} disabled={page <= 1} className="bg-white border border-line px-3 py-1.5 rounded text-sm font-semibold disabled:opacity-40">←</button>
         <span className="text-xs text-inksoft">strona {page} z {pages}</span>
@@ -473,6 +479,7 @@ function OrdersList({
   const [pageSize, setPageSize] = useState(20);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<OurStatus | "wszystkie">("wszystkie");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   // Zapisy idą jeden po drugim na najświeższym wierszu, żeby szybkie skanowanie kilku pól pod rząd
@@ -509,7 +516,7 @@ function OrdersList({
       supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, pageSize, search, reloadKey]);
+  }, [page, pageSize, search, statusFilter, reloadKey]);
 
   async function load() {
     const seq = ++loadSeq.current;
@@ -517,6 +524,7 @@ function OrdersList({
     const from = (page - 1) * pageSize;
     let q = supabase.from("sales_orders").select(SALES_COLUMNS, { count: "exact" });
     if (search) q = q.ilike("external_id", `%${escapeLike(search)}%`);
+    if (statusFilter !== "wszystkie") q = q.eq("our_status", statusFilter);
     try {
       const { data, error: err, count } = await q
         .order("order_date", { ascending: false, nullsFirst: false })
@@ -672,7 +680,21 @@ function OrdersList({
         placeholder="Szukaj po numerze zamówienia"
         className="w-72 border border-line bg-white px-3 py-2 rounded text-sm font-mono mb-3"
       />
-      <Pager page={page} pageSize={pageSize} total={total} onPage={setPage} onPageSize={(n) => { setPageSize(n); setPage(1); }} />
+      <Pager
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        onPage={setPage}
+        onPageSize={(n) => { setPageSize(n); setPage(1); }}
+        middle={
+          <div className="flex items-center gap-2">
+            <button onClick={() => { setStatusFilter("wszystkie"); setPage(1); }} className={smallPill(statusFilter === "wszystkie")}>Wszystkie</button>
+            {OUR_STATUSES.map((s) => (
+              <button key={s.key} onClick={() => { setStatusFilter(s.key); setPage(1); }} className={smallPill(statusFilter === s.key)}>{s.label}</button>
+            ))}
+          </div>
+        }
+      />
       {error && <p className="text-rust text-xs mb-3">{error}</p>}
       <div className="border border-line bg-white overflow-x-auto">
         <table className="w-full text-sm">
