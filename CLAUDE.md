@@ -305,7 +305,8 @@ wycena `getPrice` (`price` to cena BAZOWA w PLN, **`fuelSurcharge` to PROCENT, n
 pola to `xsd:float`, nic tego nie odróżnia; do 28.09.2026 kod traktował ją jak złotówki i wcale nie doliczał do
 pokazywanej ceny, więc cena na liście wychodziła zaniżona o ~20-25% — poprawione w `ShippingView.tsx`: cena na
 liście to już `price * (1 + fuelSurcharge/100)`, "składniki ceny" pokazują bazę i dopłatę osobno, z procentem w
-nazwie; zweryfikowane na żywo, matematyka zgadza się co do grosza z panelem DHL24 dla tej samej trasy; produkt
+nazwie; zweryfikowane na żywo, matematyka zgadza się co do grosza z panelem DHL24 dla tej samej trasy (to jest
+"Cena netto" z ich panelu — kolumny wyceny i opis pod tabelą wprost mówią "netto" dla DHL Parcel, bez VAT); produkt
 niedostępny na trasie = wiersz "niedostępny: <powód>"), tworzenie `createShipments`, etykieta `getLabels` **BLP = PDF**
 (ZBLP = ZPL dla Zebry, nieużywany), anulowanie `deleteShipments` (**możliwe przez API**, dopóki nie zamówiono kuriera; wiersz w `shipments` dostaje `cancelled_at`). **DHL Parcel nie ma
 środowiska testowego dostępnego dla nas** — każde nadanie jest prawdziwe, więc test = nadaj + od razu anuluj. Adres w DHL24 wymaga ulicy i numeru domu w OSOBNYCH polach oraz limitów:

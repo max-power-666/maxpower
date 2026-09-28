@@ -564,8 +564,8 @@ export default function ShippingView({
                       <th className="p-3"></th>
                       <th className="p-3">Kod</th>
                       <th className="p-3">Produkt</th>
-                      <th className="p-3 text-right">Cena</th>
-                      <th className="p-3 text-right">Cena (PLN)</th>
+                      <th className="p-3 text-right">Cena{quote.carrier === "parcel" ? " (netto)" : ""}</th>
+                      <th className="p-3 text-right">Cena (PLN{quote.carrier === "parcel" ? ", netto" : ""})</th>
                       <th className="p-3 text-right">Waga taryfowa</th>
                       <th className="p-3 text-right">Dni</th>
                       <th className="p-3">Szacowana dostawa</th>
@@ -620,7 +620,7 @@ export default function ShippingView({
               {quote.warnings.length > 0 && <p className="text-xs text-inksoft mb-2">Ostrzeżenia DHL: {quote.warnings.join("; ")}</p>}
               <button onClick={create} disabled={creating || !chosen} className={btnPrimary}>{creating ? "Nadawanie…" : `Nadaj przesyłkę (${CARRIER_LABEL[quote.carrier]}) i wygeneruj etykietę`}</button>
               <p className="text-xs text-inksoft mt-2">
-                Cena to wycena wg cennika konta (DHL Parcel: w PLN, sprawdź czy netto, czy brutto); ostateczną kwotę (opłaty dodatkowe, VAT) potwierdza faktura DHL.
+Cena to wycena wg cennika konta (DHL Parcel: kwota NETTO w PLN, już z doliczoną dopłatą paliwową — bez VAT); ostateczną kwotę (VAT, ewentualne opłaty dodatkowe) potwierdza faktura DHL.
                 {quote.carrier === "parcel"
                   ? parcel?.sandbox
                     ? " Środowisko testowe: nadanie nie jest prawdziwe."
