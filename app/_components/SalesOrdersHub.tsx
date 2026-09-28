@@ -605,6 +605,22 @@ function OrdersList({
       const next = rowsRef.current.map((r) => (rowKey(r) === key ? { ...r, our_status: status } : r));
       rowsRef.current = next;
       setRows(next);
+
+      // "W realizacji" = bierzemy się za to — odpowiada akcji "zaakceptuj zamówienie" u marketplace'u (dziś: Back
+      // Market). Nie cofa zmiany statusu, gdyby się nie udało — to tylko ostrzeżenie, nie blokada.
+      if (status === "w_realizacji") {
+        try {
+          const res = await fetch("/api/orders/validate", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ marketplace: cur.marketplace, externalId: cur.external_id }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || (data && data.error)) setError(`Zamówienie ${cur.external_id}: nie udało się zaakceptować u marketplace'u — ${data?.error ?? "błąd serwera"}.`);
+        } catch (e: any) {
+          setError(`Zamówienie ${cur.external_id}: nie udało się zaakceptować u marketplace'u — ${e?.message ?? "błąd sieci"}.`);
+        }
+      }
     });
   }
 

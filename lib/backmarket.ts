@@ -1,13 +1,17 @@
-// Klient Back Market do zgłaszania numeru przesyłki po nadaniu w module Wysyłka.
+// Klient Back Market: akceptacja zamówienia i zgłaszanie numeru przesyłki po nadaniu w module Wysyłka.
 // Dokumentacja: https://api.backmarket.dev, sekcja Orders → "Update a specific order" (POST /ws/orders/{order_id}).
 // Bez SKU w body wszystkie pozycje zamówienia przechodzą do podanego stanu naraz (BM traktuje całe zamówienie
-// jako jedną paczkę) — dokładnie to nam odpowiada, bo nadajemy zawsze jedną przesyłkę na całe zamówienie.
-// new_state = 3 ("Do wysyłki" — merchant-facing akcja "wysyłam to"; dokumentacja BM wprost opisuje przejście do
-// stanu 3 jako sposób na zgłoszenie wysyłki). UWAGA: new_state = 9 ("wysłane") NIE DZIAŁA — API realnie zwraca
-// 400 "new_state 9 must be in 2,3,4,5,6" (sprawdzone na produkcji, mimo że schema OrderState wymienia 9 jako
-// wartość dopuszczalną w ogóle — to tylko stan, jaki BM może zwrócić przy odczycie, nie który wolno ustawić tym
-// zapytaniem). Najwyraźniej Back Market sam przestawia zamówienie na 9 po swojej stronie, gdy zweryfikuje
-// przesyłkę u przewoźnika — nie jest to coś, co merchant ustawia ręcznie.
+// jako jedną paczkę) — dokładnie to nam odpowiada, bo nadajemy zawsze jedną przesyłkę na całe zamówienie i
+// akceptujemy zawsze całe zamówienie naraz (nie pojedyncze pozycje).
+//
+// new_state — dopuszczalne wartości potwierdzone na produkcji to 2, 3, 4, 5, 6 (błąd API przy innej wartości:
+// "new_state X must be in 2,3,4,5,6"), mimo że schema OrderState (do odczytu) wymienia też 0, 1, 8, 9, 10:
+//   2 = zaakceptowane przez sprzedawcę (merchant-facing akcja "przyjmuję zamówienie do realizacji" — patrz
+//       bmAcceptOrder; Table 6 dokumentacji BM nazywa to stanem POZYCJI, nie zamówienia, ale endpoint przyjmuje
+//       tę wartość i tak, prawdopodobnie stosując ją do wszystkich pozycji naraz jak przy stanie 3),
+//   3 = "Do wysyłki" (merchant-facing akcja "wysyłam to" — patrz bmMarkOrderShipped),
+//   9 = "wysłane" NIE DA SIĘ ustawić tym zapytaniem — to stan, który Back Market nadaje sam, gdy zweryfikuje
+//       przesyłkę u przewoźnika, nie coś, co merchant wpisuje ręcznie.
 
 export type BmShipConfig = { baseUrl: string; auth: string; lang: string; userAgent: string; fetchImpl?: typeof fetch; timeoutMs?: number };
 
@@ -67,6 +71,34 @@ export async function bmMarkOrderShipped(
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new BmShipError(`Back Market zwrócił błąd (${res.status}) przy zgłaszaniu przesyłki: ${text.slice(0, 300)}`, res.status);
+  }
+}
+
+// POST /ws/orders/{order_id}: akceptuje zamówienie (new_state: 2) — wołane, gdy zespół przestawia "Nasz status"
+// na "w realizacji" (patrz app/api/orders/validate/route.ts). Zanim zamówienie zostanie zaakceptowane, Back
+// Market bywa skąpy w dane odbiorcy zwracane przez GET /ws/orders (obserwacja: brakuje imienia/nazwiska, kodu
+// pocztowego i telefonu przy statusie "Do zaakceptowania", mimo że ulica/miasto/kraj są) — akceptacja może to
+// odblokować, ale nie jest to potwierdzone w dokumentacji, tylko wniosek z obserwacji; kolejny sync i tak
+// dociągnie pełne dane, gdy się pojawią.
+export async function bmAcceptOrder(cfg: BmShipConfig, opts: { orderId: string }): Promise<void> {
+  const doFetch = cfg.fetchImpl ?? fetch;
+  const orderIdNum = Number(opts.orderId);
+  const res = await doFetch(`${cfg.baseUrl}/ws/orders/${opts.orderId}`, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Accept-Language": cfg.lang,
+      Authorization: cfg.auth,
+      "User-Agent": cfg.userAgent,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ order_id: Number.isFinite(orderIdNum) ? orderIdNum : opts.orderId, new_state: 2 }),
+    cache: "no-store",
+    signal: AbortSignal.timeout(cfg.timeoutMs ?? 20_000),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new BmShipError(`Back Market zwrócił błąd (${res.status}) przy akceptowaniu zamówienia: ${text.slice(0, 300)}`, res.status);
   }
 }
 

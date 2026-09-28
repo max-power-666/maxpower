@@ -5,6 +5,7 @@ import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { COUNTRY_NAMES, DHL_EU_COUNTRIES, isEconomySelect, type DhlMoney, type DhlProduct } from "@/lib/dhlExpress";
 import { base64ToBlobUrl, defaultShippingDate, type ShipPrefill } from "@/lib/shipping";
+import { MARKETPLACES } from "@/lib/salesOrders";
 
 // Zakładka Wysyłka: nadawanie przesyłek DHL Express (MyDHL API) — formularz z wyceną, szablony paczek, ustawienia nadawcy i lista nadanych
 // przesyłek z etykietami (PDF 10x15 na Zebrę). Dostęp: Admin i Manager. Klucze i numer konta są tylko na serwerze
@@ -94,6 +95,7 @@ export default function ShippingView({
   const [templates, setTemplates] = useState<Template[]>([]);
   const [shipments, setShipments] = useState<ShipmentRow[]>([]);
   const [error, setError] = useState("");
+  const [prefillNote, setPrefillNote] = useState(""); // ostrzeżenie: marketplace nie przekazał (jeszcze) pełnych danych odbiorcy
 
   const [form, setForm] = useState(EMPTY_FORM);
   const [order, setOrder] = useState<{ marketplace: string; externalId: string } | null>(null);
@@ -129,6 +131,22 @@ export default function ShippingView({
     setQuote(null);
     setChosen(null);
     setDone(null);
+    // Marketplace czasem nie ma jeszcze pełnych danych odbiorcy (typowo: zamówienie jeszcze nie zaakceptowane) —
+    // zamiast ciszy przy pustych wymaganych polach, mówimy to wprost zamiast zostawiać zespół w niepewności.
+    const missingLabels = [
+      !prefill.name.trim() && "imię i nazwisko",
+      !prefill.street.trim() && "ulica",
+      !prefill.houseNumber.trim() && "numer domu",
+      !prefill.postalCode.trim() && "kod pocztowy",
+      !prefill.city.trim() && "miasto",
+      !prefill.phone.trim() && "telefon",
+    ].filter((x): x is string => !!x);
+    const marketplaceLabel = MARKETPLACES.find((m) => m.key === prefill.marketplace)?.label ?? prefill.marketplace;
+    setPrefillNote(
+      missingLabels.length > 0
+        ? `${marketplaceLabel} nie przekazał (jeszcze) pełnych danych odbiorcy dla tego zamówienia — brakuje: ${missingLabels.join(", ")}. Uzupełnij ręcznie albo sprawdź zamówienie w ${marketplaceLabel} (często dzieje się tak, zanim zamówienie zostanie zaakceptowane).`
+        : ""
+    );
     requestId.current = crypto.randomUUID();
     onPrefillUsed();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -365,6 +383,7 @@ export default function ShippingView({
     setQuote(null);
     setChosen(null);
     setDone(null);
+    setPrefillNote("");
     setPlannedDate(defaultShippingDate());
     requestId.current = crypto.randomUUID();
   }
@@ -433,6 +452,7 @@ export default function ShippingView({
 
           {/* formularz */}
           <div className="border border-line bg-white p-4 mb-6">
+            {prefillNote && <p className="text-amber text-xs font-semibold bg-ambersoft rounded px-3 py-2 mb-3">{prefillNote}</p>}
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-xs font-semibold text-inksoft">NOWA PRZESYŁKA{order ? ` — zamówienie ${order.externalId}` : ""}</h2>
               <button onClick={reset} className="text-xs font-semibold text-teal hover:underline">Wyczyść formularz</button>
