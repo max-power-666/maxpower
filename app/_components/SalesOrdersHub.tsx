@@ -450,6 +450,9 @@ function OrdersList({
     let q = supabase.from("sales_orders").select(SALES_COLUMNS, { count: "exact" });
     if (search) q = q.ilike("external_id", `%${escapeLike(search)}%`);
     if (statusFilter !== "wszystkie") q = q.eq("our_status", statusFilter);
+    // Erli: dopóki zamówienie nie jest opłacone (albo za pobraniem), na liście tylko zaśmieca "Nowe" — klient może
+    // się jeszcze rozmyślić i nigdy nie zapłacić. Pokazujemy je dopiero, gdy status to "Opłacone"/"Za pobraniem".
+    q = q.or("marketplace.neq.erli,status.in.(purchased,purchased_cod)");
     try {
       const { data, error: err, count } = await q
         .order("order_date", { ascending: false, nullsFirst: false })
