@@ -208,8 +208,11 @@ synchronizacja ma DWIE fazy w jednym przebiegu: FAZA 1 `GET /orders/v0/orders` (
 BEZ SKU — `mapAmazonToSales` celowo nie ustawia pola `sku` wcale, żeby upsert nigdy nie nadpisał go pustą wartością; kursor to prawdziwy `NextToken` z API
 (`sales_orders_sync_meta.scan_cursor`, prefiks `NT:`). FAZA 2 `GET /orders/v0/orders/{id}/orderItems` (0,5 req/s) dogania SKU i pozycje dla zamówień, które
 go jeszcze nie mają (`sales_orders.sku is null`), do `ITEMS_MAX_PER_RUN` (60) na przebieg — reszta poczeka na kolejny cron (15 min). Przez ciasny limit fazy 1
-**pełne pobranie historii może zająć wiele godzin/dni cronów** — to oczekiwane, nie błąd; pierwszy przebieg zaczyna od 1 stycznia bieżącego roku. Retry na 429
-honoruje nagłówek `Retry-After`. Nie testowane na żywym API (brak zarejestrowanej aplikacji w środowisku asystenta) — zweryfikowane na atrapie `fetch` wg
+pierwszy przebieg pobiera świadomie tylko **ostatnie `FIRST_RUN_LOOKBACK_DAYS` (7) dni**, nie całą historię od początku roku — przy tym limicie pełny rok
+zająłby dni cronów, a starsza historia nie jest potrzebna do bieżącej pracy (decyzja właściciela); dalej już zwykła synchronizacja przyrostowa. **Nawet ten
+tydzień może zająć kilka przebiegów cron** — to oczekiwane, nie błąd. Retry na 429 honoruje nagłówek `Retry-After`. Zarejestrowane w Amazon Solution Provider
+Portal (nie klasyczny "Apps and Services" — Amazon w 2026 skonsolidował rejestrację SP-API tam, także dla aplikacji prywatnych jednego sprzedawcy), zatwierdzone,
+z rolą "Inventory and Order Tracking". Nie testowane na żywym API z tego środowiska (brak dostępu) — zweryfikowane na atrapie `fetch` wg
 oficjalnego modelu OpenAPI (github.com/amzn/selling-partner-api-models, orders-api-model).
 
 **Apilo** (`marketplace = 'apilo'`, `lib/apilo.ts`, `lib/apiloServer.ts`, `app/api/orders/apilo-{sync,connect}`, surowe dane w `apilo_orders`) —

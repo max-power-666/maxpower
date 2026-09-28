@@ -10,8 +10,10 @@ import { mapAmazonItems, mapAmazonOrder, mapAmazonToSales, uniqueBy } from "@/li
 //  FAZA 2 — GET /orders/v0/orders/{id}/orderItems: limit 0,5 req/s (zapas 30) — dogania SKU dla zamówień, które go
 //           jeszcze nie mają (sales_orders.sku is null), niezależnie w którym przebiegu doszła do nich lista.
 // Kursor (NextToken od Amazona, prawdziwy kursor API — nie data) trzymamy w sales_orders_sync_meta.scan_cursor.
-// Pierwszy przebieg pobiera zamówienia od 1 stycznia bieżącego roku. Przez ciasny limit fazy 1 pełne pobranie historii
-// może zająć wiele przebiegów cron (co 15 min) — to oczekiwane, nie błąd.
+// Pierwszy przebieg pobiera zamówienia z ostatnich FIRST_RUN_LOOKBACK_DAYS dni (nie całą historię od 1 stycznia —
+// świadoma decyzja właściciela: przy limicie ~1 zapytanie/60 s pełny rok zająłby dni cronów, a starsza historia
+// nie jest potrzebna do bieżącej pracy). Dalej już zwykła synchronizacja przyrostowa. Przez ciasny limit fazy 1
+// nawet ten tydzień może zająć kilka przebiegów cron (co 15 min) — to oczekiwane, nie błąd.
 // Bez konfiguracji (AMAZON_CLIENT_ID/SECRET/REFRESH_TOKEN) endpoint nic nie robi i mówi o tym wprost.
 
 export const maxDuration = 300;
@@ -19,6 +21,7 @@ export const maxDuration = 300;
 const MARKETPLACE = "amazon";
 const LIST_BUDGET_MS = 250_000; // reszta czasu (do 300 s) zostaje na fazę pozycji
 const ITEMS_MAX_PER_RUN = 60; // przy 0,5 req/s to ~2 minuty — bezpieczny margines w pozostałym czasie
+const FIRST_RUN_LOOKBACK_DAYS = 7;
 
 async function saveOrders(admin: SupabaseClient<any, any, any>, all: any[]) {
   const orders = uniqueBy(all, (o) => String(o.AmazonOrderId));
@@ -52,7 +55,7 @@ export async function GET(request: Request) {
     const lastUpdatedAfter = nextToken
       ? undefined
       : firstRun
-        ? `${new Date().getFullYear()}-01-01T00:00:00Z`
+        ? new Date(Date.now() - FIRST_RUN_LOOKBACK_DAYS * 24 * 3600 * 1000).toISOString()
         : new Date(Date.parse((meta?.last_synced_at as string) || startedAt) - 10 * 60 * 1000).toISOString();
 
     let processed = 0;
