@@ -31,8 +31,9 @@ export function splitStreet(text: string): { street: string; houseNumber: string
   return { street: t, houseNumber: "" };
 }
 
-// Adres odbiorcy z surowego zamówienia. Zwraca null, gdy zamówienie nie nadaje się do przesyłki zagranicznej (brak adresu albo kraj
-// spoza obsługiwanych, w tym Polska — krajowe zamówienia z Allegro i Erli realizujemy inaczej).
+// Adres odbiorcy z surowego zamówienia. Zwraca null, gdy brak adresu, kraj spoza obsługiwanych (DHL_EU_COUNTRIES —
+// obejmuje Polskę) albo marketplace inny niż backmarket/refurbed (Allegro/Erli mają własną, krajową obsługę wysyłki
+// — Erli bezpośrednio przez swoje API, patrz ErliParcelPanel.tsx — więc w ogóle nie przechodzą przez tę funkcję).
 export function buildShipPrefill(marketplace: string, externalId: string, raw: any, customerEmail?: string | null): ShipPrefill | null {
   let p: Omit<ShipPrefill, "marketplace" | "externalId"> | null = null;
   if (marketplace === "backmarket") {

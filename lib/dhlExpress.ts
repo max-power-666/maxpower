@@ -146,7 +146,11 @@ export async function dhlRates(cfg: DhlExpressConfig, q: ProductQuery): Promise<
 /* ---------------- tworzenie przesyłki (POST /shipments) ---------------- */
 
 // Kraje UE, do których nadajemy bez odprawy celnej. Poza UE potrzebne są dane celne (opis, wartość, kod HS) — jeszcze nie obsługujemy.
-export const DHL_EU_COUNTRIES = ["AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL", "PT", "RO", "SK", "SI", "ES", "SE"];
+// UWAGA: obejmuje też Polskę (PL) — potrzebne dla zamówień Back Market/refurbed z odbiorcą w Polsce (te
+// marketplace'y nie mają własnej krajowej wysyłki, w odróżnieniu od Erli, które ma teraz Paczkomaty InPost
+// bezpośrednio przez swoje API — patrz ErliParcelPanel.tsx). Allegro i Erli i tak nie przechodzą przez
+// buildShipPrefill (lib/shipping.ts) niezależnie od kraju, więc nic tu dla nich się nie zmienia.
+export const DHL_EU_COUNTRIES = ["AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL", "PL", "PT", "RO", "SK", "SI", "ES", "SE"];
 
 export const COUNTRY_NAMES: Record<string, string> = {
   AT: "Austria", BE: "Belgia", BG: "Bułgaria", HR: "Chorwacja", CY: "Cypr", CZ: "Czechy", DK: "Dania", EE: "Estonia", FI: "Finlandia",

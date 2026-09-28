@@ -252,7 +252,10 @@ w walucie rozliczeniowej i PLN, waga taryfowa, składniki ceny; Economy Select =
 `POST /shipments` → etykieta **PDF 6x4 cala (10x15 cm, szablon `ECOM26_64_001`, zmienna `DHL_EXPRESS_LABEL_TEMPLATE`)** do wydruku na Zebrze przez sterownik (rozmiar strony
 100x150 mm) → zapis w `shipments` (numer, link śledzenia, odbiorca, paczka, opłaty, etykieta base64). Zabezpieczenia: wymagane `confirm: true`; `client_request_id` (unikalny) chroni
 przed podwójnym nadaniem tym samym kliknięciem; gdy DHL nada, a zapis w bazie się nie uda, odpowiedź zwraca numer i etykietę, żeby nic się nie zmarnowało; e-mail autora z konta, nie z żądania;
-tabela `shipments` bez UPDATE/DELETE (zapis księgowy, tylko serwer). **Na razie tylko kraje UE** (bez odprawy celnej, `isCustomsDeclarable: false`, incoterm DAP); poza UE wymaga danych
+tabela `shipments` bez UPDATE/DELETE (zapis księgowy, tylko serwer). **Na razie tylko kraje UE** (bez odprawy celnej, `isCustomsDeclarable: false`, incoterm DAP), **w tym Polska** (`DHL_EU_COUNTRIES`
+w `lib/dhlExpress.ts` — była z niej wcześniej wyłączona, bo krajowe zamówienia Allegro/Erli mają inną obsługę, ale to
+wykluczało też Back Market/refurbed z odbiorcą w Polsce, które takiej alternatywy nie mają; poprawione, zgłoszone przez
+właściciela na realnym zamówieniu refurbed do Polski); poza UE wymaga danych
 celnych (opis, wartość, kod HS) — do zrobienia. Nadawca (`shipping_settings`, jeden wiersz; Admin zmienia w zakładce) i szablony (`shipping_templates`; dodaje Admin/Manager, usuwa Admin)
 są w bazie. Z karty zamówienia (Back Market, Refurbed, kraj UE) przycisk "Nadaj przesyłkę DHL" wypełnia formularz. Linie adresu DHL to max 3 x 45 znaków (`splitAddressLines` łamie na
 spacjach, za długi adres = czytelny błąd, nie ucinanie). **Po nadaniu numer przesyłki wraca do marketplace'u**
