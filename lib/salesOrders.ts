@@ -173,6 +173,19 @@ export function bmDerivedStatus(o: any): string {
   return String(o.state);
 }
 
+// Metoda wysyłki (na razie tylko Back Market — inne kanały nie mają tego pola, our_status: null -> "—" w UI).
+// Back Market API nie ma osobnego pola "standard/express": jedyny sygnał to shipper_display, nazwa przewoźnika/
+// usługi wybrana dla zamówienia ("DHL" albo "DHL Express" w danych Recoo — potwierdzone na żywych zamówieniach,
+// zanim jeszcze cokolwiek wysłaliśmy, więc to nie echo tego, co MY zgłaszamy, tylko coś ustalone wcześniej).
+// delivery_mode to coś zupełnie innego (HOME_DELIVERY/COLLECTION_POINT — sposób ODBIORU, nie tempo wysyłki).
+// Rozpoznajemy po słowie "express" w nazwie zamiast trzymać sztywną listę przewoźników (API dopuszcza różne: DHL,
+// Colissimo, UPS...), żeby nowy przewoźnik bez "express" w nazwie sam wpadł do "Standardowa", a nie do "—".
+export function bmShippingMethodLabel(shipperDisplay: unknown): string | null {
+  const s = typeof shipperDisplay === "string" ? shipperDisplay.trim() : "";
+  if (!s) return null;
+  return /express/i.test(s) ? "Ekspresowa" : "Standardowa";
+}
+
 // To samo zamówienie -> wiersz wspólnej tabeli sales_orders. W orderlines[].listing API zwraca SKU.
 export function mapBmToSales(o: any) {
   const skus = Array.from(
@@ -186,6 +199,7 @@ export function mapBmToSales(o: any) {
     sku: skus.length > 0 ? skus.join(", ") : null,
     tracking_number: o.tracking_number || null,
     country_code: normCountry(o.shipping_address?.country),
+    shipping_method: bmShippingMethodLabel(o.shipper_display),
     synced_at: new Date().toISOString(),
   };
 }

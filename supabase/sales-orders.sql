@@ -165,6 +165,7 @@ create table if not exists sales_orders (
   sku text,                                  -- SKU-i wszystkich pozycji po przecinku (podsumowanie; szczegóły w sales_order_items)
   tracking_number text,                      -- numer przesyłki z API (Back Market: tracking_number zamówienia)
   country_code text,                         -- kod kraju ODBIORCY (adres dostawy), 2 litery ISO 3166-1 gdzie kanał to udostępnia
+  shipping_method text,                      -- "Standardowa"/"Ekspresowa" — na razie tylko Back Market (bmShippingMethodLabel), inne kanały: null
   synced_at timestamptz not null default now(),
   -- Nasz wewnętrzny status realizacji (niezależny od statusu kanału): nowe | w_realizacji | wyslane | anulowane
   our_status text not null default 'nowe' check (our_status in ('nowe', 'w_realizacji', 'wyslane', 'anulowane')),
@@ -175,6 +176,7 @@ alter table sales_orders add column if not exists history jsonb not null default
 alter table sales_orders add column if not exists tracking_number text;
 alter table sales_orders add column if not exists our_status text not null default 'nowe';
 alter table sales_orders add column if not exists country_code text;
+alter table sales_orders add column if not exists shipping_method text;
 -- Drop+add (nie "dodaj jeśli brak") celowo: żeby poszerzenie listy dozwolonych wartości (np. dodanie 'anulowane')
 -- też się zastosowało przy ponownym uruchomieniu na bazie, która ma już ten constraint z węższą listą.
 alter table sales_orders drop constraint if exists sales_orders_our_status_check;
@@ -184,6 +186,21 @@ update sales_orders s set tracking_number = o.tracking_number
   from bm_orders o
  where s.marketplace = 'backmarket' and o.order_id::text = s.external_id
    and s.tracking_number is distinct from o.tracking_number;
+
+-- Metoda wysyłki dla zamówień pobranych zanim ta kolumna powstała (i uzupełnienie na bieżąco na wypadek zmiany
+-- przewoźnika po synchronizacji) — ta sama reguła co bmShippingMethodLabel w lib/salesOrders.ts.
+update sales_orders s set shipping_method = case
+    when o.shipper_display is null or btrim(o.shipper_display) = '' then null
+    when o.shipper_display ~* 'express' then 'Ekspresowa'
+    else 'Standardowa'
+  end
+  from bm_orders o
+ where s.marketplace = 'backmarket' and o.order_id::text = s.external_id
+   and s.shipping_method is distinct from (case
+     when o.shipper_display is null or btrim(o.shipper_display) = '' then null
+     when o.shipper_display ~* 'express' then 'Ekspresowa'
+     else 'Standardowa'
+   end);
 
 -- Uzupełnienie kraju odbiorcy dla zamówień pobranych zanim ta kolumna powstała — z już zapisanych surowych danych
 -- (przyrostowa synchronizacja rusza tylko zmienione zamówienia, więc stare wiersze same by go nie dostały).
