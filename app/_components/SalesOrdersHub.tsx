@@ -96,10 +96,6 @@ export default function SalesOrdersHub({
   // Połączenie z Allegro (OAuth) — widoczne i obsługiwane tylko przez Admina.
   const [allegro, setAllegro] = useState<{ configured: boolean; connected: boolean; redirectUri: string } | null>(null);
   const [connecting, setConnecting] = useState(false);
-  // Połączenie z Apilo (TYMCZASOWY most do Amazon) — Admin wkleja tu kod autoryzacyjny z panelu Apilo, jednorazowo.
-  const [apilo, setApilo] = useState<{ configured: boolean; connected: boolean } | null>(null);
-  const [apiloCode, setApiloCode] = useState("");
-  const [apiloConnecting, setApiloConnecting] = useState(false);
 
   useEffect(() => {
     // Powrót z Allegro po autoryzacji (allegro-callback przekierowuje na /?allegro=connected|error&msg=...).
@@ -112,7 +108,6 @@ export default function SalesOrdersHub({
     }
     if (isAdmin) {
       loadAllegro();
-      loadApilo();
     }
     loadMeta();
     const channel = supabase
@@ -148,39 +143,6 @@ export default function SalesOrdersHub({
     }
   }
 
-  async function loadApilo() {
-    try {
-      const res = await fetch("/api/orders/apilo-connect", { headers: { Authorization: `Bearer ${session.access_token}` } });
-      if (res.ok) setApilo(await res.json());
-    } catch {
-      /* brak połączenia — panel Apilo po prostu się nie pokaże */
-    }
-  }
-
-  // W odróżnieniu od Allegro nie ma tu przekierowania: kod autoryzacyjny generuje się w panelu Apilo
-  // (Administracja / API Apilo) i Admin wkleja go tu ręcznie, jednorazowo — dalej tokeny odświeżają się same.
-  async function connectApilo() {
-    if (!apiloCode.trim()) return setError("Wklej kod autoryzacyjny z panelu Apilo.");
-    setApiloConnecting(true);
-    setError("");
-    try {
-      const res = await fetch("/api/orders/apilo-connect", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ code: apiloCode.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Nie udało się połączyć z Apilo.");
-      setApiloCode("");
-      setNote("Apilo połączone — kliknij Odśwież, żeby pobrać zamówienia.");
-      await loadApilo();
-    } catch (e: any) {
-      setError(e.message || "Nie udało się połączyć z Apilo.");
-    } finally {
-      setApiloConnecting(false);
-    }
-  }
-
   async function loadMeta() {
     // Pokazujemy najświeższą synchronizację spośród wszystkich kanałów.
     const { data } = await supabase.from("sales_orders_sync_meta").select("last_synced_at");
@@ -199,7 +161,6 @@ export default function SalesOrdersHub({
       { label: "Erli", url: "/api/orders/erli-sync" },
       { label: "Allegro", url: "/api/orders/allegro-sync" },
       { label: "Amazon", url: "/api/orders/amazon-sync" },
-      { label: "Apilo (Amazon)", url: "/api/orders/apilo-sync" },
       { label: "Octopia", url: "/api/orders/octopia-sync" },
     ];
     const errors: string[] = [];
@@ -240,15 +201,10 @@ export default function SalesOrdersHub({
         </span>
       </div>
 
-      {isAdmin && allegro && (
+      {/* Gdy Allegro jest połączone, nie pokazujemy nic — komunikat ma sens tylko, gdy trzeba coś zrobić. */}
+      {isAdmin && allegro && (!allegro.configured || !allegro.connected) && (
         <div className="text-xs text-inksoft mb-3 flex flex-wrap items-center gap-x-3 gap-y-1">
           {!allegro.configured && <span>Allegro: brak ALLEGRO_CLIENT_ID / ALLEGRO_CLIENT_SECRET / ALLEGRO_UA w zmiennych środowiskowych.</span>}
-          {allegro.configured && allegro.connected && (
-            <>
-              <span>Allegro: połączone ✓</span>
-              <button onClick={connectAllegro} disabled={connecting} className="text-teal hover:underline disabled:opacity-50">Połącz ponownie</button>
-            </>
-          )}
           {allegro.configured && !allegro.connected && (
             <>
               <button onClick={connectAllegro} disabled={connecting} className="bg-white border border-line px-3 py-1.5 rounded text-xs font-semibold disabled:opacity-50">
@@ -260,28 +216,6 @@ export default function SalesOrdersHub({
         </div>
       )}
 
-      {isAdmin && apilo && (
-        <div className="text-xs text-inksoft mb-3 flex flex-wrap items-center gap-x-3 gap-y-1">
-          {!apilo.configured && <span>Apilo (most do Amazon): brak APILO_CLIENT_ID / APILO_CLIENT_SECRET / APILO_BASE_URL w zmiennych środowiskowych.</span>}
-          {apilo.configured && apilo.connected && (
-            <span>Apilo: połączone ✓ <span className="italic">(tymczasowy most do Amazon)</span></span>
-          )}
-          {apilo.configured && !apilo.connected && (
-            <>
-              <input
-                value={apiloCode}
-                onChange={(e) => setApiloCode(e.target.value)}
-                placeholder="Kod autoryzacyjny z panelu Apilo"
-                className="border border-line bg-white px-2 py-1 rounded text-xs font-mono w-64"
-              />
-              <button onClick={connectApilo} disabled={apiloConnecting} className="bg-white border border-line px-3 py-1.5 rounded text-xs font-semibold disabled:opacity-50">
-                {apiloConnecting ? "Łączenie…" : "Połącz z Apilo"}
-              </button>
-              <span>Kod znajdziesz w panelu Apilo: Administracja → API Apilo, po utworzeniu aplikacji.</span>
-            </>
-          )}
-        </div>
-      )}
 
       {error && <p className="text-rust text-xs mb-3">{error}</p>}
       {note && <p className="text-inksoft text-xs mb-3">{note}</p>}
