@@ -159,8 +159,16 @@ na atrapie `fetch` wg swaggera (gitlab.com/refurbed-community/public-apis).
 **Erli** (`marketplace = 'erli'`, `lib/erli.ts`, `app/api/orders/erli-sync`, surowe dane w `erli_orders`): `POST https://erli.pl/svc/shop-api/orders/_search`,
 `Authorization: Bearer <klucz>`, odpowiedź to zwykła tablica zamówień (bez has_more — koniec listy = strona krótsza niż limit 200).
 **Sortujemy po `updated` rosnąco i idziemy kursorem** (`pagination.after` = pole `cursor` ostatniego zamówienia), a kursor trzymamy w
-`sales_orders_sync_meta.scan_cursor` — jeden mechanizm łapie i nowe zamówienia, i zmiany statusu w starych (bez osobnego "sprawdzania
-otwartych"). Numer zamówienia = `Order.id`, data = `created`, status = `status` (pending/purchased/cancelled/returned, etykiety w
+`sales_orders_sync_meta.scan_cursor` — ten mechanizm łapie nowe zamówienia i większość zmian statusu w starych. **Ale (odkryte
+28.09.2026): pole `updated` NIE zawsze się rusza przy zmianie statusu płatności** — zaobserwowane na żywo: zamówienie oznaczone w
+panelu Erli jako "Opłacone"/"Gotowe do realizacji" (`sellerStatus: readyToProcess`), a `updated` u nas wciąż sprzed tej zmiany, mimo
+że kursor dawno je minął przy kolejnych przebiegach. Dlatego **drugi, niezależny skan** filtruje `POST /orders/_search` po
+`filter: {field: "paymentStatus", operator: "=", value: "completed"}` (osobny parametr `OrderSearch`, dokumentacja Erli) — to inna,
+mniejsza pula zamówień (tylko opłacone), więc mimo tego samego sortowania po `updated` i tak dochodzi do zamówień, których główny
+skan już dawno minął. Własny kursor pod syntetycznym kluczem `erli_paid` w tej samej tabeli `sales_orders_sync_meta` (nie prawdziwy
+marketplace, tylko wewnętrzna księgowość drugiego skanu); dzieli budżet czasu funkcji z głównym skanem (`erliSweep` w `lib/erli.ts`
+przyjmuje teraz opcjonalny `filter`), pojedyncza porażka tego skanu nie psuje głównego wyniku (`paidSweepError` w odpowiedzi). Numer
+zamówienia = `Order.id`, data = `created`, status = `status` (pending/purchased/cancelled/returned, etykiety w
 `ERLI_ORDER_STATES`), SKU = `items[].sku`, a gdy brak — `items[].externalId`; pozycja z ilością > 1 rozbijana na sztuki jak w Back Market.
 Numer przesyłki = `deliveryTracking.trackingNumber` (dla przesyłek Erli uzupełnia go system po wygenerowaniu etykiety), a gdy brak — link.
 **Uwaga: zamówienie za pobraniem (COD) ma w API ten sam status `purchased` co opłacone** — dlatego w `sales_orders` zapisujemy je jako

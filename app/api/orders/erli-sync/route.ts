@@ -1,23 +1,34 @@
 import { NextResponse } from "next/server";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { isAuthorized } from "@/lib/buyback";
-import { erliSweep, type ErliClient } from "@/lib/erli";
+import { erliSweep, type ErliClient, type ErliOrderFilter } from "@/lib/erli";
 import { mapErliItems, mapErliOrder, mapErliToSales, uniqueBy } from "@/lib/salesOrders";
 
 // Synchronizuje zamówienia SPRZEDAŻY z Erli (POST /orders/_search, dokumentacja: https://erli.pl/svc/shop-api/doc/)
 // do erli_orders (surowe dane) i sales_orders + sales_order_items (wspólna lista). Odpowiednik orders/bm-sync.
 //
-// Erli sortuje po dacie aktualizacji i daje kursor (`cursor` ostatniego zamówienia), więc wystarczy jeden mechanizm:
-// zawsze wznawiamy od zapamiętanego kursora (sales_orders_sync_meta.scan_cursor) — to łapie i nowe zamówienia,
-// i zmiany statusu w starych. Pierwszy przebieg startuje od 1 stycznia bieżącego roku i idzie w porcjach (limit czasu
-// funkcji); "ukończone" oznacza, że doszliśmy do końca listy. Bez klucza (ERLI_API_KEY) endpoint nic nie robi
-// i mówi o tym wprost, żeby "Odśwież" działało dalej dla pozostałych kanałów.
-// Wywoływane przez Vercel Cron (vercel.json) i przycisk "Odśwież" w zakładce Zamówienia.
+// Erli sortuje po dacie aktualizacji i daje kursor (`cursor` ostatniego zamówienia), więc GŁÓWNY mechanizm to jeden
+// skan: zawsze wznawiamy od zapamiętanego kursora (sales_orders_sync_meta, wiersz 'erli') — to łapie i nowe
+// zamówienia, i zmiany statusu w starych. Pierwszy przebieg startuje od 1 stycznia bieżącego roku i idzie w
+// porcjach (limit czasu funkcji); "ukończone" oznacza, że doszliśmy do końca listy.
+//
+// DRUGI, niezależny skan (od 28.09.2026) filtruje po `paymentStatus = completed` (OrderFilter, dokumentacja Erli) —
+// osobny kursor pod syntetycznym kluczem 'erli_paid' w tej samej tabeli meta. Powód: pole `updated` na zamówieniu
+// NIE zawsze się rusza przy zmianie statusu płatności (zaobserwowane na żywo: zamówienie oznaczone w panelu Erli
+// jako "Opłacone"/"Gotowe do realizacji", a `updated` u nas wciąż sprzed tej zmiany — sam skan po `updated` by
+// nigdy tego nie złapał, bo kursor już dawno go minął). Ten drugi skan przegląda WYŁĄCZNIE opłacone zamówienia,
+// więc dla zamówienia, które nie ruszyło `updated`, i tak je znajdzie — jest to inna, mniejsza pula sortowana tym
+// samym polem, z własnym, niezależnym kursorem od 1 stycznia. Współdzieli `saveOrders` z głównym skanem.
+// Bez klucza (ERLI_API_KEY) endpoint nic nie robi i mówi o tym wprost, żeby "Odśwież" działało dalej dla
+// pozostałych kanałów. Wywoływane przez Vercel Cron (vercel.json) i przycisk "Odśwież" w zakładce Zamówienia.
 
 export const maxDuration = 300;
 
 const MARKETPLACE = "erli";
-const BUDGET_MS = 200_000;
+const PAID_MARKETPLACE_KEY = "erli_paid"; // syntetyczny klucz w sales_orders_sync_meta — nie prawdziwy marketplace
+const PAID_FILTER: ErliOrderFilter = { field: "paymentStatus", operator: "=", value: "completed" };
+const BUDGET_MS = 150_000;
+const PAID_SWEEP_DEADLINE_MS = 260_000; // łącznie z pierwszym skanem, licząc od startu funkcji (limit 300 s)
 
 // Zapis pobranych zamówień. Upsert pozycji zawiera tylko pola z API, więc numery seryjne i pady wpisane
 // przez zespół zostają nietknięte (patrz bm-sync).
@@ -34,8 +45,24 @@ async function saveOrders(admin: SupabaseClient<any, any, any>, all: any[]) {
   }
 }
 
+async function loadCursor(admin: SupabaseClient<any, any, any>, marketplace: string) {
+  const { data, error } = await admin.from("sales_orders_sync_meta").select("full_scan_done, scan_cursor").eq("marketplace", marketplace).maybeSingle();
+  if (error) throw new Error(`Błąd odczytu z Supabase: ${error.message}`);
+  return { firstRun: !data?.full_scan_done, after: (data?.scan_cursor as string | null) ?? `${new Date().getFullYear()}-01-01T00:00:00.000Z` };
+}
+
+async function writeCursor(admin: SupabaseClient<any, any, any>, marketplace: string, startedAt: string, result: { cursor: string | null; finished: boolean }) {
+  const { error } = await admin.from("sales_orders_sync_meta").upsert({
+    marketplace,
+    scan_cursor: result.cursor,
+    ...(result.finished ? { last_synced_at: startedAt, full_scan_done: true } : {}),
+  });
+  if (error) throw new Error(`Błąd zapisu do Supabase: ${error.message}`);
+}
+
 export async function GET(request: Request) {
   const startedAt = new Date().toISOString();
+  const startedAtMs = Date.now();
   if (!(await isAuthorized(request))) {
     return NextResponse.json({ error: "Brak autoryzacji." }, { status: 401 });
   }
@@ -53,33 +80,41 @@ export async function GET(request: Request) {
     baseUrl: process.env.ERLI_BASE_URL || undefined,
   };
 
-  const { data: meta, error: metaError } = await admin
-    .from("sales_orders_sync_meta")
-    .select("full_scan_done, scan_cursor")
-    .eq("marketplace", MARKETPLACE)
-    .maybeSingle();
-  if (metaError) return NextResponse.json({ error: `Błąd odczytu z Supabase: ${metaError.message}` }, { status: 500 });
-
-  const firstRun = !meta?.full_scan_done;
-  const after = (meta?.scan_cursor as string | null) ?? `${new Date().getFullYear()}-01-01T00:00:00.000Z`;
-
+  let firstRun: boolean;
+  let result: { finished: boolean; processed: number; cursor: string | null };
   try {
-    const result = await erliSweep(client, { after, budgetMs: BUDGET_MS, save: (orders) => saveOrders(admin, orders) });
-    const { error: metaWriteError } = await admin.from("sales_orders_sync_meta").upsert({
-      marketplace: MARKETPLACE,
-      scan_cursor: result.cursor,
-      ...(result.finished ? { last_synced_at: startedAt, full_scan_done: true } : {}),
-    });
-    if (metaWriteError) throw new Error(`Błąd zapisu do Supabase: ${metaWriteError.message}`);
-    return NextResponse.json({
-      ok: true,
-      mode: firstRun ? "full" : "incremental",
-      finished: result.finished,
-      processed: result.processed,
-      nextPage: null,
-      apiCount: null,
-    });
+    const { firstRun: fr, after } = await loadCursor(admin, MARKETPLACE);
+    firstRun = fr;
+    result = await erliSweep(client, { after, budgetMs: BUDGET_MS, save: (orders) => saveOrders(admin, orders) });
+    await writeCursor(admin, MARKETPLACE, startedAt, result);
   } catch (e: any) {
     return NextResponse.json({ error: e.message || "Błąd synchronizacji." }, { status: 502 });
   }
+
+  // Drugi, niezależny skan: tylko zamówienia z opłaconym statusem (patrz komentarz na górze pliku) — pojedyncza
+  // porażka tu NIE psuje wyniku głównego skanu, tylko trafia do paidSweepError, żeby było widać w odpowiedzi.
+  let paidSweep: { finished: boolean; processed: number } | null = null;
+  let paidSweepError: string | null = null;
+  const paidBudget = PAID_SWEEP_DEADLINE_MS - (Date.now() - startedAtMs);
+  if (paidBudget > 5_000) {
+    try {
+      const { after: paidAfter } = await loadCursor(admin, PAID_MARKETPLACE_KEY);
+      const paidResult = await erliSweep(client, { after: paidAfter, filter: PAID_FILTER, budgetMs: paidBudget, save: (orders) => saveOrders(admin, orders) });
+      await writeCursor(admin, PAID_MARKETPLACE_KEY, startedAt, paidResult);
+      paidSweep = { finished: paidResult.finished, processed: paidResult.processed };
+    } catch (e: any) {
+      paidSweepError = e.message || "Błąd drugiego skanu (paymentStatus).";
+    }
+  }
+
+  return NextResponse.json({
+    ok: true,
+    mode: firstRun ? "full" : "incremental",
+    finished: result.finished,
+    processed: result.processed,
+    paidSweep,
+    paidSweepError,
+    nextPage: null,
+    apiCount: null,
+  });
 }

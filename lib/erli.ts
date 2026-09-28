@@ -15,13 +15,20 @@ export type ErliClient = {
   timeoutMs?: number;
 };
 
+export type ErliOrderFilter = { field: string; operator: string; value: unknown };
+
 // POST /orders/_search. Zwraca zwykłą tablicę zamówień (bez has_more) — koniec listy to strona krótsza niż limit.
 // Sortujemy po `updated` rosnąco, a `after` przyjmuje datę albo pole `cursor` ostatniego zamówienia (data + id, więc
 // zamówienia o tej samej dacie nie giną). Dzięki temu ten sam mechanizm łapie i nowe zamówienia, i zmiany w starych.
-export async function erliSearchOrders(c: ErliClient, opts: { after?: string | null }): Promise<any[]> {
+// `filter` (opcjonalny) zawęża wyniki wg swaggera (OrderFilter: pola id/created/updated/paymentStatus/userEmail) —
+// używane osobno do dogonienia zmian statusu płatności (patrz erli-sync/route.ts), bo `updated` na zamówieniu NIE
+// zawsze się rusza przy takiej zmianie (zaobserwowane 28.09.2026: zamówienie oznaczone jako opłacone w panelu Erli,
+// a `updated` u nas wciąż sprzed tej zmiany — zwykły skan po `updated` by tego nigdy nie złapał).
+export async function erliSearchOrders(c: ErliClient, opts: { after?: string | null; filter?: ErliOrderFilter | null }): Promise<any[]> {
   const doFetch = c.fetchImpl ?? fetch;
   const body = {
     pagination: { sortField: "updated", order: "ASC", limit: PAGE_LIMIT, ...(opts.after ? { after: opts.after } : {}) },
+    ...(opts.filter ? { filter: opts.filter } : {}),
   };
 
   for (let attempt = 1; ; attempt++) {
@@ -54,7 +61,7 @@ export async function erliSearchOrders(c: ErliClient, opts: { after?: string | n
 // pobranego zamówienia — od niego trzeba wznowić (zarówno gdy skończył się budżet, jak i przy następnej synchronizacji).
 export async function erliSweep(
   c: ErliClient,
-  opts: { after?: string | null; budgetMs: number; save: (orders: any[]) => Promise<void>; now?: () => number }
+  opts: { after?: string | null; filter?: ErliOrderFilter | null; budgetMs: number; save: (orders: any[]) => Promise<void>; now?: () => number }
 ) {
   let cursor: string | null = opts.after ?? null;
   const result = await scanOrders({
@@ -63,7 +70,7 @@ export async function erliSweep(
     maxPages: 100_000,
     now: opts.now,
     fetchPage: async () => {
-      const orders = await erliSearchOrders(c, { after: cursor });
+      const orders = await erliSearchOrders(c, { after: cursor, filter: opts.filter });
       const last = orders[orders.length - 1];
       const next: string | null = last ? String(last.cursor ?? last.updated ?? "") || null : null;
       // Bez postępu kursora (brak pola albo ta sama wartość) kończymy, zamiast w kółko pobierać tę samą stronę.
