@@ -3,7 +3,7 @@ import { requireRole } from "@/lib/serverAuth";
 import { dhlParcelConfigFromEnv, dhlParcelCreate, dhlParcelIsSandbox, DhlParcelError, PARCEL_PRODUCTS } from "@/lib/dhlParcel";
 import { parseShipmentBody } from "@/lib/shipmentInput";
 import { admin, loadShipper, parcelTrackingUrl } from "@/lib/parcelServer";
-import { notifyMarketplace } from "@/lib/shipmentMarketplaceSync";
+import { notifyMarketplace, markOurStatusShipped } from "@/lib/shipmentMarketplaceSync";
 
 // Nadanie przesyłki DHL Parcel (createShipments + getLabels) — tylko Admin, Manager i Zamówienia.
 // UWAGA: bez środowiska testowego to PRAWDZIWA przesyłka na koncie DHL. Da się ją anulować (route cancel), dopóki nie zamówiono po nią kuriera.
@@ -91,6 +91,7 @@ export async function POST(request: Request) {
   if (insErr || !row) {
     // Zgłaszamy do marketplace'u mimo to (przesyłka jest prawdziwa niezależnie od tego, czy zapis u nas się udał).
     const sync = await notifyMarketplace(db, { marketplace: order?.marketplace ?? null, externalId: order?.externalId ?? null, carrier: "dhl_parcel", trackingNumber: created.shipmentId, trackingUrl });
+    const statusResult = await markOurStatusShipped(db, { marketplace: order?.marketplace ?? null, externalId: order?.externalId ?? null, byEmail });
     return NextResponse.json({
       ok: true,
       saved: false,
@@ -100,13 +101,16 @@ export async function POST(request: Request) {
       labelBase64: created.labelBase64,
       marketplaceSynced: sync.synced,
       marketplaceSyncError: sync.error,
+      ourStatusError: statusResult.error,
     });
   }
 
-  // Zgłoszenie do marketplace'u nigdy nie failuje odpowiedzi — przesyłka jest już nadana i zapisana; błąd zostaje
-  // w kolumnach shipments.marketplace_sync* (UI pokazuje ostrzeżenie z "Zgłoś ponownie" — route sync-marketplace).
+  // Zgłoszenie do marketplace'u i zmiana "Nasz status" nigdy nie failują odpowiedzi — przesyłka jest już nadana
+  // i zapisana; błąd zostaje w kolumnach shipments.marketplace_sync* (UI pokazuje ostrzeżenie z "Zgłoś ponownie" —
+  // route sync-marketplace) albo trzeba poprawić "Nasz status" ręcznie z listy Zamówień.
   const sync = await notifyMarketplace(db, { marketplace: order?.marketplace ?? null, externalId: order?.externalId ?? null, carrier: "dhl_parcel", trackingNumber: created.shipmentId, trackingUrl });
   await db.from("shipments").update({ marketplace_synced_at: sync.synced ? new Date().toISOString() : null, marketplace_sync_error: sync.error }).eq("id", row.id);
+  const statusResult = await markOurStatusShipped(db, { marketplace: order?.marketplace ?? null, externalId: order?.externalId ?? null, byEmail });
 
   return NextResponse.json({
     ok: true,
@@ -118,5 +122,6 @@ export async function POST(request: Request) {
     labelError: created.labelError ?? null, // przesyłka istnieje, ale etykieta nie została pobrana — użyj "Pobierz etykietę ponownie"
     marketplaceSynced: sync.synced,
     marketplaceSyncError: sync.error,
+    ourStatusError: statusResult.error,
   });
 }
