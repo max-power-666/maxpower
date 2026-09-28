@@ -39,15 +39,18 @@ export function buildShipPrefill(marketplace: string, externalId: string, raw: a
   if (marketplace === "backmarket") {
     const a = raw?.shipping_address;
     if (a) {
+      // Pola Back Market API to snake_case (first_name/last_name/postal_code/phone), NIE camelCase — wcześniej
+      // była tu literówka (firstName/lastName/postalCode/phoneNumber), przez którą imię, kod pocztowy i telefon
+      // zawsze wychodziły puste, dla każdego zamówienia Back Market, niezależnie od jego stanu.
       p = {
-        name: [clean(a.firstName), clean(a.lastName)].filter(Boolean).join(" "),
+        name: [clean(a.first_name), clean(a.last_name)].filter(Boolean).join(" "),
         company: clean(a.company),
         ...splitStreet(clean(a.street)),
         apartment: clean(a.street2), // druga linia adresu Back Market (piętro, lokal) trafia do numeru lokalu
-        postalCode: clean(a.postalCode),
+        postalCode: clean(a.postal_code),
         city: clean(a.city),
         countryCode: clean(a.country).toUpperCase(),
-        phone: clean(a.phoneNumber),
+        phone: clean(a.phone),
         email: clean(customerEmail),
       };
     }

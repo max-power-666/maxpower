@@ -64,14 +64,18 @@ export const itemFieldLabel = (field: string, item: Pick<SalesItem, "position" |
 
 type ItemDraft = { serial: string; pads: string; padSerials: string[] };
 
+// Nazwy pól jak w Back Market API (snake_case) — NIE camelCase, mimo że reszta pól w tym pliku jest camelCase.
+// Wcześniej były tu błędnie camelCase (firstName/lastName/postalCode/phoneNumber), więc imię, telefon i kod
+// pocztowy zawsze wychodziły puste, niezależnie od stanu zamówienia — to wyglądało jak "Back Market nie
+// przekazał danych", a to była literówka w nazwach pól po naszej stronie.
 type Address = {
-  firstName?: string;
-  lastName?: string;
+  first_name?: string;
+  last_name?: string;
   company?: string;
-  phoneNumber?: string;
+  phone?: string;
   street?: string;
   street2?: string;
-  postalCode?: string;
+  postal_code?: string;
   city?: string;
   state?: string;
   country?: string;
@@ -282,8 +286,8 @@ function fmtMoney(n: number | string | null | undefined, currency: string | null
   return Number(n).toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " " + (currency || "");
 }
 const formatAddress = (a: Address | null) =>
-  a ? [a.street, a.street2, [a.postalCode, a.city].filter(Boolean).join(" "), a.state, a.country].filter(Boolean).join(", ") : null;
-const fullName = (a: Address | null) => (a ? [a.firstName, a.lastName].filter(Boolean).join(" ") : null);
+  a ? [a.street, a.street2, [a.postal_code, a.city].filter(Boolean).join(" "), a.state, a.country].filter(Boolean).join(", ") : null;
+const fullName = (a: Address | null) => (a ? [a.first_name, a.last_name].filter(Boolean).join(" ") : null);
 
 function Row({ label, value, mono }: { label: string; value: string | null | undefined; mono?: boolean }) {
   return (
@@ -947,7 +951,7 @@ export default function SalesOrderCard({
                 <h3 className="text-xs font-semibold text-inksoft mb-2">KLIENT (ADRES DOSTAWY)</h3>
                 <div className="border border-line bg-white mb-6">
                   <Row label="Imię i nazwisko" value={fullName(bm.shipping_address)} />
-                  <Row label="Telefon" value={bm.shipping_address?.phoneNumber} />
+                  <Row label="Telefon" value={bm.shipping_address?.phone} />
                   <Row label="Adres" value={formatAddress(bm.shipping_address)} />
                 </div>
               </>
