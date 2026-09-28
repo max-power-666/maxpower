@@ -421,7 +421,7 @@ export default function ShippingView({
               <div className="text-sm mb-2">Cena wg cennika: {done.price}</div>
               {done.error && <p className="text-rust text-sm font-semibold mb-2">{done.error}</p>}
               {done.marketplaceSyncError && (
-                <p className="text-rust text-sm font-semibold mb-2">Nie zgłoszono numeru przesyłki do marketplace'u: {done.marketplaceSyncError} (można ponowić niżej, w liście nadanych przesyłek).</p>
+                <p className="text-rust text-sm font-semibold mb-2">Problem ze zgłoszeniem do marketplace'u: {done.marketplaceSyncError} (można ponowić niżej, w liście nadanych przesyłek).</p>
               )}
               <div className="flex gap-2">
                 <button onClick={() => openLabel(done.id, done.labelBase64)} className={btnPrimary}>Otwórz etykietę (PDF)</button>
@@ -611,7 +611,7 @@ export default function ShippingView({
                         {s.order_external_id || "—"}
                         {s.order_external_id && s.marketplace_sync_error && (
                           <div className="mt-1">
-                            <span className="text-rust font-sans font-semibold no-underline" title={s.marketplace_sync_error}>nie zgłoszono do marketplace'u</span>
+                            <span className="text-rust font-sans font-semibold no-underline" title={s.marketplace_sync_error}>problem ze zgłoszeniem do marketplace'u</span>
                             {!s.cancelled_at && (
                               <button onClick={() => retryMarketplaceSync(s)} className="ml-2 text-teal font-sans font-semibold no-underline hover:underline">Ponów</button>
                             )}

@@ -254,7 +254,21 @@ bez SKU w body, więc wszystkie pozycje zamówienia przechodzą naraz — jedna 
 `sales_order_items`, `parcel_tracking_url` jest tam wymagany; nazwa przewoźnika przez `ShippingProfileService/ListAvailableCarriers`
 jest tylko kosmetyczna, brak dopasowania nie blokuje zgłoszenia). Mapa nazw przewoźnika dla Back Market
 (`BM_SHIPPER_BY_CARRIER`) nie ma dokładnego wpisu dla DHL Parcel Polska w ich słowniku `Shipper` — użyte ogólne "DHL".
-To zgłoszenie **nigdy nie failuje samego nadania** (przesyłka w DHL już istnieje i jest płatna): wynik zapisuje się w
+
+**Razem z numerem przesyłki idzie IMEI/numer seryjny pozycji, gdy zespół go wpisał** (`sales_order_items.serial_number`
+— pole nazywa się "Numer seryjny" wszędzie w aplikacji, ale to samo pole niesie IMEI dla produktów, które go mają).
+Obydwa marketplace'y tego wymagają dla kategorii Smartfony (Back Market od 1.01.2022 — kara za brak; refurbed
+podobnie) i **tylko dla pozycji z ilością = 1 w oryginalnym zamówieniu** — to twarde ograniczenie ich API, nie nasze.
+Typ (IMEI vs zwykły numer seryjny) rozpoznajemy automatycznie w `classifyIdentifier` (`lib/shipmentMarketplaceSync.ts`):
+dokładnie 15 cyfr = IMEI (norma GSMA), każda inna wartość = numer seryjny. Back Market: `imei`/`serial_number` na
+`POST /ws/orders/{id}` dla zamówień z JEDNĄ pozycją (bez `sku` trafiłby tam jednoznacznie), a dla kilku pozycji osobne
+`PATCH /ws/orderlines/{orderline_id}` (`bmSetOrderlineIdentifier`) per pozycja — pozycje rozbite z ilości > 1 (klucze
+`"id"`, `"id-2"`...) są pomijane, bo dzielą jedną prawdziwą pozycję u Back Marketu. refurbed: `item_identifiers:
+[{identifier_type: IMEI|SERIAL_NUMBER, value}]` na tym samym `BatchUpdateOrderItemsState` — kwalifikują się wszystkie
+pozycje (refurbed nie rozbija ilości > 1, każda pozycja to zawsze jedna sztuka). Błąd zgłoszenia samego IMEI/numeru
+(np. kategoria niezgodna) **nie cofa już zgłoszonego numeru przesyłki** — `synced` zostaje `true`, a błąd trafia do
+`marketplace_sync_error` z osobnym opisem. To zgłoszenie **nigdy nie failuje samego nadania** (przesyłka w DHL już
+istnieje i jest płatna): wynik zapisuje się w
 `shipments.marketplace_synced_at`/`marketplace_sync_error`, UI pokazuje ostrzeżenie z przyciskiem "Ponów"
 (`POST /api/shipping/sync-marketplace`). Nie testowane na żywym API (brak danych dostępowych w środowisku asystenta;
 Back Market dodatkowo filtruje po IP) — zweryfikowane na atrapie `fetch` wg dokumentacji (api.backmarket.dev,

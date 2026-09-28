@@ -83,19 +83,32 @@ export async function refurbedListCarriers(c: RefurbedClient): Promise<{ name: s
 // OrderItemService/BatchUpdateOrderItemsState — oznacza pozycje zamówienia jako wysłane (max 50 na wywołanie).
 // parcel_tracking_url jest WYMAGANY przez refurbed przy przejściu do stanu SHIPPED (inaczej błąd INVALID_ARGUMENT);
 // carrier+tracking_number to tylko ładniejsze wyświetlenie klientowi, więc jest opcjonalne — brak nie blokuje wysyłki.
-// refurbed nie rozbija pozycji z ilością > 1 na sztuki (mapRefurbedItems), więc item_key = numeryczne id pozycji wprost.
+// imei/serialNumber to wymóg refurbed dla kategorii Smartfony (patrz CLAUDE.md) — item_identifiers, opcjonalne,
+// brak nie blokuje przejścia do SHIPPED. refurbed nie rozbija pozycji z ilością > 1 na sztuki (mapRefurbedItems),
+// więc item.id = numeryczne id pozycji wprost, każda pozycja jest zawsze jedną fizyczną sztuką.
 export async function refurbedMarkItemsShipped(
   c: RefurbedClient,
-  opts: { itemIds: string[]; trackingUrl: string; carrierSlug?: string | null; trackingNumber?: string | null }
+  opts: {
+    items: { id: string; imei?: string | null; serialNumber?: string | null }[];
+    trackingUrl: string;
+    carrierSlug?: string | null;
+    trackingNumber?: string | null;
+  }
 ): Promise<{ ok: boolean; failed: { id: string; message: string }[] }> {
-  if (opts.itemIds.length === 0) return { ok: true, failed: [] };
+  if (opts.items.length === 0) return { ok: true, failed: [] };
   const doFetch = c.fetchImpl ?? fetch;
-  const updates = opts.itemIds.map((id) => ({
-    id: Number(id),
-    state: "SHIPPED",
-    parcel_tracking_url: opts.trackingUrl,
-    ...(opts.carrierSlug ? { parcel_carrier_tracking_number: { carrier: opts.carrierSlug, tracking_number: opts.trackingNumber ?? "" } } : {}),
-  }));
+  const updates = opts.items.map((it) => {
+    const identifiers: { identifier_type: string; value: string }[] = [];
+    if (it.imei) identifiers.push({ identifier_type: "IMEI", value: it.imei });
+    if (it.serialNumber) identifiers.push({ identifier_type: "SERIAL_NUMBER", value: it.serialNumber });
+    return {
+      id: Number(it.id),
+      state: "SHIPPED",
+      parcel_tracking_url: opts.trackingUrl,
+      ...(opts.carrierSlug ? { parcel_carrier_tracking_number: { carrier: opts.carrierSlug, tracking_number: opts.trackingNumber ?? "" } } : {}),
+      ...(identifiers.length > 0 ? { item_identifiers: identifiers } : {}),
+    };
+  });
   const res = await doFetch(`${c.baseUrl ?? REFURBED_BASE_URL}/refb.merchant.v1.OrderItemService/BatchUpdateOrderItemsState`, {
     method: "POST",
     headers: {
@@ -116,7 +129,7 @@ export async function refurbedMarkItemsShipped(
   const results = (data.results || []) as { status?: { code?: number; message?: string } }[];
   const failed: { id: string; message: string }[] = [];
   results.forEach((r, i) => {
-    if (r.status && r.status.code) failed.push({ id: opts.itemIds[i], message: r.status.message || `kod ${r.status.code}` });
+    if (r.status && r.status.code) failed.push({ id: opts.items[i].id, message: r.status.message || `kod ${r.status.code}` });
   });
   return { ok: failed.length === 0, failed };
 }
