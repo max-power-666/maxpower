@@ -7,6 +7,7 @@ import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { BM_ORDERLINE_STATES, MARKETPLACES, OUR_STATUSES, salesStatusLabel } from "@/lib/salesOrders";
 import { MAX_PADS } from "./PadSerialsCell";
 import { buildShipPrefill, type ShipPrefill } from "@/lib/shipping";
+import ErliParcelPanel from "./ErliParcelPanel";
 
 // Karta zamówienia sprzedaży (panel boczny po kliknięciu numeru zamówienia): dane z API marketplace'u,
 // dane wpisane przez pracowników (numer seryjny, pady) i numerowany log zmian — jak karta zamówienia
@@ -181,7 +182,7 @@ type ErliOrder = {
       deliveryAddress?: { firstName?: string; lastName?: string; companyName?: string; street?: string; buildingNumber?: string; flatNumber?: string; zip?: string; city?: string; country?: string; phone?: string };
     };
     items?: { id?: number; name?: string; sku?: string; externalId?: string; ean?: string; quantity?: number; unitPrice?: number }[];
-    delivery?: { name?: string; price?: number; cod?: boolean; pickupPlace?: { name?: string; address?: string; city?: string; zip?: string } };
+    delivery?: { name?: string; price?: number; cod?: boolean; pickupPlace?: { name?: string; address?: string; city?: string; zip?: string; country?: string; provider?: string } };
     deliveryTracking?: { status?: string; trackingUrl?: string; vendor?: string; trackingNumber?: string };
     comment?: string;
   };
@@ -489,6 +490,12 @@ export default function SalesOrderCard({
                 </a>
               )}
             </div>
+
+            {marketplace === "erli" && !!onShip && er?.raw.delivery?.pickupPlace?.provider === "inpost" && (
+              <div className="mb-6 -mt-4">
+                <ErliParcelPanel externalId={externalId} session={session} />
+              </div>
+            )}
 
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-xs font-semibold text-inksoft">DANE WPROWADZONE PRZEZ PRACOWNIKA</h3>

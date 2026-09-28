@@ -14,6 +14,10 @@ import { MARKETPLACES } from "@/lib/salesOrders";
 
 const fmtMoney = (m: DhlMoney | null | undefined) =>
   m ? `${m.price.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${m.currency}` : "—";
+// shipments.charges ma kształt DHL (tablica) tylko dla dhl_express/dhl_parcel — dla erli_paczkomat to co innego
+// (id paczki Erli, potrzebny do anulowania), więc nigdy nie zakładamy tablicy bez sprawdzenia.
+const dhlCharge = (charges: unknown): { currencyType: string; priceCurrency: string; price: number } | null =>
+  Array.isArray(charges) ? charges.find((c: any) => c?.currencyType === "BILLC") ?? charges[0] ?? null : null;
 const inputCls = "w-full border border-line bg-white px-2 py-2 rounded text-sm";
 const btnPrimary = "bg-ink text-paper px-4 py-2 rounded text-sm font-semibold disabled:opacity-50";
 const btnGhost = "bg-white border border-line px-3 py-2 rounded text-sm font-semibold disabled:opacity-50";
@@ -69,7 +73,7 @@ type ShipmentRow = {
   tracking_number: string;
   tracking_url: string | null;
   receiver: { name?: string; company?: string; city?: string; countryCode?: string };
-  charges: { currencyType: string; priceCurrency: string; price: number }[] | null;
+  charges: unknown; // tablica {currencyType,priceCurrency,price} dla DHL; dla Erli inny kształt (id paczki) — patrz dhlCharge()
   marketplace_synced_at: string | null;
   marketplace_sync_error: string | null;
 };
@@ -340,9 +344,11 @@ export default function ShippingView({
 
   // Anulowanie przesyłki DHL Parcel (DHL Express nie udostępnia tego w API).
   async function cancelShipment(s: ShipmentRow) {
-    if (!confirm(`Anulować przesyłkę ${s.tracking_number}?\n\nDHL pozwala na to tylko wtedy, gdy nie zamówiono po nią kuriera.`)) return;
+    const carrierName = s.carrier === "erli_paczkomat" ? "Erli" : "DHL";
+    if (!confirm(`Anulować przesyłkę ${s.tracking_number}?\n\n${carrierName} pozwala na to tylko wtedy, gdy nie zamówiono po nią kuriera / nie trafiła do sieci.`)) return;
     setError("");
-    const res = await fetch("/api/shipping/dhl-parcel/cancel", { method: "POST", headers: auth, body: JSON.stringify({ id: s.id, confirm: true }) });
+    const endpoint = s.carrier === "erli_paczkomat" ? "/api/shipping/erli/cancel" : "/api/shipping/dhl-parcel/cancel";
+    const res = await fetch(endpoint, { method: "POST", headers: auth, body: JSON.stringify({ id: s.id, confirm: true }) });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return setError(data?.error || "Nie udało się anulować przesyłki.");
     await loadShipments();
@@ -370,6 +376,16 @@ export default function ShippingView({
         const res = await fetch("/api/shipping/dhl-parcel/label", { method: "POST", headers: auth, body: JSON.stringify({ id }) });
         const j = await res.json().catch(() => ({}));
         if (!res.ok) return setError(j?.error || "Nie udało się pobrać etykiety.");
+        data = j.labelBase64 ?? null;
+        await loadShipments();
+      }
+      // Erli: etykieta praktycznie nigdy nie jest gotowa od razu przy nadaniu — dopytujemy, a jeśli jeszcze jej
+      // nie ma, mówimy to wprost zamiast ogólnego "brak etykiety".
+      if (!data && row?.carrier === "erli_paczkomat") {
+        const res = await fetch("/api/shipping/erli/label", { method: "POST", headers: auth, body: JSON.stringify({ id }) });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok) return setError(j?.error || "Nie udało się pobrać etykiety.");
+        if (!j.ready) return setError("Erli jeszcze nie przygotowało etykiety — spróbuj ponownie za chwilę.");
         data = j.labelBase64 ?? null;
         await loadShipments();
       }
@@ -617,14 +633,14 @@ export default function ShippingView({
               <tbody>
                 {shipments.length === 0 && <tr><td colSpan={9} className="p-6 text-center text-inksoft text-sm">Brak nadanych przesyłek.</td></tr>}
                 {shipments.map((s) => {
-                  const charge = s.charges?.find((c) => c.currencyType === "BILLC") ?? s.charges?.[0];
+                  const charge = dhlCharge(s.charges);
                   return (
                     <tr key={s.id} className={`border-b border-line last:border-b-0 hover:bg-paper align-top ${s.cancelled_at ? "text-inksoft line-through" : ""}`}>
                       <td className="p-3 text-xs text-inksoft whitespace-nowrap">
                         {fmtDateTime(s.created_at)}
                         {s.environment !== "production" && <div className="text-amber font-semibold">TEST</div>}
                       </td>
-                      <td className="p-3 text-xs whitespace-nowrap">{s.carrier === "dhl_parcel" ? "DHL Parcel" : "DHL Express"}{s.cancelled_at && <div className="text-rust font-semibold no-underline">ANULOWANA</div>}</td>
+                      <td className="p-3 text-xs whitespace-nowrap">{s.carrier === "dhl_parcel" ? "DHL Parcel" : s.carrier === "erli_paczkomat" ? "Erli Paczkomat" : "DHL Express"}{s.cancelled_at && <div className="text-rust font-semibold no-underline">ANULOWANA</div>}</td>
                       <td className="p-3 font-mono whitespace-nowrap">
                         {s.tracking_url ? <a href={s.tracking_url} target="_blank" rel="noreferrer" className="text-teal hover:underline">{s.tracking_number}</a> : s.tracking_number}
                       </td>
@@ -645,7 +661,7 @@ export default function ShippingView({
                       <td className="p-3 text-xs">{s.created_by_email || "—"}</td>
                       <td className="p-3 whitespace-nowrap text-right">
                         {!s.cancelled_at && <button onClick={() => openLabel(s.id)} className="text-xs font-semibold text-teal hover:underline">{s.has_label === false ? "Pobierz etykietę" : "Etykieta"}</button>}
-                        {!s.cancelled_at && s.carrier === "dhl_parcel" && (
+                        {!s.cancelled_at && (s.carrier === "dhl_parcel" || s.carrier === "erli_paczkomat") && (
                           <button onClick={() => cancelShipment(s)} className="ml-3 text-xs font-semibold text-rust hover:underline">Anuluj</button>
                         )}
                       </td>
