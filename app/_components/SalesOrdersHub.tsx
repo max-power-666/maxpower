@@ -21,7 +21,7 @@ const pill = (active: boolean) =>
 // Mniejsza wersja — filtry w pasku ponad listą (np. "Nasz status"), obok "Pokaż"/"strona X z Y", nie sam przełącznik podstron.
 const smallPill = (active: boolean) =>
   `px-2.5 py-1 rounded-full text-xs font-semibold border whitespace-nowrap ${active ? "bg-ink text-paper border-ink" : "bg-white border-line text-inksoft"}`;
-const PAGE_SIZES = [10, 20, 50];
+const PAGE_SIZES = [10, 20, 50, 100, 200];
 
 function fmtDateTime(iso: string | null) {
   if (!iso) return "—";
@@ -402,10 +402,10 @@ function OrdersList({
   const [rows, setRows] = useState<SalesRow[]>([]);
   const [total, setTotal] = useState<number | null>(null);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  const [pageSize, setPageSize] = useState(50);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<OurStatus | "wszystkie">("wszystkie");
+  const [statusFilter, setStatusFilter] = useState<OurStatus | "wszystkie">("nowe");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   // Zapisy idą jeden po drugim na najświeższym wierszu, żeby szybkie skanowanie kilku pól pod rząd
