@@ -51,7 +51,11 @@ export function buildShipPrefill(marketplace: string, externalId: string, raw: a
         city: clean(a.city),
         countryCode: clean(a.country).toUpperCase(),
         phone: clean(a.phone),
-        email: clean(customerEmail),
+        // Back Market nie ma osobnej kolumny z e-mailem klienta (w odróżnieniu od refurbed) — ale shipping_address.email
+        // to działający adres przekaźnikowy Back Marketu (np. shipping_12345_86991986@eu.perso-email.com, nie prawdziwy
+        // e-mail kupującego — dla prywatności), który wystarczy do awizacji przesyłki. customerEmail zawsze przychodzi
+        // tu jako null dla tego kanału (SalesOrderCard.tsx), więc tylko zapasowo, gdyby się to kiedyś zmieniło.
+        email: clean(a.email) || clean(customerEmail),
       };
     }
   } else if (marketplace === "refurbed") {

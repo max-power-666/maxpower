@@ -135,8 +135,10 @@ export default function ShippingView({
     setQuote(null);
     setChosen(null);
     setDone(null);
-    // Marketplace czasem nie ma jeszcze pełnych danych odbiorcy (typowo: zamówienie jeszcze nie zaakceptowane) —
+    // Marketplace czasem naprawdę nie ma jeszcze pełnych danych odbiorcy (np. bardzo świeże zamówienie) —
     // zamiast ciszy przy pustych wymaganych polach, mówimy to wprost zamiast zostawiać zespół w niepewności.
+    // (Wcześniej podejrzewaliśmy, że to typowo kwestia stanu zamówienia w Back Market — to był błędny trop:
+    // prawdziwą przyczyną większości przypadków był bug w nazwach pól, poprawiony 28.09.2026, patrz CLAUDE.md.)
     const missingLabels = [
       !prefill.name.trim() && "imię i nazwisko",
       !prefill.street.trim() && "ulica",
@@ -148,7 +150,7 @@ export default function ShippingView({
     const marketplaceLabel = MARKETPLACES.find((m) => m.key === prefill.marketplace)?.label ?? prefill.marketplace;
     setPrefillNote(
       missingLabels.length > 0
-        ? `${marketplaceLabel} nie przekazał (jeszcze) pełnych danych odbiorcy dla tego zamówienia — brakuje: ${missingLabels.join(", ")}. Uzupełnij ręcznie albo sprawdź zamówienie w ${marketplaceLabel} (często dzieje się tak, zanim zamówienie zostanie zaakceptowane).`
+        ? `${marketplaceLabel} nie przekazał (jeszcze) pełnych danych odbiorcy dla tego zamówienia — brakuje: ${missingLabels.join(", ")}. Uzupełnij ręcznie albo sprawdź zamówienie w ${marketplaceLabel}.`
         : ""
     );
     requestId.current = crypto.randomUUID();
