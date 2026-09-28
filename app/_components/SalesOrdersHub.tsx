@@ -63,13 +63,13 @@ function Pager({
           ))}
         </select>
         <span className="text-xs text-inksoft">{total !== null ? `z ${total} zamówień łącznie` : ""}</span>
+        <div className="flex items-center gap-2 ml-2">
+          <button onClick={() => onPage(page - 1)} disabled={page <= 1} className="bg-white border border-line px-3 py-1.5 rounded text-sm font-semibold disabled:opacity-40">←</button>
+          <span className="text-xs text-inksoft">strona {page} z {pages}</span>
+          <button onClick={() => onPage(page + 1)} disabled={page >= pages} className="bg-white border border-line px-3 py-1.5 rounded text-sm font-semibold disabled:opacity-40">→</button>
+        </div>
       </div>
       {middle}
-      <div className="flex items-center gap-2">
-        <button onClick={() => onPage(page - 1)} disabled={page <= 1} className="bg-white border border-line px-3 py-1.5 rounded text-sm font-semibold disabled:opacity-40">←</button>
-        <span className="text-xs text-inksoft">strona {page} z {pages}</span>
-        <button onClick={() => onPage(page + 1)} disabled={page >= pages} className="bg-white border border-line px-3 py-1.5 rounded text-sm font-semibold disabled:opacity-40">→</button>
-      </div>
     </div>
   );
 }
