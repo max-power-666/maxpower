@@ -108,6 +108,12 @@ export function assertParcelLimits(who: string, a: ParcelAddress) {
       throw new DhlParcelError(`${who}: pole „${FIELD_PL[k]}” ma ${v.length} znaków, a DHL Parcel przyjmuje maksymalnie ${max}${k === "city" ? " — skróć nazwę miejscowości" : ""}.`);
     }
   }
+  // Dokumentacja struktury Address (dhl24.com.pl/pl/webapi2/doc/info/adresowa.html): suma znaków w "houseNumber" i
+  // "apartmentNumber" nie może przekroczyć 15 — osobny limit od 10 znaków każdego pola z osobna sprawdzonego wyżej.
+  const combined = a.houseNumber.length + (a.apartmentNumber?.length ?? 0);
+  if (combined > 15) {
+    throw new DhlParcelError(`${who}: numer domu i numer lokalu razem mają ${combined} znaków, a DHL Parcel przyjmuje maksymalnie 15 — skróć jeden z nich.`);
+  }
 }
 
 const pieceXml = (p: ParcelPackage) =>

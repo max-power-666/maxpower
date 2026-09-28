@@ -306,7 +306,7 @@ nie wykorzystuje jego przewagi nad Connect/International;
 wycena `getPrice` (cena w PLN + dopłata paliwowa; produkt niedostępny na trasie = wiersz "niedostępny: <powód>"), tworzenie `createShipments`, etykieta `getLabels` **BLP = PDF**
 (ZBLP = ZPL dla Zebry, nieużywany), anulowanie `deleteShipments` (**możliwe przez API**, dopóki nie zamówiono kuriera; wiersz w `shipments` dostaje `cancelled_at`). **DHL Parcel nie ma
 środowiska testowego dostępnego dla nas** — każde nadanie jest prawdziwe, więc test = nadaj + od razu anuluj. Adres w DHL24 wymaga ulicy i numeru domu w OSOBNYCH polach oraz limitów:
-miejscowość max **17** znaków, ulica 35, nazwa 60, telefon 20 (za długie = czytelny błąd, nie ucinanie; opis zawartości ucinany do 30). Nadawcę rozdziela `loadShipper`
+miejscowość max **17** znaków (potwierdzone wprost w ich dokumentacji, struktura Address), ulica 35, nazwa 60, telefon 20, **suma numeru domu i numeru lokalu razem max 15 znaków** (osobny limit od 10 znaków każdego pola z osobna) — za długie = czytelny błąd, nie ucinanie; opis zawartości ucinany do 30. Nadawcę rozdziela `loadShipper`
 (`lib/parcelServer.ts`, kod pocztowy bez myślnika). Wspólna serwerowa walidacja formularza: `lib/shipmentInput.ts` (`parseShipmentBody`, numer domu wyciągany z ulicy przez
 `splitStreet`). Numer przesyłki DHL24 (shipmentId) = numer do śledzenia. **Odbiorca prywatny (bez firmy) na etykiecie:**
 `contactPerson` wysyłamy tylko, gdy jest osobna firma (`receiver.company`) — inaczej `name` i `contactPerson` to ta sama
