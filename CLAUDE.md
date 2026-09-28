@@ -246,7 +246,19 @@ przed podwójnym nadaniem tym samym kliknięciem; gdy DHL nada, a zapis w bazie 
 tabela `shipments` bez UPDATE/DELETE (zapis księgowy, tylko serwer). **Na razie tylko kraje UE** (bez odprawy celnej, `isCustomsDeclarable: false`, incoterm DAP); poza UE wymaga danych
 celnych (opis, wartość, kod HS) — do zrobienia. Nadawca (`shipping_settings`, jeden wiersz; Admin zmienia w zakładce) i szablony (`shipping_templates`; dodaje Admin/Manager, usuwa Admin)
 są w bazie. Z karty zamówienia (Back Market, Refurbed, kraj UE) przycisk "Nadaj przesyłkę DHL" wypełnia formularz. Linie adresu DHL to max 3 x 45 znaków (`splitAddressLines` łamie na
-spacjach, za długi adres = czytelny błąd, nie ucinanie). **Ograniczenia DHL Express:** środowisko testowe ma limit 500 wywołań dziennie; API **nie pozwala anulować przesyłki**
+spacjach, za długi adres = czytelny błąd, nie ucinanie). **Po nadaniu numer przesyłki wraca do marketplace'u**
+(`lib/shipmentMarketplaceSync.ts`, wołane z obu route'ów `create`, obojętnie który przewoźnik): dla Back Market
+`POST /ws/orders/{id}` (`lib/backmarket.ts`, `new_state: 9` "wysłane" + `tracking_number`/`tracking_url`/`shipper`;
+bez SKU w body, więc wszystkie pozycje zamówienia przechodzą naraz — jedna przesyłka = całe zamówienie), dla refurbed
+`OrderItemService/BatchUpdateOrderItemsState` (stan `SHIPPED` na każdej pozycji zamówienia — pozycje dochodzą z
+`sales_order_items`, `parcel_tracking_url` jest tam wymagany; nazwa przewoźnika przez `ShippingProfileService/ListAvailableCarriers`
+jest tylko kosmetyczna, brak dopasowania nie blokuje zgłoszenia). Mapa nazw przewoźnika dla Back Market
+(`BM_SHIPPER_BY_CARRIER`) nie ma dokładnego wpisu dla DHL Parcel Polska w ich słowniku `Shipper` — użyte ogólne "DHL".
+To zgłoszenie **nigdy nie failuje samego nadania** (przesyłka w DHL już istnieje i jest płatna): wynik zapisuje się w
+`shipments.marketplace_synced_at`/`marketplace_sync_error`, UI pokazuje ostrzeżenie z przyciskiem "Ponów"
+(`POST /api/shipping/sync-marketplace`). Nie testowane na żywym API (brak danych dostępowych w środowisku asystenta;
+Back Market dodatkowo filtruje po IP) — zweryfikowane na atrapie `fetch` wg dokumentacji (api.backmarket.dev,
+gitlab.com/refurbed-community/public-apis). **Ograniczenia DHL Express:** środowisko testowe ma limit 500 wywołań dziennie; API **nie pozwala anulować przesyłki**
 (tylko w panelu DHL); Economy Select zależy od trasy i umowy; kuriera nie zamawiamy z aplikacji (`pickup.isRequested: false`). Wcześniej rozważane DHL Parcel Polska (DHL24 WebAPI2, SOAP)
 — porzucone (dokumentacja niedostępna, umowa jest na Express). Nie testowane na żywym API do nadawania — zweryfikowane na atrapie `fetch` wg specyfikacji.
 

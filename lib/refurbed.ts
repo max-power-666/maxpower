@@ -55,6 +55,72 @@ export async function refurbedListOrders(
   }
 }
 
+// ShippingProfileService/ListAvailableCarriers — słownik przewoźników (nazwa + slug używany w zgłaszaniu przesyłki).
+// Dokumentacja zaleca cache'ować wynik, żeby nie zużywać limitu zapytań — u nas to i tak jedno wywołanie na
+// nadaną przesyłkę, więc nie cache'ujemy między requestami.
+export async function refurbedListCarriers(c: RefurbedClient): Promise<{ name: string; slug: string }[]> {
+  const doFetch = c.fetchImpl ?? fetch;
+  const res = await doFetch(`${c.baseUrl ?? REFURBED_BASE_URL}/refb.merchant.v1.ShippingProfileService/ListAvailableCarriers`, {
+    method: "POST",
+    headers: {
+      Authorization: `Plain ${c.token.trim().replace(/^Plain\s+/i, "")}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      "User-Agent": c.userAgent,
+    },
+    body: JSON.stringify({}),
+    cache: "no-store",
+    signal: AbortSignal.timeout(c.timeoutMs ?? 15_000),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Refurbed (lista przewoźników) zwrócił błąd (${res.status}): ${text.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  return (data.carriers || []) as { name: string; slug: string }[];
+}
+
+// OrderItemService/BatchUpdateOrderItemsState — oznacza pozycje zamówienia jako wysłane (max 50 na wywołanie).
+// parcel_tracking_url jest WYMAGANY przez refurbed przy przejściu do stanu SHIPPED (inaczej błąd INVALID_ARGUMENT);
+// carrier+tracking_number to tylko ładniejsze wyświetlenie klientowi, więc jest opcjonalne — brak nie blokuje wysyłki.
+// refurbed nie rozbija pozycji z ilością > 1 na sztuki (mapRefurbedItems), więc item_key = numeryczne id pozycji wprost.
+export async function refurbedMarkItemsShipped(
+  c: RefurbedClient,
+  opts: { itemIds: string[]; trackingUrl: string; carrierSlug?: string | null; trackingNumber?: string | null }
+): Promise<{ ok: boolean; failed: { id: string; message: string }[] }> {
+  if (opts.itemIds.length === 0) return { ok: true, failed: [] };
+  const doFetch = c.fetchImpl ?? fetch;
+  const updates = opts.itemIds.map((id) => ({
+    id: Number(id),
+    state: "SHIPPED",
+    parcel_tracking_url: opts.trackingUrl,
+    ...(opts.carrierSlug ? { parcel_carrier_tracking_number: { carrier: opts.carrierSlug, tracking_number: opts.trackingNumber ?? "" } } : {}),
+  }));
+  const res = await doFetch(`${c.baseUrl ?? REFURBED_BASE_URL}/refb.merchant.v1.OrderItemService/BatchUpdateOrderItemsState`, {
+    method: "POST",
+    headers: {
+      Authorization: `Plain ${c.token.trim().replace(/^Plain\s+/i, "")}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      "User-Agent": c.userAgent,
+    },
+    body: JSON.stringify({ updates }),
+    cache: "no-store",
+    signal: AbortSignal.timeout(c.timeoutMs ?? 20_000),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Refurbed (oznaczanie jako wysłane) zwrócił błąd (${res.status}): ${text.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  const results = (data.results || []) as { status?: { code?: number; message?: string } }[];
+  const failed: { id: string; message: string }[] = [];
+  results.forEach((r, i) => {
+    if (r.status && r.status.code) failed.push({ id: opts.itemIds[i], message: r.status.message || `kod ${r.status.code}` });
+  });
+  return { ok: failed.length === 0, failed };
+}
+
 // Przechodzi wszystkie strony dla danego filtra (z budżetem czasu) i przekazuje je do save. Zwraca kursor
 // (id ostatniego pobranego zamówienia), od którego można wznowić, gdy budżet się skończył (finished = false).
 export async function refurbedSweep(

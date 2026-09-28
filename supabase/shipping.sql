@@ -67,9 +67,13 @@ create table if not exists shipments (
   charges jsonb,                                      -- opłaty zwrócone przez DHL (shipmentCharges)
   label_format text,                                  -- pdf
   label_data text,                                    -- etykieta w base64 (pobierana osobno, nie na liście)
-  cancelled_at timestamptz                            -- anulowano przez API (tylko DHL Parcel); wiersz zostaje jako zapis księgowy
+  cancelled_at timestamptz,                           -- anulowano przez API (tylko DHL Parcel); wiersz zostaje jako zapis księgowy
+  marketplace_synced_at timestamptz,                  -- kiedy numer przesyłki zgłoszono z powrotem do marketplace'u (null = nie dotyczy albo jeszcze się nie udało)
+  marketplace_sync_error text                         -- ostatni błąd zgłoszenia (null = zgłoszono albo nie dotyczy); UI pokazuje ostrzeżenie i "Zgłoś ponownie"
 );
 alter table shipments add column if not exists cancelled_at timestamptz;
+alter table shipments add column if not exists marketplace_synced_at timestamptz;
+alter table shipments add column if not exists marketplace_sync_error text;
 create index if not exists shipments_created_idx on shipments (created_at desc);
 create index if not exists shipments_order_idx on shipments (marketplace, order_external_id);
 

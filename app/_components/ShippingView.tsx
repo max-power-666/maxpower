@@ -69,6 +69,8 @@ type ShipmentRow = {
   tracking_url: string | null;
   receiver: { name?: string; company?: string; city?: string; countryCode?: string };
   charges: { currencyType: string; priceCurrency: string; price: number }[] | null;
+  marketplace_synced_at: string | null;
+  marketplace_sync_error: string | null;
 };
 
 const EMPTY_FORM = { name: "", company: "", street: "", houseNumber: "", apartment: "", postalCode: "", city: "", countryCode: "DE", phone: "", email: "", template: "", weight: "", length: "", width: "", height: "", description: "", reference: "" };
@@ -101,7 +103,7 @@ export default function ShippingView({
   const [chosen, setChosen] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const [done, setDone] = useState<{ trackingNumber: string; trackingUrl: string | null; price: string; env: string; saved: boolean; labelBase64?: string | null; id?: number; error?: string; carrier: Carrier } | null>(null);
+  const [done, setDone] = useState<{ trackingNumber: string; trackingUrl: string | null; price: string; env: string; saved: boolean; labelBase64?: string | null; id?: number; error?: string; carrier: Carrier; marketplaceSyncError?: string | null } | null>(null);
   const requestId = useRef<string>(crypto.randomUUID());
 
   useEffect(() => {
@@ -143,7 +145,7 @@ export default function ShippingView({
   async function loadShipments() {
     const { data, error: err } = await supabase
       .from("shipments")
-      .select("id, created_at, carrier, cancelled_at, label_format, created_by_email, environment, marketplace, order_external_id, product_code, product_name, tracking_number, tracking_url, receiver, charges")
+      .select("id, created_at, carrier, cancelled_at, label_format, created_by_email, environment, marketplace, order_external_id, product_code, product_name, tracking_number, tracking_url, receiver, charges, marketplace_synced_at, marketplace_sync_error")
       .order("created_at", { ascending: false })
       .limit(50);
     if (err) setError(`Nie udało się wczytać przesyłek: ${err.message}`);
@@ -304,6 +306,7 @@ export default function ShippingView({
         id: data.id,
         error: data.saved === false ? data.error : data.labelError ? `Przesyłka nadana, ale nie udało się pobrać etykiety: ${data.labelError}. Kliknij „Otwórz etykietę”, aby spróbować ponownie.` : undefined,
         carrier: quote.carrier,
+        marketplaceSyncError: data.marketplaceSyncError ?? null,
       });
       requestId.current = crypto.randomUUID(); // kolejna przesyłka = nowy klucz
       setQuote(null);
@@ -324,6 +327,16 @@ export default function ShippingView({
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return setError(data?.error || "Nie udało się anulować przesyłki.");
     await loadShipments();
+  }
+
+  // Ponawia zgłoszenie numeru przesyłki do marketplace'u (Back Market / refurbed), gdy pierwsza próba przy nadaniu się nie udała.
+  async function retryMarketplaceSync(s: ShipmentRow) {
+    setError("");
+    const res = await fetch("/api/shipping/sync-marketplace", { method: "POST", headers: auth, body: JSON.stringify({ id: s.id }) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok && !data?.error) return setError("Nie udało się zgłosić numeru przesyłki do marketplace'u.");
+    await loadShipments();
+    if (!data?.synced) setError(data?.error || "Nie udało się zgłosić numeru przesyłki do marketplace'u.");
   }
 
   async function openLabel(id: number | undefined, base64?: string | null) {
@@ -407,6 +420,9 @@ export default function ShippingView({
               </div>
               <div className="text-sm mb-2">Cena wg cennika: {done.price}</div>
               {done.error && <p className="text-rust text-sm font-semibold mb-2">{done.error}</p>}
+              {done.marketplaceSyncError && (
+                <p className="text-rust text-sm font-semibold mb-2">Nie zgłoszono numeru przesyłki do marketplace'u: {done.marketplaceSyncError} (można ponowić niżej, w liście nadanych przesyłek).</p>
+              )}
               <div className="flex gap-2">
                 <button onClick={() => openLabel(done.id, done.labelBase64)} className={btnPrimary}>Otwórz etykietę (PDF)</button>
                 <button onClick={reset} className={btnGhost}>Nowa przesyłka</button>
@@ -591,7 +607,17 @@ export default function ShippingView({
                       <td className="p-3 text-xs">{s.receiver?.name}<div className="text-inksoft">{s.receiver?.city}, {s.receiver?.countryCode}</div></td>
                       <td className="p-3 text-xs whitespace-nowrap">{s.product_name || s.product_code}</td>
                       <td className="p-3 text-right font-mono text-xs whitespace-nowrap">{charge ? fmtMoney({ price: charge.price, currency: charge.priceCurrency }) : "—"}</td>
-                      <td className="p-3 text-xs font-mono">{s.order_external_id || "—"}</td>
+                      <td className="p-3 text-xs font-mono">
+                        {s.order_external_id || "—"}
+                        {s.order_external_id && s.marketplace_sync_error && (
+                          <div className="mt-1">
+                            <span className="text-rust font-sans font-semibold no-underline" title={s.marketplace_sync_error}>nie zgłoszono do marketplace'u</span>
+                            {!s.cancelled_at && (
+                              <button onClick={() => retryMarketplaceSync(s)} className="ml-2 text-teal font-sans font-semibold no-underline hover:underline">Ponów</button>
+                            )}
+                          </div>
+                        )}
+                      </td>
                       <td className="p-3 text-xs">{s.created_by_email || "—"}</td>
                       <td className="p-3 whitespace-nowrap text-right">
                         {!s.cancelled_at && <button onClick={() => openLabel(s.id)} className="text-xs font-semibold text-teal hover:underline">{s.has_label === false ? "Pobierz etykietę" : "Etykieta"}</button>}

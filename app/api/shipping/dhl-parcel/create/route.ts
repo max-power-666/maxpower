@@ -3,6 +3,7 @@ import { requireRole } from "@/lib/serverAuth";
 import { dhlParcelConfigFromEnv, dhlParcelCreate, dhlParcelIsSandbox, DhlParcelError } from "@/lib/dhlParcel";
 import { parseShipmentBody } from "@/lib/shipmentInput";
 import { admin, loadShipper, parcelTrackingUrl } from "@/lib/parcelServer";
+import { notifyMarketplace } from "@/lib/shipmentMarketplaceSync";
 
 // Nadanie przesyłki DHL Parcel (createShipments + getLabels) — tylko Admin i Manager.
 // UWAGA: bez środowiska testowego to PRAWDZIWA przesyłka na koncie DHL. Da się ją anulować (route cancel), dopóki nie zamówiono po nią kuriera.
@@ -86,6 +87,8 @@ export async function POST(request: Request) {
     .single();
 
   if (insErr || !row) {
+    // Zgłaszamy do marketplace'u mimo to (przesyłka jest prawdziwa niezależnie od tego, czy zapis u nas się udał).
+    const sync = await notifyMarketplace(db, { marketplace: order?.marketplace ?? null, externalId: order?.externalId ?? null, carrier: "dhl_parcel", trackingNumber: created.shipmentId, trackingUrl });
     return NextResponse.json({
       ok: true,
       saved: false,
@@ -93,8 +96,16 @@ export async function POST(request: Request) {
       trackingNumber: created.shipmentId,
       trackingUrl,
       labelBase64: created.labelBase64,
+      marketplaceSynced: sync.synced,
+      marketplaceSyncError: sync.error,
     });
   }
+
+  // Zgłoszenie do marketplace'u nigdy nie failuje odpowiedzi — przesyłka jest już nadana i zapisana; błąd zostaje
+  // w kolumnach shipments.marketplace_sync* (UI pokazuje ostrzeżenie z "Zgłoś ponownie" — route sync-marketplace).
+  const sync = await notifyMarketplace(db, { marketplace: order?.marketplace ?? null, externalId: order?.externalId ?? null, carrier: "dhl_parcel", trackingNumber: created.shipmentId, trackingUrl });
+  await db.from("shipments").update({ marketplace_synced_at: sync.synced ? new Date().toISOString() : null, marketplace_sync_error: sync.error }).eq("id", row.id);
+
   return NextResponse.json({
     ok: true,
     saved: true,
@@ -103,5 +114,7 @@ export async function POST(request: Request) {
     trackingNumber: created.shipmentId,
     trackingUrl,
     labelError: created.labelError ?? null, // przesyłka istnieje, ale etykieta nie została pobrana — użyj "Pobierz etykietę ponownie"
+    marketplaceSynced: sync.synced,
+    marketplaceSyncError: sync.error,
   });
 }
