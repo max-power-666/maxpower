@@ -285,7 +285,14 @@ produkcji). **Ograniczenia DHL Express:** środowisko testowe ma limit 500 wywo�
 
 **DHL Parcel** (`lib/dhlParcel.ts`, DHL24 WebAPI2, **SOAP**, WSDL `https://dhl24.com.pl/webapi2?wsdl`, endpoint `https://dhl24.com.pl/webapi2/provider/service.html?ws=1`): koperta
 document/literal składana ręcznie (`el()` — UWAGA: zagnieżdżone elementy podawać jako tablicę, tekst jest escapowany), odpowiedź czytana `fast-xml-parser`. Logowanie: `authData` (klucz
-użytkownika = "klucz APIv2" + hasło) w każdej metodzie oprócz `getVersion`; płatnik po numerze SAP (BANK_TRANSFER, SHIPPER). Produkty międzynarodowe **EK (Connect)** i **PI (International)**;
+użytkownika = "klucz APIv2" + hasło) w każdej metodzie oprócz `getVersion`; płatnik po numerze SAP (BANK_TRANSFER, SHIPPER). Produkty międzynarodowe: **EK (Connect)**, **PI (International)** i **CP (Connect Plus)**
+— lista `PARCEL_PRODUCTS` w `lib/dhlParcel.ts`, wspólna dla wyceny (`check/route.ts`) i nadania (`create/route.ts`), żeby
+nie powtórzyć błędu sprzed wprowadzenia Connect Plus (produkt istniał w API DHL24 od dawna, ale nie było go w żadnej
+z tych list osobno trzymanych w obu route'ach, więc nie dało się go wybrać). Kody wg dokumentacji DHL24 (struktura
+`ServiceDefinition`, pole `product`; jest tam też `CM` — Connect Plus Pallet, niezaimplementowane — osobna usługa na
+paletach). Connect Plus w DHL24 obsługuje przesyłki wieloelementowe (do 15 sztuk), ale nasza integracja zawsze
+wysyła jedną paczkę — to i tak działa (przesyłka jednoelementowa jest prawidłowym przypadkiem tego produktu), tylko
+nie wykorzystuje jego przewagi nad Connect/International;
 wycena `getPrice` (cena w PLN + dopłata paliwowa; produkt niedostępny na trasie = wiersz "niedostępny: <powód>"), tworzenie `createShipments`, etykieta `getLabels` **BLP = PDF**
 (ZBLP = ZPL dla Zebry, nieużywany), anulowanie `deleteShipments` (**możliwe przez API**, dopóki nie zamówiono kuriera; wiersz w `shipments` dostaje `cancelled_at`). **DHL Parcel nie ma
 środowiska testowego dostępnego dla nas** — każde nadanie jest prawdziwe, więc test = nadaj + od razu anuluj. Adres w DHL24 wymaga ulicy i numeru domu w OSOBNYCH polach oraz limitów:

@@ -1,13 +1,26 @@
 // Klient DHL Parcel (DHL24 WebAPI2, SOAP) — https://dhl24.com.pl/webapi2/doc/index.html, definicja WSDL: https://dhl24.com.pl/webapi2?wsdl.
-// Przesyłki międzynarodowe: produkty EK (Connect) i PI (International). Autoryzacja: struktura authData (klucz użytkownika + hasło)
-// w KAŻDEJ metodzie oprócz getVersion, płatnik po numerze klienta SAP (7 cyfr). W odróżnieniu od DHL Express przesyłkę można ANULOWAĆ
-// przez API (deleteShipments), dopóki nie zamówiono po nią kuriera, a etykietę pobrać jako PDF (BLP) albo ZPL dla Zebry (ZBLP).
-// Koperta SOAP jest składana ręcznie (document/literal), a odpowiedź czytana parserem XML — bez ciężkiej biblioteki SOAP.
+// Przesyłki międzynarodowe: produkty EK (Connect), PI (International) i CP (Connect Plus — patrz PARCEL_PRODUCTS niżej).
+// Autoryzacja: struktura authData (klucz użytkownika + hasło) w KAŻDEJ metodzie oprócz getVersion, płatnik po numerze
+// klienta SAP (7 cyfr). W odróżnieniu od DHL Express przesyłkę można ANULOWAĆ przez API (deleteShipments), dopóki nie
+// zamówiono po nią kuriera, a etykietę pobrać jako PDF (BLP) albo ZPL dla Zebry (ZBLP). Koperta SOAP jest składana
+// ręcznie (document/literal), a odpowiedź czytana parserem XML — bez ciężkiej biblioteki SOAP.
 
 import { XMLParser } from "fast-xml-parser";
 
 export const DHL_PARCEL_NS = "https://dhl24.com.pl/webapi2/provider/service.html?ws=1";
 export const DHL_PARCEL_BASE_URL = "https://dhl24.com.pl/webapi2";
+
+// Produkty międzynarodowe, jedna lista dla wyceny (check/route.ts) i nadania (create/route.ts) — inaczej łatwo o
+// rozjazd, jak wcześniej (Connect Plus istniał w API, ale nie było go w żadnej z tych list, więc nie dało się go
+// wybrać). Kody wg dokumentacji DHL24 (struktura ServiceDefinition, pole "product"). Connect Plus obsługuje w
+// DHL24 wiele elementów w jednej przesyłce (do 15) — nasza integracja wysyła zawsze jedną paczkę, co dla Connect
+// Plus działa (przesyłka jednoelementowa), ale nie wykorzystuje tej przewagi produktu.
+export const PARCEL_PRODUCTS = [
+  { code: "EK", name: "DHL Connect" },
+  { code: "PI", name: "DHL International" },
+  { code: "CP", name: "DHL Connect Plus" },
+] as const;
+export type ParcelProductCode = (typeof PARCEL_PRODUCTS)[number]["code"];
 
 export type DhlParcelConfig = { username: string; password: string; sap: string; baseUrl?: string; fetchImpl?: typeof fetch };
 

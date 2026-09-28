@@ -1,19 +1,15 @@
 import { NextResponse } from "next/server";
 import { requireRole } from "@/lib/serverAuth";
-import { dhlParcelConfigFromEnv, dhlParcelIsSandbox, dhlParcelPrice, dhlParcelVersion } from "@/lib/dhlParcel";
+import { dhlParcelConfigFromEnv, dhlParcelIsSandbox, dhlParcelPrice, dhlParcelVersion, PARCEL_PRODUCTS } from "@/lib/dhlParcel";
 import { parseShipmentBody } from "@/lib/shipmentInput";
 import { admin, loadShipper } from "@/lib/parcelServer";
 
 // DHL Parcel (DHL24 WebAPI2) — konfiguracja i WYCENA. Tylko Admin, Manager i Zamówienia.
 //  GET  -> { configured, sandbox, version }: czy są dane dostępowe i czy usługa DHL odpowiada (getVersion nie wymaga logowania).
-//  POST -> wycena (getPrice) produktów międzynarodowych EK (Connect) i PI (International) dla wpisanej trasy i paczki.
+//  POST -> wycena (getPrice) produktów międzynarodowych z PARCEL_PRODUCTS (lib/dhlParcel.ts) dla wpisanej trasy i paczki.
 // Wycena niczego nie tworzy i nic nie kosztuje. Hasło i numer SAP zostają na serwerze.
 
 const ROLES = ["Admin", "Manager", "Zamówienia"];
-const PRODUCTS = [
-  { code: "EK", name: "DHL Connect" },
-  { code: "PI", name: "DHL International" },
-];
 
 export async function GET(request: Request) {
   const db = admin();
@@ -43,7 +39,7 @@ export async function POST(request: Request) {
 
   const { receiver, pack } = parsed.value;
   const quotes = await Promise.all(
-    PRODUCTS.map((p) =>
+    PARCEL_PRODUCTS.map((p) =>
       dhlParcelPrice(cfg, {
         product: p.code,
         shipper,

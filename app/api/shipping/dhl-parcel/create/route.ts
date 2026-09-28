@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireRole } from "@/lib/serverAuth";
-import { dhlParcelConfigFromEnv, dhlParcelCreate, dhlParcelIsSandbox, DhlParcelError } from "@/lib/dhlParcel";
+import { dhlParcelConfigFromEnv, dhlParcelCreate, dhlParcelIsSandbox, DhlParcelError, PARCEL_PRODUCTS } from "@/lib/dhlParcel";
 import { parseShipmentBody } from "@/lib/shipmentInput";
 import { admin, loadShipper, parcelTrackingUrl } from "@/lib/parcelServer";
 import { notifyMarketplace } from "@/lib/shipmentMarketplaceSync";
@@ -24,8 +24,9 @@ export async function POST(request: Request) {
   const parsed = parseShipmentBody(b);
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
   const { receiver, pack, plannedDate, reference, order, requestId } = parsed.value;
-  const product = b?.productCode === "EK" || b?.productCode === "PI" ? (b.productCode as string) : null;
-  if (!product) return NextResponse.json({ error: "Wybierz produkt: EK (Connect) albo PI (International)." }, { status: 400 });
+  const productDef = PARCEL_PRODUCTS.find((p) => p.code === b?.productCode);
+  const product = productDef?.code ?? null;
+  if (!product) return NextResponse.json({ error: `Wybierz produkt: ${PARCEL_PRODUCTS.map((p) => `${p.code} (${p.name})`).join(", ")}.` }, { status: 400 });
 
   const { data: existing } = await db.from("shipments").select("id, tracking_number, tracking_url").eq("client_request_id", requestId).maybeSingle();
   if (existing) return NextResponse.json({ ok: true, saved: true, duplicate: true, id: existing.id, trackingNumber: existing.tracking_number, trackingUrl: existing.tracking_url });
@@ -74,7 +75,7 @@ export async function POST(request: Request) {
       marketplace: order?.marketplace ?? null,
       order_external_id: order?.externalId ?? null,
       product_code: product,
-      product_name: product === "EK" ? "DHL Connect" : "DHL International",
+      product_name: productDef!.name,
       tracking_number: created.shipmentId,
       tracking_url: trackingUrl,
       planned_shipping_date: plannedDate,
