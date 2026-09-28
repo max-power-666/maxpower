@@ -226,7 +226,21 @@ export default function Home() {
   }, [role]);
 
   async function loadRole() {
-    const { data, error } = await supabase.from("members").select("role").eq("user_id", session!.user.id).maybeSingle();
+    const attempt = () => supabase.from("members").select("role").eq("user_id", session!.user.id).maybeSingle();
+    let { data, error } = await attempt();
+    if (error && /jwt/i.test(error.message)) {
+      // Token dostępu wygasł — typowo karta była długo w tle (uśpiony komputer, zminimalizowane okno) i
+      // supabase-js nie zdążył go odświeżyć proaktywnie, zanim to zapytanie poleciało. Wymuszamy odświeżenie
+      // i próbujemy raz jeszcze, zanim pokażemy błąd — samo powtórzenie tego samego zapytania (przycisk
+      // "Spróbuj ponownie") niczego by nie naprawiło, bo używałoby tego samego, już nieważnego tokenu.
+      const { error: refreshErr } = await supabase.auth.refreshSession();
+      if (refreshErr) {
+        // Sesja naprawdę wygasła (refresh token też) — nie da się jej odzyskać, trzeba zalogować się ponownie.
+        await supabase.auth.signOut();
+        return;
+      }
+      ({ data, error } = await attempt());
+    }
     if (error) {
       // Błąd odczytu (sieć, sesja) to nie to samo co brak roli — zostawiamy dotychczasowy stan.
       console.error("loadRole:", error.message);
