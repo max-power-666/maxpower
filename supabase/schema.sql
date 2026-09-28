@@ -153,3 +153,10 @@ create policy "authenticated read fakturownia_stock_cache" on fakturownia_stock_
 drop policy if exists "authenticated read fakturownia_sync_meta" on fakturownia_sync_meta;
 create policy "authenticated read fakturownia_sync_meta" on fakturownia_sync_meta
   for select using (auth.role() = 'authenticated');
+
+-- Realtime dla members: gdy Admin nada lub zmieni rolę, aplikacja tej osoby odświeża ją od razu
+-- (bez tego widziała ekran "brak roli" aż do przeładowania strony) i lista w Zespole aktualizuje się na żywo.
+do $$
+begin
+  begin alter publication supabase_realtime add table members; exception when duplicate_object then null; end;
+end $$;

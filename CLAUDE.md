@@ -43,6 +43,8 @@ numerach seryjnych, wielokanałowa synchronizacja stanów, naprawy, auto-wycena)
 Role: **Admin, Manager, Magazyn, Zamówienia, Serwis, Testy, Bidder**. Rolę nadaje Admin w zakładce Zespół (tam też
 imię i nazwisko — `members.name`). Nowa osoba po pierwszym logowaniu dostaje pusty wiersz
 w `members` i ekran "poproś administratora o rolę" (`NoRoleScreen`); sama roli nie wybiera.
+Rola odświeża się sama po nadaniu/zmianie przez Admina (realtime na `members` — wymaga bloku publikacji z `schema.sql`;
+do tego odczyt przy powrocie do karty i co 15 s na ekranie "brak roli"). Błąd odczytu roli to NIE brak roli — pokazujemy "Spróbuj ponownie".
 Przegląd jest wspólną stroną startową. Mapa dostępu: `ROLE_ACCESS` w `app/page.tsx`.
 Manager widzi wszystkie zakładki (Zespół tylko do odczytu), ale niczego nie usuwa i nie zmienia ról ani imion (to tylko Admin, także w bazie).
 Rola jest zwykłym tekstem w `members.role` — dodanie roli nie wymaga SQL.

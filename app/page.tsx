@@ -128,7 +128,7 @@ function LoginScreen() {
 /* ---------------- brak przypisanej roli ---------------- */
 
 // Rolę nadaje administrator z zakładki Zespół — nowy użytkownik nie wybiera jej sam.
-function NoRoleScreen({ email }: { email: string }) {
+function NoRoleScreen({ email, onRetry }: { email: string; onRetry: () => void }) {
   return (
     <div className="min-h-screen flex items-center justify-center bg-paper px-4">
       <div className="max-w-sm w-full text-center">
@@ -136,6 +136,10 @@ function NoRoleScreen({ email }: { email: string }) {
         <p className="text-inksoft text-sm">
           Twoje konto (<b>{email}</b>) nie ma jeszcze przypisanej roli. Poproś administratora, żeby nadał Ci ją w zakładce Zespół.
         </p>
+        <p className="text-inksoft text-xs mt-3">Gdy rola zostanie nadana, ta strona odświeży się sama.</p>
+        <button onClick={onRetry} className="mt-3 text-sm font-semibold text-teal hover:underline">
+          Sprawdź ponownie
+        </button>
       </div>
     </div>
   );
@@ -146,6 +150,7 @@ function NoRoleScreen({ email }: { email: string }) {
 export default function Home() {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   const [role, setRole] = useState<string | undefined>(undefined);
+  const [roleError, setRoleError] = useState("");
   const [units, setUnits] = useState<Unit[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [view, setView] = useState<ViewKey>("overview");
@@ -181,7 +186,12 @@ export default function Home() {
     const channel = supabase
       .channel("units-changes")
       .on("postgres_changes", { event: "*", schema: "public", table: "units" }, () => loadUnits())
-      .on("postgres_changes", { event: "*", schema: "public", table: "members" }, () => loadMembers())
+      // Zmiana w members odświeża też własną rolę — inaczej osoba, której Admin właśnie nadał
+      // lub zmienił rolę, widzi starą (np. ekran "brak roli") aż do przeładowania strony.
+      .on("postgres_changes", { event: "*", schema: "public", table: "members" }, () => {
+        loadMembers();
+        loadRole();
+      })
       .on("postgres_changes", { event: "*", schema: "public", table: "fakturownia_stock_cache" }, () => loadFakturowniaSummaryFromDb())
       .on("postgres_changes", { event: "*", schema: "public", table: "fakturownia_sync_meta" }, () => loadFakturowniaSummaryFromDb())
       .subscribe();
@@ -190,6 +200,22 @@ export default function Home() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
+
+  // Rola odświeża się też przy powrocie do karty, a na ekranie "brak roli" co 15 s — działa nawet
+  // bez realtime na members (np. przed uruchomieniem migracji w schema.sql).
+  useEffect(() => {
+    if (!session) return;
+    const onVisible = () => {
+      if (document.visibilityState === "visible") loadRole();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    const timer = role === "" ? setInterval(loadRole, 15000) : undefined;
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      if (timer) clearInterval(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, role]);
 
   // jeśli rola nie ma już dostępu do aktualnie otwartej zakładki (np. zmieniła się rola), wróć do Przeglądu
   useEffect(() => {
@@ -200,7 +226,14 @@ export default function Home() {
   }, [role]);
 
   async function loadRole() {
-    const { data } = await supabase.from("members").select("role").eq("user_id", session!.user.id).maybeSingle();
+    const { data, error } = await supabase.from("members").select("role").eq("user_id", session!.user.id).maybeSingle();
+    if (error) {
+      // Błąd odczytu (sieć, sesja) to nie to samo co brak roli — zostawiamy dotychczasowy stan.
+      console.error("loadRole:", error.message);
+      setRoleError(error.message);
+      return;
+    }
+    setRoleError("");
     if (data) {
       setRole(data.role ?? "");
     } else {
@@ -308,8 +341,20 @@ export default function Home() {
 
   if (session === undefined) return <div className="min-h-screen flex items-center justify-center text-inksoft text-sm">Ładowanie…</div>;
   if (!session) return <LoginScreen />;
-  if (role === undefined) return <div className="min-h-screen flex items-center justify-center text-inksoft text-sm">Ładowanie…</div>;
-  if (role === "") return <NoRoleScreen email={session.user.email ?? ""} />;
+  if (role === undefined)
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-3 text-inksoft text-sm">
+        {roleError ? (
+          <>
+            <span>Nie udało się wczytać Twojej roli ({roleError}).</span>
+            <button onClick={() => loadRole()} className="font-semibold text-teal hover:underline">Spróbuj ponownie</button>
+          </>
+        ) : (
+          "Ładowanie…"
+        )}
+      </div>
+    );
+  if (role === "") return <NoRoleScreen email={session.user.email ?? ""} onRetry={() => loadRole()} />;
 
   return (
     <div className="min-h-screen flex">
