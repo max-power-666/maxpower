@@ -5,7 +5,7 @@ import { parseShipmentBody } from "@/lib/shipmentInput";
 import { admin, loadShipper, parcelTrackingUrl } from "@/lib/parcelServer";
 import { notifyMarketplace } from "@/lib/shipmentMarketplaceSync";
 
-// Nadanie przesyłki DHL Parcel (createShipments + getLabels) — tylko Admin i Manager.
+// Nadanie przesyłki DHL Parcel (createShipments + getLabels) — tylko Admin, Manager i Zamówienia.
 // UWAGA: bez środowiska testowego to PRAWDZIWA przesyłka na koncie DHL. Da się ją anulować (route cancel), dopóki nie zamówiono po nią kuriera.
 // Zabezpieczenia jak przy Expressie: jawne `confirm: true`, klucz `clientRequestId` przeciw podwójnemu nadaniu, etykieta nigdy nie ginie
 // (gdy zapis w bazie się nie uda albo pobranie etykiety zawiedzie, odpowiedź mówi to wprost i zawiera numer). Na razie tylko kraje UE.
@@ -14,7 +14,7 @@ export const maxDuration = 60;
 
 export async function POST(request: Request) {
   const db = admin();
-  const uid = await requireRole(request, db, ["Admin", "Manager"]);
+  const uid = await requireRole(request, db, ["Admin", "Manager", "Zamówienia"]);
   if (!uid) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
   const cfg = dhlParcelConfigFromEnv();
   if (!cfg) return NextResponse.json({ error: "Brak konfiguracji DHL Parcel (zmienne środowiskowe)." }, { status: 400 });

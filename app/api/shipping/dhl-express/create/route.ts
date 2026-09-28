@@ -6,7 +6,7 @@ import { parseShipmentBody } from "@/lib/shipmentInput";
 import { parcelTrackingUrl } from "@/lib/parcelServer";
 import { notifyMarketplace } from "@/lib/shipmentMarketplaceSync";
 
-// Nadanie przesyłki DHL Express (POST /shipments) — tylko Admin i Manager.
+// Nadanie przesyłki DHL Express (POST /shipments) — tylko Admin, Manager i Zamówienia.
 // UWAGA: na środowisku produkcyjnym to PRAWDZIWA przesyłka na koncie DHL (koszt), a DHL Express nie pozwala jej anulować przez API.
 // Dlatego: wymagamy jawnego potwierdzenia (`confirm: true`), pilnujemy podwójnego kliknięcia kluczem `clientRequestId`
 // (to samo kliknięcie nie nada dwóch przesyłek) i nigdy nie gubimy etykiety — gdy zapis w bazie się nie uda, oddajemy ją w odpowiedzi.
@@ -18,7 +18,7 @@ const admin = () => createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.
 
 export async function POST(request: Request) {
   const db = admin();
-  const uid = await requireRole(request, db, ["Admin", "Manager"]);
+  const uid = await requireRole(request, db, ["Admin", "Manager", "Zamówienia"]);
   if (!uid) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
   const cfg = dhlExpressConfigFromEnv();
   if (!cfg) return NextResponse.json({ error: "Brak konfiguracji DHL Express (zmienne środowiskowe)." }, { status: 400 });

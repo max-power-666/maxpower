@@ -4,13 +4,13 @@ import { requireRole } from "@/lib/serverAuth";
 import { notifyMarketplace, type ShipmentCarrier } from "@/lib/shipmentMarketplaceSync";
 
 // Ponawia zgłoszenie numeru przesyłki do marketplace'u (Back Market / refurbed) dla przesyłki, której
-// pierwsza próba (przy nadaniu — patrz dhl-express/create i dhl-parcel/create) się nie udała. Tylko Admin i Manager.
+// pierwsza próba (przy nadaniu — patrz dhl-express/create i dhl-parcel/create) się nie udała. Tylko Admin, Manager i Zamówienia.
 
 const admin = () => createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 
 export async function POST(request: Request) {
   const db = admin();
-  const uid = await requireRole(request, db, ["Admin", "Manager"]);
+  const uid = await requireRole(request, db, ["Admin", "Manager", "Zamówienia"]);
   if (!uid) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
 
   const b = await request.json().catch(() => null);

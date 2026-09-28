@@ -5,12 +5,14 @@
 --  * shipping_settings  — dane nadawcy widoczne na etykiecie (jeden wiersz), zmienia je Admin,
 --  * shipping_templates — szablony paczek (nazwa, waga, wymiary, opis zawartości), np. "ps4",
 --  * shipments          — nadane przesyłki (DHL Express i DHL Parcel) wraz z etykietą (PDF w base64) i opłatami. Zapisuje wyłącznie serwer (service_role);
---                         czytać mogą tylko Admin i Manager (są tam adresy odbiorców).
+--                         czytać mogą tylko Admin, Manager i Zamówienia (są tam adresy odbiorców).
 
--- Admin albo Manager: SECURITY DEFINER, żeby polityki mogły sprawdzić rolę w members bez uprawnień do niej.
+-- Admin, Manager albo Zamówienia: SECURITY DEFINER, żeby polityki mogły sprawdzić rolę w members bez uprawnień do niej.
+-- Nazwa funkcji zostaje historyczna (Admin/Manager) mimo że dziś obejmuje też rolę Zamówienia — używana wyłącznie
+-- przez tabele Wysyłki, więc zmiana nazwy niczego by nie ułatwiła.
 create or replace function is_admin_or_manager() returns boolean
 language sql stable security definer set search_path = public as $$
-  select exists (select 1 from members where user_id = auth.uid() and role in ('Admin', 'Manager'));
+  select exists (select 1 from members where user_id = auth.uid() and role in ('Admin', 'Manager', 'Zamówienia'));
 $$;
 
 create table if not exists shipping_settings (
@@ -95,7 +97,7 @@ create policy "admin manager update shipping_templates" on shipping_templates fo
 drop policy if exists "admin delete shipping_templates" on shipping_templates;
 create policy "admin delete shipping_templates" on shipping_templates for delete using (is_admin());
 
--- Przesyłki: odczyt Admin/Manager; brak polityk zapisu, więc tworzy je tylko serwer (service_role poza RLS).
+-- Przesyłki: odczyt Admin/Manager/Zamówienia; brak polityk zapisu, więc tworzy je tylko serwer (service_role poza RLS).
 -- Nie ma UPDATE/DELETE: nadana przesyłka jest zapisem księgowym i zostaje.
 drop policy if exists "admin manager read shipments" on shipments;
 create policy "admin manager read shipments" on shipments for select using (is_admin_or_manager());

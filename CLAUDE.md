@@ -53,7 +53,7 @@ Rola jest zwykłym tekstem w `members.role` — dodanie roli nie wymaga SQL.
 | Magazyn | `inventory` | Admin, Manager, Magazyn |
 | Zamówienia | `sales` | Admin, Manager, Zamówienia |
 | Backlog | `backlog` | wszyscy (każda rola) |
-| Wysyłka | `shipping` | Admin, Manager |
+| Wysyłka | `shipping` | Admin, Manager, Zamówienia |
 | RCP | `rcp` | wszyscy (każda rola) |
 | Zespół | `team` | Admin (edycja), Manager (tylko odczyt) |
 | Serwis | `service` | Admin, Manager, Serwis |
@@ -235,7 +235,7 @@ usuwa też jego pliki ze Storage (wiersze znikają kaskadowo, ale pliki same by 
 darmowym planie Supabase ma łącznie 1 GB — warto go pilnować.
 
 **Wysyłka** (`ShippingView.tsx`, `lib/dhlExpress.ts`, `lib/dhlParcel.ts`, `lib/shipping.ts`, `lib/shipmentInput.ts`, `shipping.sql`, `app/api/shipping/*`) — nadawanie przesyłek
-przez **dwóch przewoźników** (wybór w formularzu; domyślnie DHL Parcel) — najpierw opis **DHL Express** (MyDHL API REST, OpenAPI 3.3.1, nagłówek `x-version: 3.3.1`); dostęp tylko Admin i Manager (`lib/serverAuth.ts` `requireRole`, polityki `is_admin_or_manager()`).
+przez **dwóch przewoźników** (wybór w formularzu; domyślnie DHL Parcel) — najpierw opis **DHL Express** (MyDHL API REST, OpenAPI 3.3.1, nagłówek `x-version: 3.3.1`); dostęp Admin, Manager i Zamówienia (`lib/serverAuth.ts` `requireRole`, polityki `is_admin_or_manager()` — nazwa historyczna, dziś obejmuje też rolę Zamówienia). Nadawcę (dane firmy) zmienia tylko Admin, szablony paczek usuwa tylko Admin — reszta (wycena, nadanie, anulowanie, szablony) tak samo dla Manager i Zamówienia.
 Logowanie Basic: API Key (Username / site ID) : API Secret (Password) z aplikacji MyDHL na developer.dhl.com — ta sama para dla testu i produkcji; środowisko wybiera
 adres (`express.api.dhl.com/mydhlapi/test` vs `/mydhlapi`), **domyślnie testowe**, produkcja tylko przy `DHL_EXPRESS_ENV=production`. Numer konta i klucze tylko w env.
 Przepływ: formularz (odbiorca z zamówienia albo ręcznie, paczka z **szablonu** albo ręcznie, data nadania) → **wycena** `GET /rates` (produkty na naszym koncie z ceną

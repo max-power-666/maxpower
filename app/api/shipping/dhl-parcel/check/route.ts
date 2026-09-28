@@ -4,12 +4,12 @@ import { dhlParcelConfigFromEnv, dhlParcelIsSandbox, dhlParcelPrice, dhlParcelVe
 import { parseShipmentBody } from "@/lib/shipmentInput";
 import { admin, loadShipper } from "@/lib/parcelServer";
 
-// DHL Parcel (DHL24 WebAPI2) — konfiguracja i WYCENA. Tylko Admin i Manager.
+// DHL Parcel (DHL24 WebAPI2) — konfiguracja i WYCENA. Tylko Admin, Manager i Zamówienia.
 //  GET  -> { configured, sandbox, version }: czy są dane dostępowe i czy usługa DHL odpowiada (getVersion nie wymaga logowania).
 //  POST -> wycena (getPrice) produktów międzynarodowych EK (Connect) i PI (International) dla wpisanej trasy i paczki.
 // Wycena niczego nie tworzy i nic nie kosztuje. Hasło i numer SAP zostają na serwerze.
 
-const ROLES = ["Admin", "Manager"];
+const ROLES = ["Admin", "Manager", "Zamówienia"];
 const PRODUCTS = [
   { code: "EK", name: "DHL Connect" },
   { code: "PI", name: "DHL International" },

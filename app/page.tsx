@@ -44,7 +44,7 @@ const ROLE_ACCESS: Record<string, ViewKey[]> = {
   Admin: ["overview", "inventory", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "rcp"],
   Manager: ["overview", "inventory", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "rcp"], // wszystko; Zespół tylko do odczytu, usuwa tylko Admin
   Magazyn: ["overview", "inventory", "backlog", "rcp"],
-  Zamówienia: ["overview", "sales", "backlog", "rcp"],
+  Zamówienia: ["overview", "sales", "shipping", "backlog", "rcp"],
   Serwis: ["overview", "service", "backlog", "rcp"],
   Testy: ["overview", "tests", "backlog", "rcp"],
   Bidder: ["overview", "tradein", "backlog", "rcp"],

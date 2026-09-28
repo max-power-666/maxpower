@@ -3,12 +3,12 @@ import { requireRole } from "@/lib/serverAuth";
 import { dhlParcelConfigFromEnv, dhlParcelDelete } from "@/lib/dhlParcel";
 import { admin } from "@/lib/parcelServer";
 
-// Anulowanie przesyłki DHL Parcel (deleteShipments) — Admin i Manager. DHL pozwala na to tylko wtedy, gdy nie zamówiono po nią kuriera;
+// Anulowanie przesyłki DHL Parcel (deleteShipments) — Admin, Manager i Zamówienia. DHL pozwala na to tylko wtedy, gdy nie zamówiono po nią kuriera;
 // w przeciwnym razie zwraca błąd i przesyłka zostaje aktywna (pokazujemy go wprost). Wiersz w bazie dostaje znacznik cancelled_at,
 // nie jest usuwany (zapis księgowy).
 export async function POST(request: Request) {
   const db = admin();
-  const uid = await requireRole(request, db, ["Admin", "Manager"]);
+  const uid = await requireRole(request, db, ["Admin", "Manager", "Zamówienia"]);
   if (!uid) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
   const cfg = dhlParcelConfigFromEnv();
   if (!cfg) return NextResponse.json({ error: "Brak konfiguracji DHL Parcel." }, { status: 400 });

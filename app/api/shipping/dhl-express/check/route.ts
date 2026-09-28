@@ -3,13 +3,13 @@ import { createClient } from "@supabase/supabase-js";
 import { requireRole } from "@/lib/serverAuth";
 import { DhlExpressError, dhlExpressConfigFromEnv, dhlRates, type ProductQuery } from "@/lib/dhlExpress";
 
-// Sprawdzenie połączenia z DHL Express (MyDHL API) — tylko Admin i Manager.
+// Sprawdzenie połączenia z DHL Express (MyDHL API) — tylko Admin, Manager i Zamówienia.
 //  GET  -> { configured, env }: czy zmienne środowiskowe są ustawione i które środowisko DHL jest aktywne (test / production).
 //  POST -> produkty DHL Express dostępne dla jednej paczki na wskazanej trasie na NASZYM koncie (m.in. Economy Select i jego kod)
 //          wraz z WYCENĄ wg cennika konta (GET /rates). Nic nie tworzy i nie kosztuje — to zapytanie tylko do odczytu.
 // Numer konta i klucze zostają na serwerze; do przeglądarki nie trafiają.
 
-const ROLES = ["Admin", "Manager"];
+const ROLES = ["Admin", "Manager", "Zamówienia"];
 
 const admin = () => createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 

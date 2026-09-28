@@ -3,10 +3,10 @@ import { requireRole } from "@/lib/serverAuth";
 import { dhlParcelConfigFromEnv, dhlParcelLabel } from "@/lib/dhlParcel";
 import { admin } from "@/lib/parcelServer";
 
-// Ponowne pobranie etykiety przesyłki DHL Parcel (getLabels) i zapis w bazie — gdy przy nadaniu pobranie się nie udało. Admin i Manager.
+// Ponowne pobranie etykiety przesyłki DHL Parcel (getLabels) i zapis w bazie — gdy przy nadaniu pobranie się nie udało. Admin, Manager i Zamówienia.
 export async function POST(request: Request) {
   const db = admin();
-  if (!(await requireRole(request, db, ["Admin", "Manager"]))) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
+  if (!(await requireRole(request, db, ["Admin", "Manager", "Zamówienia"]))) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
   const cfg = dhlParcelConfigFromEnv();
   if (!cfg) return NextResponse.json({ error: "Brak konfiguracji DHL Parcel." }, { status: 400 });
   const b = await request.json().catch(() => null);
