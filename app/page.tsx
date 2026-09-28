@@ -15,7 +15,7 @@ import TestsView from "./_components/TestsView";
 import InventoryRawView from "./_components/InventoryRawView";
 import { displayNameForEmail } from "@/lib/displayName";
 
-const ROLES = ["Admin", "Manager", "Magazyn", "Serwis", "Testy", "Bidder"];
+const ROLES = ["Admin", "Manager", "Magazyn", "Zamówienia", "Serwis", "Testy", "Bidder"];
 
 type ViewKey = "overview" | "inventory" | "sales" | "team" | "service" | "tests" | "tradein" | "orders" | "backlog" | "shipping" | "rcp";
 
@@ -44,6 +44,7 @@ const ROLE_ACCESS: Record<string, ViewKey[]> = {
   Admin: ["overview", "inventory", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "rcp"],
   Manager: ["overview", "inventory", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "rcp"], // wszystko; Zespół tylko do odczytu, usuwa tylko Admin
   Magazyn: ["overview", "inventory", "backlog", "rcp"],
+  Zamówienia: ["overview", "sales", "backlog", "rcp"],
   Serwis: ["overview", "service", "backlog", "rcp"],
   Testy: ["overview", "tests", "backlog", "rcp"],
   Bidder: ["overview", "tradein", "backlog", "rcp"],

@@ -40,7 +40,7 @@ numerach seryjnych, wielokanałowa synchronizacja stanów, naprawy, auto-wycena)
 
 ## Zakładki i role
 
-Role: **Admin, Manager, Magazyn, Serwis, Testy, Bidder**. Rolę nadaje Admin w zakładce Zespół (tam też
+Role: **Admin, Manager, Magazyn, Zamówienia, Serwis, Testy, Bidder**. Rolę nadaje Admin w zakładce Zespół (tam też
 imię i nazwisko — `members.name`). Nowa osoba po pierwszym logowaniu dostaje pusty wiersz
 w `members` i ekran "poproś administratora o rolę" (`NoRoleScreen`); sama roli nie wybiera.
 Przegląd jest wspólną stroną startową. Mapa dostępu: `ROLE_ACCESS` w `app/page.tsx`.
@@ -51,7 +51,7 @@ Rola jest zwykłym tekstem w `members.role` — dodanie roli nie wymaga SQL.
 |---|---|---|
 | Przegląd | `overview` | wszyscy |
 | Magazyn | `inventory` | Admin, Manager, Magazyn |
-| Zamówienia | `sales` | Admin, Manager |
+| Zamówienia | `sales` | Admin, Manager, Zamówienia |
 | Backlog | `backlog` | wszyscy (każda rola) |
 | Wysyłka | `shipping` | Admin, Manager |
 | RCP | `rcp` | wszyscy (każda rola) |
