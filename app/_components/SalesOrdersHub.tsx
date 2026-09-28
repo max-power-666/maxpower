@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { MARKETPLACES, OUR_STATUSES, salesStatusLabel, startOfYesterdayIso, summarizeDays, type DayCount, type OurStatus } from "@/lib/salesOrders";
@@ -11,10 +11,10 @@ import InlineEditCell from "./InlineEditCell";
 import SalesOrderCard, { itemFieldLabel, updateSalesItem, type SalesHistoryEntry, type SalesItem } from "./SalesOrderCard";
 import PadSerialsCell, { MAX_PADS } from "./PadSerialsCell";
 
-// Zakładka Zamówienia: sprzedaż z marketplace'ów. Podstrona "Zamówienia" to wspólna lista ze wszystkich
-// kanałów (tabela sales_orders; dziś tylko Back Market), "BM raw data" to podgląd wszystkiego, co zwróciło
-// API Back Market (tabela bm_orders). Dane wypełnia serwer (app/api/orders/bm-sync, cron co 15 min);
-// przycisk "Odśwież" uruchamia synchronizację od razu. To zamówienia SPRZEDAŻY — skup to zakładka Trade-in.
+// Zakładka Zamówienia: sprzedaż z marketplace'ów — wspólna lista ze wszystkich kanałów (tabela sales_orders).
+// Dane wypełnia serwer (app/api/orders/*-sync, cron co 15 min); przycisk "Odśwież" uruchamia synchronizację od razu.
+// To zamówienia SPRZEDAŻY — skup to zakładka Trade-in. (Podstrona "BM raw data" — surowy podgląd bm_orders —
+// usunięta na prośbę właściciela, nieużywana; jeśli znów będzie potrzebna, patrz historia gita tego pliku.)
 
 const pill = (active: boolean) =>
   `px-3 py-1.5 rounded-full text-sm font-semibold border ${active ? "bg-ink text-paper border-ink" : "bg-white border-line"}`;
@@ -87,7 +87,6 @@ export default function SalesOrdersHub({
   canShip: boolean; // wyliczane z ROLE_ACCESS[role] w app/page.tsx (rola ma dostęp do Wysyłki)
   onShip: (prefill: ShipPrefill) => void;
 }) {
-  const [sub, setSub] = useState<"orders" | "bm">("orders");
   const [reloadKey, setReloadKey] = useState(0);
   const [lastSynced, setLastSynced] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -232,19 +231,13 @@ export default function SalesOrdersHub({
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex gap-2">
-          <button onClick={() => setSub("orders")} className={pill(sub === "orders")}>Zamówienia</button>
-          <button onClick={() => setSub("bm")} className={pill(sub === "bm")}>BM raw data</button>
-        </div>
-        <div className="flex items-center gap-3">
-          <button onClick={syncNow} disabled={syncing} className="bg-white border border-line px-4 py-2 rounded text-sm font-semibold disabled:opacity-50">
-            {syncing ? "Synchronizowanie…" : "Odśwież"}
-          </button>
-          <span className="text-xs text-inksoft lowercase">
-            {lastSynced ? `ostatnia synchronizacja: ${fmtDateTime(lastSynced)}` : "brak jeszcze synchronizacji"}
-          </span>
-        </div>
+      <div className="flex items-center justify-end gap-3 mb-4">
+        <button onClick={syncNow} disabled={syncing} className="bg-white border border-line px-4 py-2 rounded text-sm font-semibold disabled:opacity-50">
+          {syncing ? "Synchronizowanie…" : "Odśwież"}
+        </button>
+        <span className="text-xs text-inksoft lowercase">
+          {lastSynced ? `ostatnia synchronizacja: ${fmtDateTime(lastSynced)}` : "brak jeszcze synchronizacji"}
+        </span>
       </div>
 
       {isAdmin && allegro && (
@@ -295,10 +288,7 @@ export default function SalesOrdersHub({
 
       <DaySummary reloadKey={reloadKey} />
 
-      {sub === "orders" && (
-        <OrdersList reloadKey={reloadKey} session={session} onOpen={(marketplace, externalId) => setOpenOrder({ marketplace, externalId })} />
-      )}
-      {sub === "bm" && <BmRawView reloadKey={reloadKey} />}
+      <OrdersList reloadKey={reloadKey} session={session} onOpen={(marketplace, externalId) => setOpenOrder({ marketplace, externalId })} />
 
       {openOrder && (
         <SalesOrderCard
@@ -784,135 +774,6 @@ function OrdersList({
                 </tr>
               ));
             })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-/* ---------------- BM raw data: wszystko, co zwróciło API Back Market ---------------- */
-
-type BmRow = {
-  order_id: number;
-  state: number;
-  country_code: string | null;
-  date_creation: string | null;
-  date_modification: string | null;
-  date_payment: string | null;
-  date_shipping: string | null;
-  expected_dispatch_date: string | null;
-  price: number | null;
-  shipping_price: number | null;
-  currency: string | null;
-  sales_taxes: number | null;
-  payment_method: string | null;
-  installment_payment: boolean | null;
-  paypal_reference: string | null;
-  delivery_mode: string | null;
-  tracking_number: string | null;
-  shipper_display: string | null;
-  is_backship: boolean | null;
-  orderlines: { listing?: string; quantity?: number }[] | null;
-  raw: unknown;
-};
-
-const yesNo = (b: boolean | null) => (b === null || b === undefined ? "—" : b ? "tak" : "nie");
-
-const BM_COLUMNS: { label: string; cell: (r: BmRow) => string; mono?: boolean; right?: boolean }[] = [
-  { label: "order_id", cell: (r) => String(r.order_id), mono: true },
-  { label: "state", cell: (r) => `${r.state} · ${salesStatusLabel("backmarket", String(r.state))}` },
-  { label: "country_code", cell: (r) => r.country_code || "—" },
-  { label: "date_creation", cell: (r) => fmtDateTime(r.date_creation) },
-  { label: "date_modification", cell: (r) => fmtDateTime(r.date_modification) },
-  { label: "date_payment", cell: (r) => fmtDateTime(r.date_payment) },
-  { label: "date_shipping", cell: (r) => fmtDateTime(r.date_shipping) },
-  { label: "expected_dispatch_date", cell: (r) => fmtDateTime(r.expected_dispatch_date) },
-  { label: "orderlines (listing × ilość)", cell: (r) => (r.orderlines || []).map((l) => `${l.listing ?? "?"} × ${l.quantity ?? 1}`).join(", ") || "—", mono: true },
-  { label: "price", cell: (r) => fmtNumber(r.price), right: true, mono: true },
-  { label: "shipping_price", cell: (r) => fmtNumber(r.shipping_price), right: true, mono: true },
-  { label: "currency", cell: (r) => r.currency || "—" },
-  { label: "sales_taxes", cell: (r) => fmtNumber(r.sales_taxes), right: true, mono: true },
-  { label: "payment_method", cell: (r) => r.payment_method || "—" },
-  { label: "installment_payment", cell: (r) => yesNo(r.installment_payment) },
-  { label: "paypal_reference", cell: (r) => r.paypal_reference || "—", mono: true },
-  { label: "delivery_mode", cell: (r) => r.delivery_mode || "—" },
-  { label: "shipper_display", cell: (r) => r.shipper_display || "—" },
-  { label: "is_backship", cell: (r) => yesNo(r.is_backship) },
-  { label: "tracking_number", cell: (r) => r.tracking_number || "—", mono: true },
-];
-
-function BmRawView({ reloadKey }: { reloadKey: number }) {
-  const [rows, setRows] = useState<BmRow[]>([]);
-  const [total, setTotal] = useState<number | null>(null);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
-  const [expanded, setExpanded] = useState<number | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, pageSize, reloadKey]);
-
-  async function load() {
-    setLoading(true);
-    setError("");
-    const from = (page - 1) * pageSize;
-    const { data, error: err, count } = await supabase
-      .from("bm_orders")
-      .select("*", { count: "exact" })
-      .order("date_creation", { ascending: false, nullsFirst: false })
-      .range(from, from + pageSize - 1);
-    if (err) setError(`Nie udało się wczytać danych: ${err.message}`);
-    else {
-      setRows((data as BmRow[]) || []);
-      setTotal(count ?? null);
-    }
-    setLoading(false);
-  }
-
-  return (
-    <div>
-      <Pager page={page} pageSize={pageSize} total={total} onPage={setPage} onPageSize={(n) => { setPageSize(n); setPage(1); }} />
-      {error && <p className="text-rust text-xs mb-3">{error}</p>}
-      <p className="text-xs text-inksoft mb-2">Nazwy kolumn są takie jak w API Back Market. „JSON” pokazuje całą odpowiedź dla zamówienia (razem z adresami).</p>
-      <div className="border border-line bg-white overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-xs text-inksoft border-b border-line">
-              {BM_COLUMNS.map((c) => (
-                <th key={c.label} className={`p-3 whitespace-nowrap ${c.right ? "text-right" : ""}`}>{c.label}</th>
-              ))}
-              <th className="p-3"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {!loading && rows.length === 0 && (
-              <tr><td colSpan={BM_COLUMNS.length + 1} className="p-6 text-center text-inksoft text-sm">Brak danych — kliknij Odśwież, żeby pobrać zamówienia z Back Market.</td></tr>
-            )}
-            {rows.map((r) => (
-              <Fragment key={r.order_id}>
-                <tr className="border-b border-line last:border-b-0 hover:bg-paper">
-                  {BM_COLUMNS.map((c) => (
-                    <td key={c.label} className={`p-3 whitespace-nowrap ${c.mono ? "font-mono" : ""} ${c.right ? "text-right" : ""}`}>{c.cell(r)}</td>
-                  ))}
-                  <td className="p-3 whitespace-nowrap">
-                    <button onClick={() => setExpanded(expanded === r.order_id ? null : r.order_id)} className="text-xs font-semibold text-teal hover:underline">
-                      {expanded === r.order_id ? "Ukryj JSON" : "JSON"}
-                    </button>
-                  </td>
-                </tr>
-                {expanded === r.order_id && (
-                  <tr className="border-b border-line bg-paper">
-                    <td colSpan={BM_COLUMNS.length + 1} className="p-3">
-                      <pre className="text-xs font-mono overflow-x-auto whitespace-pre-wrap">{JSON.stringify(r.raw, null, 2)}</pre>
-                    </td>
-                  </tr>
-                )}
-              </Fragment>
-            ))}
           </tbody>
         </table>
       </div>
