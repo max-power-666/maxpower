@@ -109,7 +109,7 @@ export default function ShippingView({
   const [chosen, setChosen] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const [done, setDone] = useState<{ trackingNumber: string; trackingUrl: string | null; price: string; env: string; saved: boolean; labelBase64?: string | null; id?: number; error?: string; carrier: Carrier; marketplaceSyncError?: string | null; ourStatusError?: string | null } | null>(null);
+  const [done, setDone] = useState<{ trackingNumber: string; trackingUrl: string | null; price: string; env: string; saved: boolean; labelBase64?: string | null; id?: number; error?: string; carrier: Carrier; marketplaceSyncError?: string | null; ourStatusError?: string | null; deliveryNoteUrl?: string | null } | null>(null);
   const requestId = useRef<string>(crypto.randomUUID());
 
   useEffect(() => {
@@ -337,6 +337,16 @@ export default function ShippingView({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Nie udało się nadać przesyłki.");
+      // Packing slip Back Marketu (delivery_note): pojawia się w ich API dopiero po akceptacji zamówienia (stan
+      // "Do wysyłki" i dalej — potwierdzone na żywych danych), więc na tym etapie (po nadaniu przesyłki) prawie
+      // zawsze już tam jest. Bierzemy to, co już mamy zsynchronizowane (bez osobnego wywołania do Back Marketu) —
+      // link jest podpisany i ważny 5 dni od momentu, gdy go zsynchronizowaliśmy, co przy typowym czasie między
+      // akceptacją a nadaniem z zapasem starcza.
+      let deliveryNoteUrl: string | null = null;
+      if (order?.marketplace === "backmarket") {
+        const { data: bm } = await supabase.from("bm_orders").select("delivery_note").eq("order_id", order.externalId).maybeSingle();
+        deliveryNoteUrl = (bm?.delivery_note as string | null) ?? null;
+      }
       setDone({
         trackingNumber: data.trackingNumber,
         trackingUrl: data.trackingUrl ?? null,
@@ -349,6 +359,7 @@ export default function ShippingView({
         carrier: quote.carrier,
         marketplaceSyncError: data.marketplaceSyncError ?? null,
         ourStatusError: data.ourStatusError ?? null,
+        deliveryNoteUrl,
       });
       requestId.current = crypto.randomUUID(); // kolejna przesyłka = nowy klucz
       setQuote(null);
@@ -483,6 +494,9 @@ export default function ShippingView({
               )}
               <div className="flex gap-2">
                 <button onClick={() => openLabel(done.id, done.labelBase64)} className={btnPrimary}>Otwórz etykietę (PDF)</button>
+                {done.deliveryNoteUrl && (
+                  <a href={done.deliveryNoteUrl} target="_blank" rel="noreferrer" className={`${btnGhost} inline-block`}>Otwórz packing slip (PDF)</a>
+                )}
                 <button onClick={reset} className={btnGhost}>Nowa przesyłka</button>
               </div>
               <p className="text-xs text-inksoft mt-2">Wydrukuj etykietę na Zebrze: w oknie druku wybierz drukarkę i rozmiar strony 100 × 150 mm, skala 100%.</p>

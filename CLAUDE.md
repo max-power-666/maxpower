@@ -264,7 +264,14 @@ wykluczało też Back Market/refurbed z odbiorcą w Polsce, które takiej altern
 właściciela na realnym zamówieniu refurbed do Polski); poza UE wymaga danych
 celnych (opis, wartość, kod HS) — do zrobienia. Nadawca (`shipping_settings`, jeden wiersz; Admin zmienia w zakładce) i szablony (`shipping_templates`; dodaje Admin/Manager, usuwa Admin)
 są w bazie. Z karty zamówienia (Back Market, Refurbed, kraj UE) przycisk "Nadaj przesyłkę DHL" wypełnia formularz. Linie adresu DHL to max 3 x 45 znaków (`splitAddressLines` łamie na
-spacjach, za długi adres = czytelny błąd, nie ucinanie). **Po nadaniu numer przesyłki wraca do marketplace'u**
+spacjach, za długi adres = czytelny błąd, nie ucinanie). **Packing slip Back Marketu** (`bm_orders.delivery_note`, pole API "Document to add in package which
+contains useful information for the customer" — link do PDF na S3, podpisany, ważny 5 dni **od momentu synchronizacji**, nie od
+utworzenia dokumentu, potwierdzone na żywo: `Expires` w URL = `synced_at` + 5 dni): pojawia się w API dopiero **po akceptacji
+zamówienia** (stan "Do wysyłki" i dalej — dla "Do zaakceptowania" zawsze puste, sprawdzone na żywych danych), więc w praktyce jest
+już zsynchronizowany, zanim dojdzie do nadawania przesyłki. Po udanym nadaniu (obojętnie który przewoźnik) przycisk "Otwórz packing
+slip (PDF)" obok "Otwórz etykietę" — czyta już zsynchronizowaną wartość z `bm_orders`, bez osobnego wywołania do Back Marketu (typowy
+odstęp między akceptacją a nadaniem starcza z zapasem na 5-dniowe okno); nic nie pokazuje, gdy pole jest puste (refurbed i inne kanały
+nie mają tego pola — brak przycisku). **Po nadaniu numer przesyłki wraca do marketplace'u**
 (`lib/shipmentMarketplaceSync.ts`, wołane z obu route'ów `create`, obojętnie który przewoźnik): dla Back Market
 `POST /ws/orders/{id}` (`lib/backmarket.ts`, `new_state: 3` "Do wysyłki" + `tracking_number`/`tracking_url`/`shipper` —
 **`new_state: 9` ("wysłane") zwraca błąd 400 na produkcji** (`"new_state 9 must be in 2,3,4,5,6"`), mimo że schema
