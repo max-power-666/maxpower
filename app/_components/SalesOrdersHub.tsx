@@ -78,7 +78,7 @@ export default function SalesOrdersHub({
   session: Session;
   members: MemberLite[];
   isAdmin: boolean;
-  canShip: boolean; // Admin i Manager mogą nadawać przesyłki
+  canShip: boolean; // wyliczane z ROLE_ACCESS[role] w app/page.tsx (rola ma dostęp do Wysyłki)
   onShip: (prefill: ShipPrefill) => void;
 }) {
   const [sub, setSub] = useState<"orders" | "bm">("orders");

@@ -439,7 +439,7 @@ export default function Home() {
               session={session}
               members={members}
               isAdmin={role === "Admin"}
-              canShip={role === "Admin" || role === "Manager"}
+              canShip={(ROLE_ACCESS[role ?? ""] ?? []).includes("shipping")}
               onShip={(p) => {
                 setShipPrefill(p);
                 setView("shipping");

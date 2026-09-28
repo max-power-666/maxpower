@@ -306,7 +306,7 @@ export default function SalesOrderCard({
   session: Session;
   members: MemberLite[];
   onClose: () => void;
-  onShip?: (prefill: ShipPrefill) => void; // tylko Admin i Manager
+  onShip?: (prefill: ShipPrefill) => void; // tylko role z dostępem do Wysyłki (patrz canShip w app/page.tsx)
 }) {
   const [worker, setWorker] = useState<WorkerData | null>(null);
   const [items, setItems] = useState<SalesItem[]>([]);
