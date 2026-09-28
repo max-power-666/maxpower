@@ -17,6 +17,7 @@ export const OUR_STATUSES = [
   { key: "nowe", label: "Nowe" },
   { key: "w_realizacji", label: "W realizacji" },
   { key: "wyslane", label: "Wysłane" },
+  { key: "anulowane", label: "Anulowane" },
 ] as const;
 export type OurStatus = (typeof OUR_STATUSES)[number]["key"];
 

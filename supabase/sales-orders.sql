@@ -166,8 +166,8 @@ create table if not exists sales_orders (
   tracking_number text,                      -- numer przesyłki z API (Back Market: tracking_number zamówienia)
   country_code text,                         -- kod kraju ODBIORCY (adres dostawy), 2 litery ISO 3166-1 gdzie kanał to udostępnia
   synced_at timestamptz not null default now(),
-  -- Nasz wewnętrzny status realizacji (niezależny od statusu kanału): nowe | w_realizacji | wyslane
-  our_status text not null default 'nowe' check (our_status in ('nowe', 'w_realizacji', 'wyslane')),
+  -- Nasz wewnętrzny status realizacji (niezależny od statusu kanału): nowe | w_realizacji | wyslane | anulowane
+  our_status text not null default 'nowe' check (our_status in ('nowe', 'w_realizacji', 'wyslane', 'anulowane')),
   history jsonb not null default '[]'::jsonb,  -- log zmian danych pracowniczych: [{action:"edited", by_email, at, changes:[{field,from,to}]}]
   primary key (marketplace, external_id)
 );
@@ -175,12 +175,10 @@ alter table sales_orders add column if not exists history jsonb not null default
 alter table sales_orders add column if not exists tracking_number text;
 alter table sales_orders add column if not exists our_status text not null default 'nowe';
 alter table sales_orders add column if not exists country_code text;
-do $$
-begin
-  if not exists (select 1 from pg_constraint where conname = 'sales_orders_our_status_check') then
-    alter table sales_orders add constraint sales_orders_our_status_check check (our_status in ('nowe', 'w_realizacji', 'wyslane'));
-  end if;
-end $$;
+-- Drop+add (nie "dodaj jeśli brak") celowo: żeby poszerzenie listy dozwolonych wartości (np. dodanie 'anulowane')
+-- też się zastosowało przy ponownym uruchomieniu na bazie, która ma już ten constraint z węższą listą.
+alter table sales_orders drop constraint if exists sales_orders_our_status_check;
+alter table sales_orders add constraint sales_orders_our_status_check check (our_status in ('nowe', 'w_realizacji', 'wyslane', 'anulowane'));
 -- Uzupełnienie numeru przesyłki dla zamówień pobranych wcześniej (z surowych danych).
 update sales_orders s set tracking_number = o.tracking_number
   from bm_orders o

@@ -357,6 +357,7 @@ const OUR_STATUS_STYLE: Record<OurStatus, string> = {
   nowe: "bg-rustsoft text-rust",
   w_realizacji: "bg-ambersoft text-amber",
   wyslane: "bg-tealsoft text-teal",
+  anulowane: "bg-paper text-inksoft border border-line",
 };
 
 // Kolor plakietki statusu Back Market: w toku (do zrobienia) bursztyn, wysłane zielone, reszta neutralnie.
