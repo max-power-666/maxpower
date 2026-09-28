@@ -289,7 +289,10 @@ wycena `getPrice` (cena w PLN + dopłata paliwowa; produkt niedostępny na trasi
 środowiska testowego dostępnego dla nas** — każde nadanie jest prawdziwe, więc test = nadaj + od razu anuluj. Adres w DHL24 wymaga ulicy i numeru domu w OSOBNYCH polach oraz limitów:
 miejscowość max **17** znaków, ulica 35, nazwa 60, telefon 20 (za długie = czytelny błąd, nie ucinanie; opis zawartości ucinany do 30). Nadawcę rozdziela `loadShipper`
 (`lib/parcelServer.ts`, kod pocztowy bez myślnika). Wspólna serwerowa walidacja formularza: `lib/shipmentInput.ts` (`parseShipmentBody`, numer domu wyciągany z ulicy przez
-`splitStreet`). Numer przesyłki DHL24 (shipmentId) = numer do śledzenia. Nie testowane na żywym API — zweryfikowane na atrapie `fetch` wg WSDL.
+`splitStreet`). Numer przesyłki DHL24 (shipmentId) = numer do śledzenia. **Odbiorca prywatny (bez firmy) na etykiecie:**
+`contactPerson` wysyłamy tylko, gdy jest osobna firma (`receiver.company`) — inaczej `name` i `contactPerson` to ta sama
+osoba i etykieta drukuje ją dwa razy (znalezione na żywej etykiecie DHL Parcel; ten sam wzorzec poprawiony też w DHL
+Express — `contactInformation.fullName` tylko z firmą). Nie testowane na żywym API poza tym przypadkiem — zweryfikowane na atrapie `fetch` wg WSDL.
 
 **RCP** (`RcpView.tsx`) — rejestracja czasu pracy; **na razie tylko pusta zakładka-szkielet**, widoczna dla wszystkich ról. Docelowo z niej ma wyjść ewidencja godzin
 potrzebna do wydajności (punkty na godzinę) i premii z regulaminu (plan rozwoju, punkt 8).

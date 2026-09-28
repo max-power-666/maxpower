@@ -47,7 +47,8 @@ export async function POST(request: Request) {
         street: receiver.street,
         houseNumber: receiver.houseNumber,
         apartmentNumber: receiver.apartment,
-        contactPerson: receiver.name,
+        // Tylko gdy jest firma — inaczej "name" i "contactPerson" to ta sama osoba i etykieta DHL24 drukuje ją dwa razy.
+        contactPerson: receiver.company ? receiver.name : undefined,
         contactPhone: receiver.phone,
         contactEmail: receiver.email,
       },

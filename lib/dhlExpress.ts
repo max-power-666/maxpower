@@ -224,7 +224,9 @@ const party = (p: ShipmentParty) => {
     contactInformation: {
       phone: p.phone,
       companyName: p.company?.trim() || p.name, // DHL wymaga nazwy firmy — dla osoby prywatnej wpisujemy jej imię i nazwisko
-      fullName: p.name,
+      // fullName tylko gdy jest osobna firma — inaczej companyName i fullName to ta sama osoba i etykieta drukuje ją dwa razy
+      // (ten sam błąd znaleziony na żywej etykiecie DHL Parcel, patrz analogiczna poprawka w dhl-parcel/create/route.ts).
+      ...(p.company?.trim() ? { fullName: p.name } : {}),
       ...(p.email ? { email: p.email } : {}),
     },
   };
