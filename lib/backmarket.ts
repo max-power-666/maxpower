@@ -1,15 +1,18 @@
 // Klient Back Market: akceptacja zamówienia i zgłaszanie numeru przesyłki po nadaniu w module Wysyłka.
 // Dokumentacja: https://api.backmarket.dev, sekcja Orders → "Update a specific order" (POST /ws/orders/{order_id}).
-// Bez SKU w body wszystkie pozycje zamówienia przechodzą do podanego stanu naraz (BM traktuje całe zamówienie
-// jako jedną paczkę) — dokładnie to nam odpowiada, bo nadajemy zawsze jedną przesyłkę na całe zamówienie i
-// akceptujemy zawsze całe zamówienie naraz (nie pojedyncze pozycje).
+// UWAGA: wymóg SKU w body ZALEŻY od new_state — patrz opis przy każdej wartości niżej, nie jest jednolity.
 //
 // new_state — dopuszczalne wartości potwierdzone na produkcji to 2, 3, 4, 5, 6 (błąd API przy innej wartości:
 // "new_state X must be in 2,3,4,5,6"), mimo że schema OrderState (do odczytu) wymienia też 0, 1, 8, 9, 10:
 //   2 = zaakceptowane przez sprzedawcę (merchant-facing akcja "przyjmuję zamówienie do realizacji" — patrz
-//       bmAcceptOrder; Table 6 dokumentacji BM nazywa to stanem POZYCJI, nie zamówienia, ale endpoint przyjmuje
-//       tę wartość i tak, prawdopodobnie stosując ją do wszystkich pozycji naraz jak przy stanie 3),
-//   3 = "Do wysyłki" (merchant-facing akcja "wysyłam to" — patrz bmMarkOrderShipped),
+//       bmAcceptOrder). To NAPRAWDĘ jest stan POZYCJI (Table 6 dokumentacji BM), nie zamówienia, i W ODRÓŻNIENIU
+//       OD stanu 3 wymaga podania "sku" — bez niego API zwraca błąd 400 "sku not found" (potwierdzone na
+//       produkcji, zgłoszenie właściciela 29.09.2026). Zamówienie z kilkoma różnymi SKU wymaga osobnego wywołania
+//       na KAŻDY z nich (patrz app/api/orders/validate/route.ts) — inaczej niż przy stanie 3, który obejmuje
+//       wszystkie pozycje naraz jednym zapytaniem bez SKU.
+//   3 = "Do wysyłki" (merchant-facing akcja "wysyłam to" — patrz bmMarkOrderShipped); bez SKU w body wszystkie
+//       pozycje zamówienia przechodzą do tego stanu naraz (BM traktuje całe zamówienie jako jedną paczkę) —
+//       dokładnie to nam odpowiada, bo nadajemy zawsze jedną przesyłkę na całe zamówienie.
 //   9 = "wysłane" NIE DA SIĘ ustawić tym zapytaniem — to stan, który Back Market nadaje sam, gdy zweryfikuje
 //       przesyłkę u przewoźnika, nie coś, co merchant wpisuje ręcznie.
 
@@ -74,13 +77,13 @@ export async function bmMarkOrderShipped(
   }
 }
 
-// POST /ws/orders/{order_id}: akceptuje zamówienie (new_state: 2) — wołane, gdy zespół przestawia "Nasz status"
-// na "w realizacji" (patrz app/api/orders/validate/route.ts). Zanim zamówienie zostanie zaakceptowane, Back
-// Market bywa skąpy w dane odbiorcy zwracane przez GET /ws/orders (obserwacja: brakuje imienia/nazwiska, kodu
-// pocztowego i telefonu przy statusie "Do zaakceptowania", mimo że ulica/miasto/kraj są) — akceptacja może to
-// odblokować, ale nie jest to potwierdzone w dokumentacji, tylko wniosek z obserwacji; kolejny sync i tak
-// dociągnie pełne dane, gdy się pojawią.
-export async function bmAcceptOrder(cfg: BmShipConfig, opts: { orderId: string }): Promise<void> {
+// POST /ws/orders/{order_id}: akceptuje JEDNĄ pozycję zamówienia (new_state: 2) — wołane z przycisku "Zaakceptuj
+// zamówienie" na karcie zamówienia (SalesOrderCard.tsx), patrz app/api/orders/validate/route.ts. WYMAGA "sku" w
+// body — bez niego Back Market zwraca błąd 400 "sku not found" (potwierdzone na produkcji 29.09.2026), w
+// odróżnieniu od stanu 3 (wysyłka), gdzie SKU jest zbędne, bo dotyczy całego zamówienia naraz. Zamówienie z kilkoma
+// różnymi SKU wymaga osobnego wywołania tej funkcji na każdy z nich — route woła ją w pętli po unikalnych SKU
+// z orderlines.
+export async function bmAcceptOrder(cfg: BmShipConfig, opts: { orderId: string; sku: string }): Promise<void> {
   const doFetch = cfg.fetchImpl ?? fetch;
   const orderIdNum = Number(opts.orderId);
   const res = await doFetch(`${cfg.baseUrl}/ws/orders/${opts.orderId}`, {
@@ -92,13 +95,13 @@ export async function bmAcceptOrder(cfg: BmShipConfig, opts: { orderId: string }
       "User-Agent": cfg.userAgent,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ order_id: Number.isFinite(orderIdNum) ? orderIdNum : opts.orderId, new_state: 2 }),
+    body: JSON.stringify({ order_id: Number.isFinite(orderIdNum) ? orderIdNum : opts.orderId, new_state: 2, sku: opts.sku }),
     cache: "no-store",
     signal: AbortSignal.timeout(cfg.timeoutMs ?? 20_000),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new BmShipError(`Back Market zwrócił błąd (${res.status}) przy akceptowaniu zamówienia: ${text.slice(0, 300)}`, res.status);
+    throw new BmShipError(`Back Market zwrócił błąd (${res.status}) przy akceptowaniu zamówienia (SKU ${opts.sku}): ${text.slice(0, 300)}`, res.status);
   }
 }
 

@@ -35,8 +35,21 @@ export async function POST(request: Request) {
   const cfg = bmShipConfigFromEnv();
   if (!cfg) return NextResponse.json({ ok: true, validated: false, error: "Brak konfiguracji Back Market (BACKMARKET_AUTH) — zaakceptuj zamówienie ręcznie w panelu Back Market." });
 
+  // Akceptacja (new_state: 2) wymaga "sku" w body i działa per POZYCJA — zamówienie z kilkoma różnymi SKU trzeba
+  // zaakceptować raz na każdy z nich (patrz komentarz w lib/backmarket.ts). Bierzemy SKU z już zsynchronizowanych
+  // orderlines; gdy ich jeszcze nie ma (bardzo świeże zamówienie), próbujemy bez SKU — da ten sam czytelny błąd
+  // zamiast po cichu nic nie robić.
+  const { data: bmOrder } = await db.from("bm_orders").select("orderlines").eq("order_id", Number(externalId)).maybeSingle();
+  const skus = Array.from(
+    new Set(((bmOrder?.orderlines as any[]) || []).map((l) => (typeof l?.listing === "string" ? l.listing.trim() : "")).filter(Boolean))
+  );
+
   try {
-    await bmAcceptOrder(cfg, { orderId: externalId });
+    if (skus.length === 0) {
+      await bmAcceptOrder(cfg, { orderId: externalId, sku: "" });
+    } else {
+      for (const sku of skus) await bmAcceptOrder(cfg, { orderId: externalId, sku });
+    }
     return NextResponse.json({ ok: true, validated: true, error: null });
   } catch (e: any) {
     return NextResponse.json({ ok: true, validated: false, error: e?.message || "Nie udało się zaakceptować zamówienia w Back Market." });
