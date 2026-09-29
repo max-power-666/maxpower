@@ -57,6 +57,7 @@ Rola jest zwykłym tekstem w `members.role` — dodanie roli nie wymaga SQL.
 | Backlog | `backlog` | wszyscy (każda rola) |
 | Wysyłka | `shipping` | Admin, Manager, Zamówienia |
 | RCP | `rcp` | wszyscy (każda rola) |
+| Zwroty | `returns` | wszyscy (każda rola) |
 | Zespół | `team` | Admin (edycja), Manager (tylko odczyt) |
 | Serwis | `service` | Admin, Manager, Serwis |
 | Testy | `tests` | Admin, Manager, Testy |
@@ -453,6 +454,11 @@ Express — `contactInformation.fullName` tylko z firmą). Nie testowane na żyw
 **RCP** (`RcpView.tsx`) — rejestracja czasu pracy; **na razie tylko pusta zakładka-szkielet**, widoczna dla wszystkich ról. Docelowo z niej ma wyjść ewidencja godzin
 potrzebna do wydajności (punkty na godzinę) i premii z regulaminu (plan rozwoju, punkt 8).
 
+**Zwroty** (`ReturnsView.tsx`) — **na razie tylko pusta zakładka-szkielet** (dodana 30.09.2026), widoczna dla wszystkich ról, ten sam wzorzec co RCP.
+Docelowo: rejestr fizycznej obsługi zwrotu (przyjęcie zwróconej paczki, sprawdzenie stanu sprzętu, decyzja co dalej — powrót do magazynu / naprawa /
+utylizacja), wzorem Serwisu/Testów/Trade-in — **nie** zestawienie zwrotów z marketplace'ów (te już są widoczne w Zamówieniach jako część kubełka
+"Anulowane", patrz `statusBucket`/`CANCELLED_STATUS` w `lib/salesOrders.ts`).
+
 **Serwis** (`ServiceView.tsx`, `service_log`). Rejestr napraw wg tabeli z regulaminu:
 Joy-Con para 15 pkt, kontroler PS4 25, Xbox One 35, PS5 12, czyszczenie konsoli 45.
 Jeden wiersz = jedna naprawa: `started_at`, status (w_naprawie / naprawiony / uszkodzony),
@@ -579,3 +585,4 @@ Configuration) musi być aktualny adres produkcyjny, inaczej magic link nie zadz
 8. ⬜ Ewidencja czasu pracy → wydajność pkt/h i premia z regulaminu
 9. ⬜ Integracje z kanałami sprzedaży (Allegro, eBay) — osobny etap, wymaga kluczy API
 10. ⬜ Twarde uprawnienia per rola (RLS)
+11. ⬜ Zwroty: rejestr fizycznej obsługi zwrotu (przyjęcie, ocena stanu, decyzja co dalej)
