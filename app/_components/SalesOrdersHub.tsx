@@ -613,7 +613,9 @@ function OrdersList({
       />
       <div className="flex items-center gap-2 flex-wrap mb-3">
         <button onClick={() => { setMarketplaceFilter("wszystkie"); setPage(1); }} className={smallPill(marketplaceFilter === "wszystkie")}>Wszystkie</button>
-        {MARKETPLACES.map((m) => (
+        {/* Apilo pominięte celowo: integracja wycofana (patrz CLAUDE.md), nie ma sensu filtrować po niej aktywnie —
+            etykieta w MARKETPLACES zostaje, żeby dawne zamówienia apilo dalej ładnie się podpisywały na liście. */}
+        {MARKETPLACES.filter((m) => m.key !== "apilo").map((m) => (
           <button key={m.key} onClick={() => { setMarketplaceFilter(m.key); setPage(1); }} className={smallPill(marketplaceFilter === m.key)}>{m.label}</button>
         ))}
       </div>
