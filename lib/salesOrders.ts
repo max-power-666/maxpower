@@ -34,6 +34,7 @@ const SHIPPED_STATUS: Record<string, string[]> = {
   backmarket: ["9"],
   refurbed: ["SHIPPED", "FULFILLED"],
   erli: ["sent"], // nasz znacznik (erliDerivedStatus) — Erli sam nie ma "wysłane" na poziomie zamówienia
+  allegro: ["SENT"], // nasz znacznik (allegroDerivedStatus) — status zamówienia sam nie ma "wysłane", patrz niżej
   octopia: ["Shipped", "Delivered"],
   amazon: ["Shipped"],
 };
@@ -41,7 +42,7 @@ const CANCELLED_STATUS: Record<string, string[]> = {
   backmarket: ["cancelled", "refunded"],
   refurbed: ["CANCELLED", "REJECTED", "RETURNED"],
   erli: ["cancelled", "returned"],
-  allegro: ["CANCELLED"],
+  allegro: ["CANCELLED", "RETURNED"], // RETURNED to też nasz znacznik (allegroDerivedStatus)
   octopia: ["Cancelled", "Rejected"],
   amazon: ["Canceled"],
 };
@@ -126,6 +127,9 @@ export const ALLEGRO_ORDER_STATES: Record<string, string> = {
   READY_FOR_PROCESSING: "Opłacone",
   READY_FOR_PROCESSING_COD: "Za pobraniem",
   CANCELLED: "Anulowane",
+  // Nasze znaczniki wyliczone z fulfillment.status (patrz allegroDerivedStatus) — nie są wartościami status z API:
+  SENT: "Wysłane",
+  RETURNED: "Zwrócone",
 };
 
 // Stany zamówienia Octopia (Enums.Orders.Status).
@@ -434,6 +438,25 @@ const allegroOrderDate = (o: any): string | null => {
   return dates[0] ?? o.updatedAt ?? null;
 };
 
+// Status zamówienia (checkout form) Allegro NIE ma wartości "wysłane" — to tylko BOUGHT/FILLED_IN/READY_FOR_PROCESSING/
+// CANCELLED. Realny postęp realizacji siedzi w osobnym polu fulfillment.status ("Status realizacji" na karcie zamówienia,
+// zapisywane w allegro_orders.fulfillment_status): NEW/PROCESSING/READY_FOR_SHIPMENT/READY_FOR_PICKUP/SENT/PICKED_UP/
+// CANCELLED/SUSPENDED/RETURNED (dokumentacja Allegro: SENT ustawia się samo po dodaniu numeru przesyłki — dokładnie ten
+// przypadek zgłoszony przez właściciela 30.09.2026, zamówienie z fulfillment.status=SENT pokazywało w kolumnie Status
+// wciąż "Opłacone"). Ten sam wzorzec co erliDerivedStatus dla Erli: status zamówienia (CANCELLED) jest NADRZĘDNY —
+// fulfillment już nic tam nie zmienia; inaczej SENT/PICKED_UP (odebrane przez kuriera z paczkomatu — też koniec drogi
+// u nas, jeden wspólny znacznik jak przy Erli) -> "SENT", RETURNED (całość zwrócona i zrefundowana, ustawiane tylko
+// automatycznie przez Allegro) -> "RETURNED".
+function allegroDerivedStatus(o: any): string {
+  const raw = String(o.status ?? "BOUGHT");
+  if (raw === "CANCELLED") return raw;
+  const base = raw === "READY_FOR_PROCESSING" && o.payment?.type === "CASH_ON_DELIVERY" ? "READY_FOR_PROCESSING_COD" : raw;
+  const fs = o.fulfillment?.status;
+  if (fs === "SENT" || fs === "PICKED_UP") return "SENT";
+  if (fs === "RETURNED") return "RETURNED";
+  return base;
+}
+
 export function mapAllegroToSales(o: any) {
   const skus = Array.from(new Set(((o.lineItems as any[]) || []).map(allegroItemSku).filter((x): x is string => !!x)));
   // Numer przesyłki (waybill) nie jest na liście zamówień — dociągamy go osobnym zapytaniem do /shipments (pole _shipments).
@@ -442,7 +465,7 @@ export function mapAllegroToSales(o: any) {
     marketplace: "allegro",
     external_id: String(o.id),
     order_date: allegroOrderDate(o),
-    status: o.status === "READY_FOR_PROCESSING" && o.payment?.type === "CASH_ON_DELIVERY" ? "READY_FOR_PROCESSING_COD" : String(o.status ?? "BOUGHT"),
+    status: allegroDerivedStatus(o),
     sku: skus.length > 0 ? skus.join(", ") : null,
     tracking_number: waybill || null,
     country_code: normCountry(o.delivery?.address?.countryCode),
@@ -477,7 +500,7 @@ const NOT_COUNTED: Record<string, string[]> = {
   backmarket: ["cancelled", "refunded", "10", "0", "8"],
   refurbed: ["CANCELLED", "REJECTED", "RETURNED"],
   erli: ["cancelled", "returned", "pending"],
-  allegro: ["CANCELLED", "BOUGHT", "FILLED_IN"],
+  allegro: ["CANCELLED", "BOUGHT", "FILLED_IN", "RETURNED"],
 };
 
 export function isCountedOrder(marketplace: string, status: string): boolean {

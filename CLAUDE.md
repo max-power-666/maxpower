@@ -136,9 +136,12 @@ która obsługuje skup). Dwie podstrony: *Zamówienia* — wspólna lista ze wsz
 i tak zostają: `sales_orders.tracking_number` dalej widoczne na karcie zamówienia (`Row label="Numer przesyłki"` per kanał), a Etap dalej rządzi pigułkami filtra (Wszystkie/Nowe/Wysłane/Anulowane), tylko nie ma już własnej kolumny w tabeli. Przy okazji: numer zamówienia na liście dostał mniejszą czcionkę (`text-xs`, wcześniej dziedziczył `text-sm` z tabeli). Etap = kubełek statusu liczony WPROST ze statusu kanału (`statusBucket` w `lib/salesOrders.ts`: Nowe /
 Wysłane / Anulowane), **nie osobna kolumna** — zastąpił dawne ręcznie zmieniane `sales_orders.our_status`, wycofane
 30.09.2026 na prośbę właściciela ("korzystajmy ze statusów dostępnych w marketplace'ach", zamiast ręcznie śledzić
-postęp). "Wysłane" i "Anulowane" to zamknięte, jednoznaczne surowe statusy per kanał (Back Market `9`/`cancelled`/
-`refunded`, refurbed `SHIPPED`/`FULFILLED`/`CANCELLED`/`REJECTED`/`RETURNED`, Erli `cancelled`/`returned`, Allegro
-`CANCELLED`, Octopia `Shipped`/`Delivered`/`Cancelled`/`Rejected`, Amazon `Shipped`/`Canceled`) — wszystko inne (do
+postęp). "Wysłane" i "Anulowane" to zamknięte, jednoznaczne statusy per kanał — surowe z API albo, gdzie API samo nie
+ma takiej wartości, nasz znacznik wyliczony przy synchronizacji (`bmDerivedStatus`/`erliDerivedStatus`/
+`allegroDerivedStatus`, patrz opisy kanałów niżej): Back Market `9`/`cancelled`/`refunded`, refurbed
+`SHIPPED`/`FULFILLED`/`CANCELLED`/`REJECTED`/`RETURNED`, Erli `sent`(★)/`cancelled`/`returned`, Allegro
+`SENT`(★)/`CANCELLED`/`RETURNED`(★), Octopia `Shipped`/`Delivered`/`Cancelled`/`Rejected`, Amazon `Shipped`/`Canceled`
+— (★) = nasz znacznik, nie wartość z API. Wszystko inne (do
 zaakceptowania, do wysyłki, oczekuje na płatność, opłacone, za pobraniem, w przygotowaniu...) to po prostu "Nowe".
 Filtr na liście (pigułki Wszystkie/Nowe/Wysłane/Anulowane) buduje z TYCH SAMYCH list (`shippedOrFilter`/
 `cancelledOrFilter`) kompozytowy filtr PostgREST — "Nowe" to `NOT (wysłane OR anulowane)`, czyli `not.or=(...)`;
@@ -250,7 +253,18 @@ cała strona ma ten sam updatedAt), kursor w `sales_orders_sync_meta.scan_cursor
 data = najwcześniejsze `lineItems.boughtAt`, SKU = `offer.external.id` (a gdy brak — id oferty), pozycje z ilością > 1 rozbijane na sztuki.
 Numer przesyłki (waybill) nie jest na liście — dociągamy `GET /order/checkout-forms/{id}/shipments` dla zamówień, w których cokolwiek wysłano
 (zapisane w `raw._shipments`). **Jak przy Erli: COD (`payment.type = CASH_ON_DELIVERY`) ma ten sam status `READY_FOR_PROCESSING` co opłacone**, więc zapisujemy
-je jako `READY_FOR_PROCESSING_COD` ("Za pobraniem"). Nie testowane na żywym API (brak konta/aplikacji w środowisku asystenta) — zweryfikowane na atrapie
+je jako `READY_FOR_PROCESSING_COD` ("Za pobraniem"). **Status zamówienia (BOUGHT/FILLED_IN/READY_FOR_PROCESSING/CANCELLED) sam NIE ma wartości
+"wysłane" — dokładnie ten sam wzorzec problemu co przy Erli (patrz wyżej). Realny postęp realizacji siedzi w osobnym polu `fulfillment.status`**
+("Status realizacji (Allegro)" na karcie zamówienia, zapisywane w `allegro_orders.fulfillment_status`): `NEW`/`PROCESSING`/`READY_FOR_SHIPMENT`/
+`READY_FOR_PICKUP`/`SENT`/`PICKED_UP`/`CANCELLED`/`SUSPENDED`/`RETURNED` (dokumentacja Allegro: `SENT` ustawia się samo, gdy do zamówienia dojdzie
+numer przesyłki i sprzedawca ma włączoną automatyczną zmianę statusu; `RETURNED` też tylko automatycznie, gdy całość zwrócona i zrefundowana —
+nie da się go ustawić ręcznie). `allegroDerivedStatus` (`lib/salesOrders.ts`, wywoływane w `mapAllegroToSales`, ten sam wzorzec co
+`erliDerivedStatus`) podnosi bazowy status do naszego znacznika `SENT` ("Wysłane"), gdy `fulfillment.status` to `SENT` lub `PICKED_UP` (odebrane
+przez kuriera z paczkomatu — jeden wspólny znacznik jak przy Erli, bez rozróżniania), albo do `RETURNED` ("Zwrócone"), gdy `fulfillment.status`
+to `RETURNED` — status zamówienia `CANCELLED` jest przy tym NADRZĘDNY, fulfillment już nic tam nie zmienia. **Zgłoszone przez właściciela
+30.09.2026** (zamówienie z `fulfillment.status = SENT` pokazywało w kolumnie Status wciąż "Opłacone") — poprawka obejmuje tylko przyszłe
+synchronizacje; `RETURNED` dodane też do listy statusów pomijanych w kafelkach "Zamówienia dzisiaj/wczoraj" (`NOT_COUNTED.allegro`), bo to w
+pełni zwrócone i zrefundowane zamówienie, tak samo jak anulowane. Nie testowane na żywym API (brak konta/aplikacji w środowisku asystenta) — zweryfikowane na atrapie
 `fetch` wg swaggera (developer.allegro.pl/swagger.yaml).
 **Back Market — stan zamówienia vs stany pozycji:** gdy wszystkie pozycje dojdą do stanu końcowego, całe zamówienie ma stan 9 ("przetworzone") także
 przy zamówieniu anulowanym przez klienta (pozycja stan 4, brak `date_shipping`) — pokazywało się to jako "Wysłane" (w dniu poprawki: 463 anulowane
