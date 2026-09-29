@@ -3,14 +3,16 @@ import { createClient } from "@supabase/supabase-js";
 import { requireRole } from "@/lib/serverAuth";
 import { bmShipConfigFromEnv, bmAcceptOrder } from "@/lib/backmarket";
 
-// Akceptuje zamówienie u marketplace'u, gdy zespół przestawia "Nasz status" na "w realizacji" w Zamówieniach
-// (SalesOrdersHub.tsx, changeOurStatus) — sygnał "bierzemy się za to" odpowiada akcji "zaakceptuj zamówienie"
-// po stronie kanału. Dziś tylko Back Market (POST /ws/orders/{id}, new_state: 2 — patrz lib/backmarket.ts);
-// inne marketplace'y (refurbed, Erli, Allegro, Octopia, Apilo, Amazon) nie mają tu jeszcze odpowiednika, więc
-// route po prostu nic dla nich nie robi (nie błąd).
+// Akceptuje zamówienie u marketplace'u — jawny przycisk "Zaakceptuj zamówienie" na karcie zamówienia
+// (SalesOrderCard.tsx, acceptOrder), widoczny przy Back Marketcie w stanie "Do zaakceptowania". Dziś tylko Back
+// Market (POST /ws/orders/{id}, new_state: 2 — patrz lib/backmarket.ts); inne marketplace'y (refurbed, Erli,
+// Allegro, Octopia, Apilo, Amazon) nie mają tu jeszcze odpowiednika, więc route po prostu nic dla nich nie robi
+// (nie błąd). Do 29.09.2026 wywoływane automatycznie przy zmianie "Nasz status" na "w realizacji" — wycofane, bo
+// myliło dwie różne rzeczy: naszą wewnętrzną organizację pracy (Nasz status) i realną akcję u marketplace'u.
 //
-// Nigdy nie failuje twardo: "Nasz status" już się zmienił w bazie, zanim to wywołanie w ogóle wystartuje, więc
-// błąd akceptacji jest tylko ostrzeżeniem w UI (SalesOrdersHub pokazuje je, ale nie cofa zmiany statusu).
+// Nigdy nie failuje twardo: błąd trafia do UI jako komunikat, ale nic wcześniej nie zdążyło się zmienić w naszej
+// bazie (w odróżnieniu od poprzedniego mechanizmu, gdzie "Nasz status" już był zmieniony, zanim to wywołanie
+// w ogóle wystartowało).
 
 export const maxDuration = 30;
 

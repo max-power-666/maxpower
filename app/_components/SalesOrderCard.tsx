@@ -328,6 +328,7 @@ export default function SalesOrderCard({
   const [editing, setEditing] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, ItemDraft>>({});
   const [saving, setSaving] = useState(false);
+  const [accepting, setAccepting] = useState(false);
 
   useEffect(() => {
     load();
@@ -377,6 +378,40 @@ export default function SalesOrderCard({
     setAp((apRes.data as ApiloOrder) ?? null);
     setAz((azRes.data as AmazonOrder) ?? null);
     setLoaded(true);
+  }
+
+  // Akceptacja zamówienia u Back Marketu — jawny przycisk (od 29.09.2026), niezależny od "Nasz status" (wcześniej
+  // to zmiana "Nasz status" na "w realizacji" wywoływała to jako efekt uboczny, co myliło dwie różne rzeczy: naszą
+  // wewnętrzną organizację pracy i realną akcję u marketplace'u). Po sukcesie dogrywa świeże dane zamówienia na
+  // miejscu (bm-refresh, ten sam route co przy packing slipie), żeby plakietka statusu zaktualizowała się od razu,
+  // zamiast czekać na kolejny cron.
+  async function acceptOrder() {
+    setAccepting(true);
+    setError("");
+    const headers = { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" };
+    try {
+      const res = await fetch("/api/orders/validate", { method: "POST", headers, body: JSON.stringify({ marketplace, externalId }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.error) throw new Error(data?.error || "Nie udało się zaakceptować zamówienia.");
+      await supabase.rpc("sales_order_add_log", {
+        p_marketplace: marketplace,
+        p_external_id: externalId,
+        p_entry: {
+          action: "edited",
+          by_email: session.user.email ?? null,
+          at: new Date().toISOString(),
+          changes: [{ field: "Back Market", from: "Do zaakceptowania", to: "Zaakceptowano" }],
+        },
+      });
+      // Odświeżenie danych to tylko wygoda (płakietka od razu pokaże "Do wysyłki") — akceptacja już się udała,
+      // więc błąd tego kroku nie psuje wyniku.
+      await fetch("/api/orders/bm-refresh", { method: "POST", headers, body: JSON.stringify({ orderId: externalId }) }).catch(() => {});
+      await load();
+    } catch (e: any) {
+      setError(e.message || "Nie udało się zaakceptować zamówienia.");
+    } finally {
+      setAccepting(false);
+    }
   }
 
   function startEdit() {
@@ -487,6 +522,11 @@ export default function SalesOrderCard({
               <span className="inline-block text-xs font-semibold px-2 py-1 rounded-full bg-tealsoft text-teal">
                 {salesStatusLabel(marketplace, worker.status)}
               </span>
+              {marketplace === "backmarket" && bm?.state === 1 && (
+                <button onClick={acceptOrder} disabled={accepting} className="text-xs font-semibold text-teal hover:underline disabled:opacity-50">
+                  {accepting ? "Akceptowanie…" : "Zaakceptuj zamówienie →"}
+                </button>
+              )}
               {onShip && shipPrefill && (
                 <button onClick={() => onShip(shipPrefill)} className="text-xs font-semibold text-teal hover:underline">
                   Nadaj przesyłkę DHL →

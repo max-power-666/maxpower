@@ -464,6 +464,21 @@ begin
   end if;
 end $$;
 
+-- Dopisanie wpisu do logu zamówienia BEZ zmiany innych pól (np. po ręcznej akceptacji u marketplace'u — patrz
+-- przycisk "Zaakceptuj zamówienie" w SalesOrderCard.tsx, woła app/api/orders/validate) — atomowo po stronie bazy,
+-- żeby równoczesny zapis innej osoby nie nadpisał sobie nawzajem logu (to samo ryzyko co przy zwykłym update).
+create or replace function sales_order_add_log(p_marketplace text, p_external_id text, p_entry jsonb)
+returns void
+language plpgsql as $$
+begin
+  update sales_orders
+     set history = history || jsonb_build_array(p_entry)
+   where marketplace = p_marketplace and external_id = p_external_id;
+  if not found then
+    raise exception 'Nie ma takiego zamówienia.';
+  end if;
+end $$;
+
 create or replace function sales_item_update(
   p_marketplace text, p_external_id text, p_item_key text,
   p_serial text, p_pads int, p_pad_serials text[], p_entry jsonb
