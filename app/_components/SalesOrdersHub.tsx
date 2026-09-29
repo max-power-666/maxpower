@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
-import { MARKETPLACES, STATUS_BUCKETS, statusBucket, shippedOrFilter, cancelledOrFilter, salesStatusLabel, startOfYesterdayIso, summarizeDays, type DayCount, type StatusBucket } from "@/lib/salesOrders";
+import { MARKETPLACES, STATUS_BUCKETS, shippedOrFilter, cancelledOrFilter, salesStatusLabel, startOfYesterdayIso, summarizeDays, type DayCount, type StatusBucket } from "@/lib/salesOrders";
 import { escapeLike } from "@/lib/search";
 import { type MemberLite } from "@/lib/displayName";
 import type { ShipPrefill } from "@/lib/shipping";
@@ -333,15 +333,6 @@ const SALES_COLUMNS =
   "marketplace, external_id, order_date, status, sku, tracking_number, country_code, shipping_method, sales_order_items(item_key, position, sku, serial_number, pads, pad_serials)";
 const rowKey = (r: { marketplace: string; external_id: string }) => `${r.marketplace}:${r.external_id}`;
 
-// Back Market daje numer przesyłki, refurbed tylko link śledzenia — link pokazujemy jako klikalne "śledzenie".
-function TrackingCell({ value }: { value: string | null }) {
-  if (!value) return <>—</>;
-  if (/^https?:\/\//i.test(value)) {
-    return <a href={value} target="_blank" rel="noreferrer" className="text-teal hover:underline font-sans">śledzenie ↗</a>;
-  }
-  return <>{value}</>;
-}
-
 // Kolor plakietki kanału — żeby na liście od razu było widać, skąd jest zamówienie (inne barwy niż statusy).
 const MARKETPLACE_STYLE: Record<string, string> = {
   backmarket: "bg-[#e3ecf9] text-[#2a6bb5]",
@@ -351,12 +342,6 @@ const MARKETPLACE_STYLE: Record<string, string> = {
   octopia: "bg-[#dcf5e3] text-[#1a7a3d]",
   apilo: "bg-[#fdecc8] text-[#a15c00]",
   amazon: "bg-[#2a2a2a] text-[#ff9900]",
-};
-
-const STATUS_BUCKET_STYLE: Record<StatusBucket, string> = {
-  nowe: "bg-rustsoft text-rust",
-  wyslane: "bg-tealsoft text-teal",
-  anulowane: "bg-paper text-inksoft border border-line",
 };
 
 // Kolor plakietki statusu Back Market: w toku (do zrobienia) bursztyn, wysłane zielone, reszta neutralnie.
@@ -602,17 +587,15 @@ function OrdersList({
               <th className="p-3">Status</th>
               <th className="p-3">Kraj</th>
               <th className="p-3">Metoda wysyłki</th>
-              <th className="p-3">Nr przesyłki</th>
               <th className="p-3">SKU</th>
               <th className="p-3">Numer seryjny</th>
               <th className="p-3">Pady</th>
               <th className="p-3">Nr seryjny padów</th>
-              <th className="p-3">Etap</th>
             </tr>
           </thead>
           <tbody>
             {!loading && rows.length === 0 && (
-              <tr><td colSpan={12} className="p-6 text-center text-inksoft text-sm">{search ? "Nic nie znaleziono dla tego numeru." : "Brak zamówień — kliknij Odśwież, żeby pobrać je z Back Market."}</td></tr>
+              <tr><td colSpan={10} className="p-6 text-center text-inksoft text-sm">{search ? "Nic nie znaleziono dla tego numeru." : "Brak zamówień — kliknij Odśwież, żeby pobrać je z Back Market."}</td></tr>
             )}
             {rows.map((r) => {
               // Zamówienie bez pozycji (jeszcze nie zsynchronizowane) pokazujemy jednym wierszem z samym SKU.
@@ -632,7 +615,7 @@ function OrdersList({
                       <td rowSpan={items.length} className="p-3 whitespace-nowrap">
                         <button
                           onClick={() => onOpen(r.marketplace, r.external_id)}
-                          className="font-mono font-semibold text-teal hover:underline"
+                          className="font-mono font-semibold text-xs text-teal hover:underline"
                         >
                           {r.external_id}
                         </button>
@@ -645,9 +628,6 @@ function OrdersList({
                       </td>
                       <td rowSpan={items.length} className="p-3 text-xs font-mono whitespace-nowrap">{r.country_code || "—"}</td>
                       <td rowSpan={items.length} className="p-3 text-xs whitespace-nowrap">{r.shipping_method || "—"}</td>
-                      <td rowSpan={items.length} className="p-3 font-mono whitespace-nowrap">
-                        <TrackingCell value={r.tracking_number} />
-                      </td>
                     </>
                   )}
                   <td className="p-3 font-mono whitespace-nowrap">{it ? it.sku || "—" : r.sku || "—"}</td>
@@ -665,13 +645,6 @@ function OrdersList({
                     </>
                   ) : (
                     <td colSpan={3} className="p-3 text-xs text-inksoft">—</td>
-                  )}
-                  {idx === 0 && (
-                    <td rowSpan={items.length} className="p-3">
-                      <span className={`inline-block text-xs font-semibold px-2 py-1 rounded-full whitespace-nowrap ${STATUS_BUCKET_STYLE[statusBucket(r.marketplace, r.status)]}`}>
-                        {STATUS_BUCKETS.find((b) => b.key === statusBucket(r.marketplace, r.status))?.label}
-                      </span>
-                    </td>
                   )}
                 </tr>
               ));
