@@ -263,7 +263,13 @@ w `lib/dhlExpress.ts` — była z niej wcześniej wyłączona, bo krajowe zamów
 wykluczało też Back Market/refurbed z odbiorcą w Polsce, które takiej alternatywy nie mają; poprawione, zgłoszone przez
 właściciela na realnym zamówieniu refurbed do Polski); poza UE wymaga danych
 celnych (opis, wartość, kod HS) — do zrobienia. Nadawca (`shipping_settings`, jeden wiersz; Admin zmienia w zakładce) i szablony (`shipping_templates`; dodaje Admin/Manager, usuwa Admin)
-są w bazie. Z karty zamówienia (Back Market, Refurbed, kraj UE) przycisk "Nadaj przesyłkę DHL" wypełnia formularz. Linie adresu DHL to max 3 x 45 znaków (`splitAddressLines` łamie na
+są w bazie. Z karty zamówienia (Back Market, Refurbed, Octopia, kraj UE) przycisk "Nadaj przesyłkę DHL" wypełnia formularz
+(`buildShipPrefill` w `lib/shipping.ts`; Octopia dołączona 29.09.2026 — adres per-pozycja z `lines[0].shippingAddress`, kompletny,
+zwykły brakujący branch, nie ograniczenie API). **Amazon świadomie bez tego przycisku:** SP-API zwraca `ShippingAddress` bez
+imienia/nazwiska, linii adresu i telefonu — tylko `City`/`PostalCode`/`CountryCode` — niezależnie od stanu zamówienia (sprawdzone na
+30 żywych zamówieniach, także "Shipped"); to efekt roli "Inventory and Order Tracking" bez dostępu do PII, nie błąd po naszej stronie.
+Pełny adres wymaga osobnego zatwierdzenia w Seller Central (dostęp do danych PII) i osobnego mechanizmu (Restricted Data Token:
+`POST /tokens/.../restrictedDataToken` + `GET /orders/v0/orders/{id}/address`) — do zrobienia, gdy właściciel uzyska tę zgodę. Linie adresu DHL to max 3 x 45 znaków (`splitAddressLines` łamie na
 spacjach, za długi adres = czytelny błąd, nie ucinanie). **Packing slip Back Marketu** (`bm_orders.delivery_note`, pole API "Document to add in package which
 contains useful information for the customer" — link do PDF na S3, podpisany, ważny 5 dni **od momentu synchronizacji**, nie od
 utworzenia dokumentu, potwierdzone na żywo: `Expires` w URL = `synced_at` + 5 dni): pojawia się w API dopiero **po akceptacji

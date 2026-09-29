@@ -455,12 +455,16 @@ export default function SalesOrderCard({
   const marketplaceLabel = MARKETPLACES.find((m) => m.key === marketplace)?.label ?? marketplace;
 
   // Adres odbiorcy z zamówienia -> formularz przesyłki DHL (tylko zamówienia zagraniczne z obsługiwanych kanałów).
+  // Amazon celowo bez wpisu tutaj — patrz komentarz w buildShipPrefill (lib/shipping.ts): SP-API nie udostępnia
+  // pełnego adresu bez dodatkowego zatwierdzenia PII (Restricted Data Token) w Seller Central.
   const shipPrefill: ShipPrefill | null =
     marketplace === "backmarket" && bm
       ? buildShipPrefill("backmarket", externalId, bm, null)
       : marketplace === "refurbed" && rf
         ? buildShipPrefill("refurbed", externalId, rf.raw, rf.customer_email)
-        : null;
+        : marketplace === "octopia" && oc
+          ? buildShipPrefill("octopia", externalId, oc.raw, null)
+          : null;
 
   return (
     <div className="fixed inset-0 bg-black/30 flex justify-end z-50" onClick={(e) => e.target === e.currentTarget && onClose()}>

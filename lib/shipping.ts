@@ -75,7 +75,34 @@ export function buildShipPrefill(marketplace: string, externalId: string, raw: a
         email: clean(customerEmail),
       };
     }
+  } else if (marketplace === "octopia") {
+    // Octopia: adres jest tylko PER-POZYCJA (lines[].shippingAddress), nie na poziomie zamówienia — ten sam wzorzec
+    // co przy wyciąganiu country_code (mapOctopiaToSales) — bierzemy pierwszą pozycję. Pola sprawdzone na żywych
+    // danych (firstName/lastName/addressLine1/addressLine2/postalCode/city/countryCode/phone/email) — kompletne,
+    // w odróżnieniu od Amazon (patrz niżej), więc to zwykły brakujący branch, nie ograniczenie API. companyName nie
+    // pojawiło się w sprawdzonych zamówieniach (same osoby prywatne), ale to samo pole istnieje w billingAddress
+    // tego samego API, więc prawdopodobnie działa też tu — dla zamówień bez firmy po prostu zostanie puste.
+    const a = (raw?.lines as any[])?.[0]?.shippingAddress;
+    if (a) {
+      p = {
+        name: [clean(a.firstName), clean(a.lastName)].filter(Boolean).join(" "),
+        company: clean(a.companyName),
+        ...splitStreet(clean(a.addressLine1)),
+        apartment: clean(a.addressLine2),
+        postalCode: clean(a.postalCode),
+        city: clean(a.city),
+        countryCode: clean(a.countryCode).toUpperCase(),
+        phone: clean(a.phone),
+        email: clean(a.email) || clean(customerEmail),
+      };
+    }
   }
+  // Amazon NIE ma tu branchu celowo: SP-API zwraca ShippingAddress bez imienia/nazwiska, linii adresu i telefonu —
+  // tylko city/postalCode/countryCode — niezależnie od stanu zamówienia (sprawdzone na 30 zamówieniach, w tym
+  // "Shipped"). To nie błąd mapowania: nasza aplikacja Amazon ma rolę "Inventory and Order Tracking" bez dostępu do
+  // danych PII (Restricted Data Token) — pełny adres wymaga osobnego zatwierdzenia w Seller Central i osobnego
+  // wywołania (POST /tokens/.../restrictedDataToken + GET /orders/v0/orders/{id}/address) — do zrobienia po stronie
+  // właściciela, zanim to ma sens kodować.
   if (!p || !DHL_EU_COUNTRIES.includes(p.countryCode)) return null;
   return { marketplace, externalId, ...p };
 }
