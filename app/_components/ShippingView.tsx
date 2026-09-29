@@ -6,11 +6,12 @@ import { supabase } from "@/lib/supabaseClient";
 import { COUNTRY_NAMES, DHL_EU_COUNTRIES, isEconomySelect, type DhlMoney, type DhlProduct } from "@/lib/dhlExpress";
 import { base64ToBlobUrl, defaultShippingDate, type ShipPrefill } from "@/lib/shipping";
 import { MARKETPLACES } from "@/lib/salesOrders";
+import { escapeLike } from "@/lib/search";
 
 // Zakładka Wysyłka: nadawanie przesyłek DHL Express (MyDHL API) — formularz z wyceną, szablony paczek, ustawienia nadawcy i lista nadanych
 // przesyłek z etykietami (PDF 10x15 na Zebrę). Dostęp: Admin i Manager. Klucze i numer konta są tylko na serwerze
 // (route'y /api/shipping/dhl-express/*). Na środowisku produkcyjnym nadanie to PRAWDZIWA przesyłka (koszt), a DHL Express nie pozwala
-// jej anulować przez API — dlatego przed nadaniem jest ostrzeżenie z potwierdzeniem.
+// jej anulować przez API.
 
 const fmtMoney = (m: DhlMoney | null | undefined) =>
   m ? `${m.price.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${m.currency}` : "—";
@@ -79,6 +80,7 @@ type ShipmentRow = {
 };
 
 const EMPTY_FORM = { name: "", company: "", street: "", houseNumber: "", apartment: "", postalCode: "", city: "", countryCode: "DE", phone: "", email: "", template: "", weight: "", length: "", width: "", height: "", description: "", reference: "" };
+const SHIP_PAGE_SIZE = 20;
 
 export default function ShippingView({
   session,
@@ -98,6 +100,10 @@ export default function ShippingView({
   const [settings, setSettings] = useState<Settings | null>(null);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [shipments, setShipments] = useState<ShipmentRow[]>([]);
+  const [shipSearchInput, setShipSearchInput] = useState("");
+  const [shipSearch, setShipSearch] = useState("");
+  const [shipPage, setShipPage] = useState(1);
+  const [shipTotal, setShipTotal] = useState(0);
   const [error, setError] = useState("");
   const [prefillNote, setPrefillNote] = useState(""); // ostrzeżenie: marketplace nie przekazał (jeszcze) pełnych danych odbiorcy
 
@@ -123,9 +129,22 @@ export default function ShippingView({
       .catch(() => setParcel({ configured: false, sandbox: false, version: null }));
     loadSettings();
     loadTemplates();
-    loadShipments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Wyszukiwanie po numerze przesyłki: debounce, resetuje stronę na 1 (wzorzec jak w InventoryRawView).
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setShipSearch(shipSearchInput.trim());
+      setShipPage(1);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [shipSearchInput]);
+
+  useEffect(() => {
+    loadShipments();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shipPage, shipSearch]);
 
   // Wejście z karty zamówienia: adres odbiorcy i numer zamówienia wypełniają formularz.
   useEffect(() => {
@@ -167,13 +186,22 @@ export default function ShippingView({
     setTemplates((data as Template[]) || []);
   }
   async function loadShipments() {
-    const { data, error: err } = await supabase
+    const from = (shipPage - 1) * SHIP_PAGE_SIZE;
+    let q = supabase
       .from("shipments")
-      .select("id, created_at, carrier, cancelled_at, label_format, created_by_email, environment, marketplace, order_external_id, product_code, product_name, tracking_number, tracking_url, receiver, charges, marketplace_synced_at, marketplace_sync_error")
-      .order("created_at", { ascending: false })
-      .limit(50);
-    if (err) setError(`Nie udało się wczytać przesyłek: ${err.message}`);
-    else setShipments(((data as (ShipmentRow & { label_format: string | null })[]) || []).map((r) => ({ ...r, has_label: !!r.label_format })));
+      .select(
+        "id, created_at, carrier, cancelled_at, label_format, created_by_email, environment, marketplace, order_external_id, product_code, product_name, tracking_number, tracking_url, receiver, charges, marketplace_synced_at, marketplace_sync_error",
+        { count: "exact" }
+      );
+    if (shipSearch) q = q.ilike("tracking_number", `%${escapeLike(shipSearch)}%`);
+    const { data, error: err, count } = await q.order("created_at", { ascending: false }).range(from, from + SHIP_PAGE_SIZE - 1);
+    if (err) {
+      // strona poza zakresem (np. po anulowaniu ubyło wierszy) — wróć na początek
+      if (err.code === "PGRST103" && shipPage > 1) return setShipPage(1);
+      return setError(`Nie udało się wczytać przesyłek: ${err.message}`);
+    }
+    setShipments(((data as (ShipmentRow & { label_format: string | null })[]) || []).map((r) => ({ ...r, has_label: !!r.label_format })));
+    setShipTotal(count ?? 0);
   }
 
   function setField(k: keyof typeof EMPTY_FORM, v: string) {
@@ -299,23 +327,6 @@ export default function ShippingView({
     const product = quote?.products.find((p) => p.code === chosen);
     if (!product || !quote) return;
     const isParcel = quote.carrier === "parcel";
-    const prod = isParcel && parcel?.sandbox === false;
-    const env = isParcel ? (parcel?.sandbox ? "TESTOWE" : "PRODUKCYJNE") : express?.env === "production" ? "PRODUKCYJNE" : "TESTOWE";
-    const ok = confirm(
-      `NADANIE PRZESYŁKI ${CARRIER_LABEL[quote.carrier].toUpperCase()} (środowisko ${env})\n\n` +
-        `Produkt: ${product.name}\nCena wg cennika: ${fmtMoney(product.billing)}\n` +
-        `Odbiorca: ${form.name}, ${form.street} ${form.houseNumber}${form.apartment ? "/" + form.apartment : ""}, ${form.postalCode} ${form.city}, ${form.countryCode}\n` +
-        `Paczka: ${form.weight} kg, ${form.length}×${form.width}×${form.height} cm\n\n` +
-        (isParcel
-          ? prod
-            ? "To PRAWDZIWA przesyłka (DHL Parcel nie ma środowiska testowego) — obciąży konto DHL. Możesz ją anulować na liście przesyłek, dopóki nie zamówisz po nią kuriera.\n\n"
-            : "Środowisko testowe: przesyłka nie jest prawdziwa.\n\n"
-          : express?.env === "production"
-            ? "To PRAWDZIWA przesyłka — obciąży konto DHL. DHL Express nie pozwala jej anulować przez API (tylko w panelu DHL).\n\n"
-            : "Środowisko testowe: przesyłka nie jest prawdziwa i nie obciąża konta.\n\n") +
-        "Nadać przesyłkę i wygenerować etykietę?"
-    );
-    if (!ok) return;
 
     setError("");
     setCreating(true);
@@ -445,42 +456,35 @@ export default function ShippingView({
 
   const formReady =
     form.name.trim() && form.street.trim() && form.houseNumber.trim() && form.postalCode.trim() && form.city.trim() && form.phone.trim() && Number(form.weight.replace(",", ".")) > 0 && form.length && form.width && form.height;
+  const shipTotalPages = Math.max(1, Math.ceil(shipTotal / SHIP_PAGE_SIZE));
 
   return (
     <div>
-      {/* połączenie */}
-      <div className="border border-line bg-white p-4 mb-6">
-        <h2 className="text-xs font-semibold text-inksoft mb-2">PRZEWOŹNICY</h2>
-        {(express === null || parcel === null) && <p className="text-xs text-inksoft">Sprawdzanie konfiguracji…</p>}
-        {parcel && (
-          <p className="text-xs mb-1">
-            <span className="font-semibold">DHL Parcel:</span>{" "}
-            {parcel.configured ? (
-              <span className="text-inksoft">
-                skonfigurowany{parcel.version ? ` (usługa odpowiada, wersja ${parcel.version})` : " (usługa DHL chwilowo nie odpowiedziała)"}.{" "}
-                <span className={`font-semibold ${parcel.sandbox ? "text-teal" : "text-rust"}`}>{parcel.sandbox ? "Środowisko testowe." : "Środowisko PRODUKCYJNE — przesyłki są prawdziwe i płatne (można je anulować)."}</span>
-              </span>
-            ) : (
-              <span className="text-rust">nie skonfigurowany — ustaw w Vercel DHL_PARCEL_USERNAME, DHL_PARCEL_PASSWORD i DHL_PARCEL_SAP, potem Redeploy.</span>
-            )}
-          </p>
-        )}
-        {express && (
-          <p className="text-xs">
-            <span className="font-semibold">DHL Express:</span>{" "}
-            {express.configured ? (
-              <span className="text-inksoft">
-                skonfigurowany,{" "}
-                <span className={`font-semibold ${express.env === "production" ? "text-rust" : "text-teal"}`}>{express.env === "production" ? "środowisko PRODUKCYJNE — przesyłki są prawdziwe i płatne (nie da się ich anulować przez API)" : "środowisko testowe — przesyłki nie są prawdziwe"}</span>.
-              </span>
-            ) : (
-              <span className="text-rust">nie skonfigurowany — ustaw DHL_EXPRESS_API_KEY, DHL_EXPRESS_API_SECRET, DHL_EXPRESS_ACCOUNT i DHL_EXPRESS_ENV.</span>
-            )}
-          </p>
-        )}
-        {settings && <p className="text-xs text-inksoft mt-1">Nadawca: {settings.shipper_company}, {settings.street}, {settings.postal_code} {settings.city}.</p>}
-        {!settings && (parcel?.configured || express?.configured) && <p className="text-xs text-rust mt-1">Brak danych nadawcy — uruchom supabase/shipping.sql.</p>}
-      </div>
+      {/* połączenie — ukryte, dopóki wszystko działa; pokazuje się tylko, gdy jest coś do zgłoszenia */}
+      {((parcel && !parcel.configured) ||
+        (parcel?.configured && !parcel.version) ||
+        (express && !express.configured) ||
+        ((parcel?.configured || express?.configured) && !settings)) && (
+        <div className="border border-line bg-white p-4 mb-6">
+          <h2 className="text-xs font-semibold text-inksoft mb-2">PRZEWOŹNICY</h2>
+          {parcel && !parcel.configured && (
+            <p className="text-xs text-rust mb-1">
+              <span className="font-semibold">DHL Parcel:</span> nie skonfigurowany — ustaw w Vercel DHL_PARCEL_USERNAME, DHL_PARCEL_PASSWORD i DHL_PARCEL_SAP, potem Redeploy.
+            </p>
+          )}
+          {parcel?.configured && !parcel.version && (
+            <p className="text-xs text-rust mb-1">
+              <span className="font-semibold">DHL Parcel:</span> skonfigurowany, ale usługa DHL chwilowo nie odpowiedziała.
+            </p>
+          )}
+          {express && !express.configured && (
+            <p className="text-xs text-rust">
+              <span className="font-semibold">DHL Express:</span> nie skonfigurowany — ustaw DHL_EXPRESS_API_KEY, DHL_EXPRESS_API_SECRET, DHL_EXPRESS_ACCOUNT i DHL_EXPRESS_ENV.
+            </p>
+          )}
+          {(parcel?.configured || express?.configured) && !settings && <p className="text-xs text-rust">Brak danych nadawcy — uruchom supabase/shipping.sql.</p>}
+        </div>
+      )}
 
       {error && <p className="text-rust text-xs mb-4">{error}</p>}
 
@@ -652,7 +656,34 @@ Cena to wycena wg cennika konta (DHL Parcel: kwota NETTO w PLN, już z doliczon�
           )}
 
           {/* nadane przesyłki */}
-          <h2 className="text-xs font-semibold text-inksoft mb-2">NADANE PRZESYŁKI</h2>
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
+            <h2 className="text-xs font-semibold text-inksoft">NADANE PRZESYŁKI</h2>
+            <div className="flex items-center gap-3">
+              <input
+                value={shipSearchInput}
+                onChange={(e) => setShipSearchInput(e.target.value)}
+                placeholder="Szukaj po numerze przesyłki"
+                className="w-56 border border-line bg-white px-3 py-1.5 rounded text-sm font-mono"
+              />
+              <span className="text-xs text-inksoft whitespace-nowrap">
+                {shipTotal.toLocaleString("pl-PL")} {shipSearch ? "wyników" : "przesyłek"} · strona {Math.min(shipPage, shipTotalPages)} z {shipTotalPages}
+              </span>
+              <button
+                onClick={() => setShipPage((p) => Math.max(1, p - 1))}
+                disabled={shipPage <= 1}
+                className="bg-white border border-line px-3 py-1.5 rounded text-sm font-semibold text-ink disabled:opacity-40"
+              >
+                ‹ Poprzednia
+              </button>
+              <button
+                onClick={() => setShipPage((p) => Math.min(shipTotalPages, p + 1))}
+                disabled={shipPage >= shipTotalPages}
+                className="bg-white border border-line px-3 py-1.5 rounded text-sm font-semibold text-ink disabled:opacity-40"
+              >
+                Następna ›
+              </button>
+            </div>
+          </div>
           <div className="border border-line bg-white overflow-x-auto mb-8">
             <table className="w-full text-sm">
               <thead>
@@ -669,7 +700,7 @@ Cena to wycena wg cennika konta (DHL Parcel: kwota NETTO w PLN, już z doliczon�
                 </tr>
               </thead>
               <tbody>
-                {shipments.length === 0 && <tr><td colSpan={9} className="p-6 text-center text-inksoft text-sm">Brak nadanych przesyłek.</td></tr>}
+                {shipments.length === 0 && <tr><td colSpan={9} className="p-6 text-center text-inksoft text-sm">{shipSearch ? "Brak wyników." : "Brak nadanych przesyłek."}</td></tr>}
                 {shipments.map((s) => {
                   const charge = dhlCharge(s.charges);
                   return (

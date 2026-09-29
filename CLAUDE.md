@@ -312,11 +312,18 @@ przez **dwóch przewoźników** (wybór w formularzu; domyślnie DHL Parcel) —
 Logowanie Basic: API Key (Username / site ID) : API Secret (Password) z aplikacji MyDHL na developer.dhl.com — ta sama para dla testu i produkcji; środowisko wybiera
 adres (`express.api.dhl.com/mydhlapi/test` vs `/mydhlapi`), **domyślnie testowe**, produkcja tylko przy `DHL_EXPRESS_ENV=production`. Numer konta i klucze tylko w env.
 Przepływ: formularz (odbiorca z zamówienia albo ręcznie, paczka z **szablonu** albo ręcznie, data nadania) → **wycena** `GET /rates` (produkty na naszym koncie z ceną
-w walucie rozliczeniowej i PLN, waga taryfowa, składniki ceny; Economy Select = kod `W`/`H`, domyślnie zaznaczony) → wybór produktu → **potwierdzenie z ostrzeżeniem** →
-`POST /shipments` → etykieta **PDF 6x4 cala (10x15 cm, szablon `ECOM26_64_001`, zmienna `DHL_EXPRESS_LABEL_TEMPLATE`)** do wydruku na Zebrze przez sterownik (rozmiar strony
-100x150 mm) → zapis w `shipments` (numer, link śledzenia, odbiorca, paczka, opłaty, etykieta base64). Zabezpieczenia: wymagane `confirm: true`; `client_request_id` (unikalny) chroni
+w walucie rozliczeniowej i PLN, waga taryfowa, składniki ceny; Economy Select = kod `W`/`H`, domyślnie zaznaczony) → wybór produktu → `POST /shipments` (bez okna potwierdzenia
+w przeglądarce — usunięte 30.09.2026 na prośbę właściciela, zbędny dodatkowy klik; info o środowisku testowym/produkcyjnym zostaje jako zwykły tekst pod tabelą wyceny) →
+etykieta **PDF 6x4 cala (10x15 cm, szablon `ECOM26_64_001`, zmienna `DHL_EXPRESS_LABEL_TEMPLATE`)** do wydruku na Zebrze przez sterownik (rozmiar strony
+100x150 mm) → zapis w `shipments` (numer, link śledzenia, odbiorca, paczka, opłaty, etykieta base64). Zabezpieczenia: wymagane `confirm: true` w body żądania (parametr API,
+niezależny od usuniętego okna w przeglądarce); `client_request_id` (unikalny) chroni
 przed podwójnym nadaniem tym samym kliknięciem; gdy DHL nada, a zapis w bazie się nie uda, odpowiedź zwraca numer i etykietę, żeby nic się nie zmarnowało; e-mail autora z konta, nie z żądania;
-tabela `shipments` bez UPDATE/DELETE (zapis księgowy, tylko serwer). **Na razie tylko kraje UE** (bez odprawy celnej, `isCustomsDeclarable: false`, incoterm DAP), **w tym Polska** (`DHL_EU_COUNTRIES`
+tabela `shipments` bez UPDATE/DELETE (zapis księgowy, tylko serwer). **Blok "PRZEWOŹNICY" u góry zakładki (status konfiguracji DHL Parcel/Express)
+jest ukryty, dopóki wszystko działa — pokazuje się tylko, gdy któryś przewoźnik nie jest skonfigurowany, usługa DHL chwilowo nie odpowiada albo
+brakuje danych nadawcy** (30.09.2026, na prośbę właściciela — w normalnym stanie zajmował miejsce bez informacji wartej uwagi); linijka z adresem
+nadawcy w tym miejscu usunięta na stałe (dane nadawcy i tak są dostępne pod "Zmień dane nadawcy (Admin)" niżej). **Lista "Nadane przesyłki" ma
+paginację (`.range()`, 20/stronę) i wyszukiwarkę po numerze przesyłki** (`ilike` na `tracking_number`, z debounce 300 ms — wcześniej `.limit(50)`
+bez offsetu pokazywał tylko najświeższe 50 przesyłek bez możliwości przejścia dalej). **Na razie tylko kraje UE** (bez odprawy celnej, `isCustomsDeclarable: false`, incoterm DAP), **w tym Polska** (`DHL_EU_COUNTRIES`
 w `lib/dhlExpress.ts` — była z niej wcześniej wyłączona, bo krajowe zamówienia Allegro/Erli mają inną obsługę, ale to
 wykluczało też Back Market/refurbed z odbiorcą w Polsce, które takiej alternatywy nie mają; poprawione, zgłoszone przez
 właściciela na realnym zamówieniu refurbed do Polski); poza UE wymaga danych
