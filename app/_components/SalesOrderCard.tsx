@@ -549,6 +549,11 @@ export default function SalesOrderCard({
                   Otwórz w Amazon ↗
                 </a>
               )}
+              {marketplace === "octopia" && (
+                <a href="https://seller.octopia.com/order/all" target="_blank" rel="noreferrer" className="text-xs font-semibold text-teal hover:underline">
+                  Otwórz listę zamówień w Octopia ↗
+                </a>
+              )}
             </div>
 
             {marketplace === "erli" && !!onShip && er?.raw.delivery?.pickupPlace?.provider === "inpost" && (
