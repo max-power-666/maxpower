@@ -1,9 +1,10 @@
-// Skutki uboczne udanego nadania przesyłki DHL dla zamówienia z Zamówień: (1) notifyMarketplace zgłasza numer
+// Skutek uboczny udanego nadania przesyłki DHL dla zamówienia z Zamówień: notifyMarketplace zgłasza numer
 // przesyłki z powrotem do marketplace'u, z którego pochodzi zamówienie — dziś Back Market i refurbed, jedyne dwa
 // kanały, z których karta zamówienia daje przycisk "Nadaj przesyłkę DHL" (patrz buildShipPrefill w lib/shipping.ts;
 // inne marketplace'y — Erli, Allegro, Octopia, Apilo, Amazon — na razie nie mają tego przycisku, więc nic tu dla
-// nich nie robimy); (2) markOurStatusShipped przestawia nasz wewnętrzny "Nasz status" na "Wysłane", niezależnie
-// od marketplace'u i niezależnie od wyniku (1) — to dwa całkiem osobne skutki tego samego zdarzenia.
+// nich nie robimy). Do 30.09.2026 był tu też markOurStatusShipped (przestawiał "Nasz status" na "Wysłane") —
+// usunięty razem z całym polem `our_status` (patrz lib/salesOrders.ts, statusBucket): status na liście liczy się
+// teraz wprost ze statusu kanału, więc nie było już czego "przestawiać" ręcznie.
 //
 // Razem z numerem przesyłki zgłaszamy też IMEI/numer seryjny pozycji, gdy zespół go już wpisał w Zamówieniach
 // (sales_order_items.serial_number) — oba marketplace'y wymagają tego dla smartfonów (od 1.01.2022 u Back Marketu,
@@ -19,49 +20,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { bmShipConfigFromEnv, bmMarkOrderShipped, bmSetOrderlineIdentifier, BM_SHIPPER_BY_CARRIER } from "./backmarket";
 import { refurbedListCarriers, refurbedMarkItemsShipped } from "./refurbed";
-import { OUR_STATUSES } from "./salesOrders";
 
 export type ShipmentCarrier = "dhl_express" | "dhl_parcel";
-
-// Przestawia "Nasz status" (sales_orders.our_status) na "Wysłane", gdy przesyłka DHL powstała bez błędu — niezależnie
-// od marketplace'u (to nasze własne, wewnętrzne pole, nie wymaga żadnego API kanału) i niezależnie od tego, czy
-// zgłoszenie numeru do marketplace'u (notifyMarketplace) się udało — to dwa oddzielne, niezależne skutki nadania.
-// Nie failuje twardo: przesyłka i tak już powstała, a "Nasz status" da się poprawić ręcznie z listy Zamówień.
-export async function markOurStatusShipped(
-  db: SupabaseClient<any, any, any>,
-  opts: { marketplace: string | null; externalId: string | null; byEmail: string | null }
-): Promise<{ ok: boolean; error: string | null }> {
-  if (!opts.marketplace || !opts.externalId) return { ok: true, error: null }; // przesyłka nie powiązana z zamówieniem — nic do zrobienia
-  try {
-    const { data: cur, error: curErr } = await db
-      .from("sales_orders")
-      .select("our_status")
-      .eq("marketplace", opts.marketplace)
-      .eq("external_id", opts.externalId)
-      .maybeSingle();
-    if (curErr) return { ok: false, error: `Nie udało się odczytać zamówienia: ${curErr.message}` };
-    if (!cur) return { ok: true, error: null }; // zamówienie spoza Zamówień — nic do zrobienia
-    if (cur.our_status === "wyslane") return { ok: true, error: null }; // już ustawione (np. ponowne nadanie po błędzie)
-
-    const fromLabel = OUR_STATUSES.find((s) => s.key === cur.our_status)?.label ?? cur.our_status;
-    const entry = {
-      action: "edited",
-      by_email: opts.byEmail,
-      at: new Date().toISOString(),
-      changes: [{ field: "Nasz status", from: fromLabel, to: "Wysłane" }],
-    };
-    const { error: rpcErr } = await db.rpc("sales_order_set_status", {
-      p_marketplace: opts.marketplace,
-      p_external_id: opts.externalId,
-      p_status: "wyslane",
-      p_entry: entry,
-    });
-    if (rpcErr) return { ok: false, error: `Nie udało się ustawić "Nasz status" na Wysłane: ${rpcErr.message}` };
-    return { ok: true, error: null };
-  } catch (e: any) {
-    return { ok: false, error: e?.message || "Nie udało się ustawić statusu zamówienia." };
-  }
-}
 
 // IMEI ma zawsze dokładnie 15 cyfr (norma GSMA) — inaczej traktujemy wartość jako zwykły numer seryjny. Puste/białe
 // znaki -> brak identyfikatora (nic do zgłoszenia, nie błąd).

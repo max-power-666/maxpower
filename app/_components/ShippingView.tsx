@@ -109,7 +109,7 @@ export default function ShippingView({
   const [chosen, setChosen] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const [done, setDone] = useState<{ trackingNumber: string; trackingUrl: string | null; price: string; env: string; saved: boolean; labelBase64?: string | null; id?: number; error?: string; carrier: Carrier; marketplaceSyncError?: string | null; ourStatusError?: string | null; deliveryNoteUrl?: string | null } | null>(null);
+  const [done, setDone] = useState<{ trackingNumber: string; trackingUrl: string | null; price: string; env: string; saved: boolean; labelBase64?: string | null; id?: number; error?: string; carrier: Carrier; marketplaceSyncError?: string | null; deliveryNoteUrl?: string | null } | null>(null);
   const requestId = useRef<string>(crypto.randomUUID());
 
   useEffect(() => {
@@ -367,7 +367,6 @@ export default function ShippingView({
         error: data.saved === false ? data.error : data.labelError ? `Przesyłka nadana, ale nie udało się pobrać etykiety: ${data.labelError}. Kliknij „Otwórz etykietę”, aby spróbować ponownie.` : undefined,
         carrier: quote.carrier,
         marketplaceSyncError: data.marketplaceSyncError ?? null,
-        ourStatusError: data.ourStatusError ?? null,
         deliveryNoteUrl,
       });
       requestId.current = crypto.randomUUID(); // kolejna przesyłka = nowy klucz
@@ -497,9 +496,6 @@ export default function ShippingView({
               {done.error && <p className="text-rust text-sm font-semibold mb-2">{done.error}</p>}
               {done.marketplaceSyncError && (
                 <p className="text-rust text-sm font-semibold mb-2">Problem ze zgłoszeniem do marketplace'u: {done.marketplaceSyncError} (można ponowić niżej, w liście nadanych przesyłek).</p>
-              )}
-              {done.ourStatusError && (
-                <p className="text-rust text-sm font-semibold mb-2">Nie udało się ustawić "Nasz status" na Wysłane: {done.ourStatusError} — zmień go ręcznie w Zamówieniach.</p>
               )}
               <div className="flex gap-2">
                 <button onClick={() => openLabel(done.id, done.labelBase64)} className={btnPrimary}>Otwórz etykietę (PDF)</button>

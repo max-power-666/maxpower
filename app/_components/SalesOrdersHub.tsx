@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
-import { MARKETPLACES, OUR_STATUSES, salesStatusLabel, startOfYesterdayIso, summarizeDays, type DayCount, type OurStatus } from "@/lib/salesOrders";
+import { MARKETPLACES, STATUS_BUCKETS, statusBucket, shippedOrFilter, cancelledOrFilter, salesStatusLabel, startOfYesterdayIso, summarizeDays, type DayCount, type StatusBucket } from "@/lib/salesOrders";
 import { escapeLike } from "@/lib/search";
 import { type MemberLite } from "@/lib/displayName";
 import type { ShipPrefill } from "@/lib/shipping";
@@ -18,7 +18,7 @@ import PadSerialsCell, { MAX_PADS } from "./PadSerialsCell";
 
 const pill = (active: boolean) =>
   `px-3 py-1.5 rounded-full text-sm font-semibold border ${active ? "bg-ink text-paper border-ink" : "bg-white border-line"}`;
-// Mniejsza wersja — filtry w pasku ponad listą (np. "Nasz status"), obok "Pokaż"/"strona X z Y", nie sam przełącznik podstron.
+// Mniejsza wersja — filtry w pasku ponad listą (marketplace, Etap), obok "Pokaż"/"strona X z Y", nie sam przełącznik podstron.
 const smallPill = (active: boolean) =>
   `px-2.5 py-1 rounded-full text-xs font-semibold border whitespace-nowrap ${active ? "bg-ink text-paper border-ink" : "bg-white border-line text-inksoft"}`;
 const PAGE_SIZES = [10, 20, 50, 100, 200];
@@ -327,11 +327,10 @@ type SalesRow = {
   tracking_number: string | null;
   country_code: string | null;
   shipping_method: string | null;
-  our_status: OurStatus;
   sales_order_items: SalesItem[];
 };
 const SALES_COLUMNS =
-  "marketplace, external_id, order_date, status, sku, tracking_number, country_code, shipping_method, our_status, sales_order_items(item_key, position, sku, serial_number, pads, pad_serials)";
+  "marketplace, external_id, order_date, status, sku, tracking_number, country_code, shipping_method, sales_order_items(item_key, position, sku, serial_number, pads, pad_serials)";
 const rowKey = (r: { marketplace: string; external_id: string }) => `${r.marketplace}:${r.external_id}`;
 
 // Back Market daje numer przesyłki, refurbed tylko link śledzenia — link pokazujemy jako klikalne "śledzenie".
@@ -354,9 +353,8 @@ const MARKETPLACE_STYLE: Record<string, string> = {
   amazon: "bg-[#2a2a2a] text-[#ff9900]",
 };
 
-const OUR_STATUS_STYLE: Record<OurStatus, string> = {
+const STATUS_BUCKET_STYLE: Record<StatusBucket, string> = {
   nowe: "bg-rustsoft text-rust",
-  w_realizacji: "bg-ambersoft text-amber",
   wyslane: "bg-tealsoft text-teal",
   anulowane: "bg-paper text-inksoft border border-line",
 };
@@ -405,7 +403,7 @@ function OrdersList({
   const [pageSize, setPageSize] = useState(50);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<OurStatus | "wszystkie">("nowe");
+  const [statusFilter, setStatusFilter] = useState<StatusBucket | "wszystkie">("nowe");
   const [marketplaceFilter, setMarketplaceFilter] = useState<string | "wszystkie">("wszystkie");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -451,7 +449,13 @@ function OrdersList({
     const from = (page - 1) * pageSize;
     let q = supabase.from("sales_orders").select(SALES_COLUMNS, { count: "exact" });
     if (search) q = q.ilike("external_id", `%${escapeLike(search)}%`);
-    if (statusFilter !== "wszystkie") q = q.eq("our_status", statusFilter);
+    // Filtr statusu liczony wprost ze statusu kanału (patrz statusBucket w lib/salesOrders.ts), nie z osobnej
+    // kolumny — "Nowe" to NOT (wysłane OR anulowane), stąd `not.or=(...)`. supabase-js nie ma wprost metody na
+    // złożone "not.or", więc nadużywamy parametru foreignTable w .or() (`key = foreignTable + ".or"` w źródle
+    // biblioteki) — sprawdzone bezpośrednio na żywej bazie, że daje poprawny, zweryfikowany wynik.
+    if (statusFilter === "wyslane") q = q.or(shippedOrFilter());
+    else if (statusFilter === "anulowane") q = q.or(cancelledOrFilter());
+    else if (statusFilter === "nowe") q = q.or(`${shippedOrFilter()},${cancelledOrFilter()}`, { foreignTable: "not" });
     if (marketplaceFilter !== "wszystkie") q = q.eq("marketplace", marketplaceFilter);
     // Erli: dopóki zamówienie nie jest opłacone (albo za pobraniem), na liście tylko zaśmieca "Nowe" — klient może
     // się jeszcze rozmyślić i nigdy nie zapłacić. Pokazujemy je dopiero, gdy status to "Opłacone"/"Za pobraniem".
@@ -513,40 +517,6 @@ function OrdersList({
       );
       rowsRef.current = next;
       setRows(next);
-    });
-  }
-
-  // Nasz status realizacji (poziom zamówienia): zmiana + wpis do logu w jednej transakcji (funkcja bazy).
-  function changeOurStatus(order: SalesRow, status: OurStatus) {
-    setError("");
-    const key = rowKey(order);
-    saveQueue.current = saveQueue.current.then(async () => {
-      const cur = rowsRef.current.find((r) => rowKey(r) === key);
-      if (!cur || cur.our_status === status) return;
-      const label = (k: string) => OUR_STATUSES.find((o) => o.key === k)?.label ?? k;
-      const entry: SalesHistoryEntry = {
-        action: "edited",
-        by_email: session.user.email ?? null,
-        at: new Date().toISOString(),
-        changes: [{ field: "Nasz status", from: label(cur.our_status), to: label(status) }],
-      };
-      const { error: err } = await supabase.rpc("sales_order_set_status", {
-        p_marketplace: cur.marketplace,
-        p_external_id: cur.external_id,
-        p_status: status,
-        p_entry: entry,
-      });
-      if (err) {
-        setError(`Nie udało się zmienić statusu: ${err.message}`);
-        await load(); // select jest kontrolowany przez React — przywróć stan z bazy
-        return;
-      }
-      const next = rowsRef.current.map((r) => (rowKey(r) === key ? { ...r, our_status: status } : r));
-      rowsRef.current = next;
-      setRows(next);
-      // Akceptacja zamówienia u marketplace'u (Back Market) NIE jest już tu wywoływana automatycznie — od
-      // 29.09.2026 to osobny, jawny przycisk "Zaakceptuj zamówienie" na karcie zamówienia (SalesOrderCard.tsx),
-      // niezależny od "Nasz status" (poprzednio jedno przesłaniało drugie, mimo że to dwie różne rzeczy).
     });
   }
 
@@ -615,7 +585,7 @@ function OrdersList({
         middle={
           <div className="flex items-center gap-2">
             <button onClick={() => { setStatusFilter("wszystkie"); setPage(1); }} className={smallPill(statusFilter === "wszystkie")}>Wszystkie</button>
-            {OUR_STATUSES.map((s) => (
+            {STATUS_BUCKETS.map((s) => (
               <button key={s.key} onClick={() => { setStatusFilter(s.key); setPage(1); }} className={smallPill(statusFilter === s.key)}>{s.label}</button>
             ))}
           </div>
@@ -637,7 +607,7 @@ function OrdersList({
               <th className="p-3">Numer seryjny</th>
               <th className="p-3">Pady</th>
               <th className="p-3">Nr seryjny padów</th>
-              <th className="p-3">Nasz status</th>
+              <th className="p-3">Etap</th>
             </tr>
           </thead>
           <tbody>
@@ -698,15 +668,9 @@ function OrdersList({
                   )}
                   {idx === 0 && (
                     <td rowSpan={items.length} className="p-3">
-                      <select
-                        value={r.our_status}
-                        onChange={(ev) => changeOurStatus(r, ev.target.value as OurStatus)}
-                        className={`text-xs font-semibold px-2 py-1 rounded-full border-none ${OUR_STATUS_STYLE[r.our_status]}`}
-                      >
-                        {OUR_STATUSES.map((o) => (
-                          <option key={o.key} value={o.key}>{o.label}</option>
-                        ))}
-                      </select>
+                      <span className={`inline-block text-xs font-semibold px-2 py-1 rounded-full whitespace-nowrap ${STATUS_BUCKET_STYLE[statusBucket(r.marketplace, r.status)]}`}>
+                        {STATUS_BUCKETS.find((b) => b.key === statusBucket(r.marketplace, r.status))?.label}
+                      </span>
                     </td>
                   )}
                 </tr>

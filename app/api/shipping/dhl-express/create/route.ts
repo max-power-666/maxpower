@@ -4,7 +4,7 @@ import { requireRole } from "@/lib/serverAuth";
 import { DhlExpressError, dhlCreateShipment, dhlExpressConfigFromEnv, type CreateShipmentInput } from "@/lib/dhlExpress";
 import { parseShipmentBody } from "@/lib/shipmentInput";
 import { parcelTrackingUrl } from "@/lib/parcelServer";
-import { notifyMarketplace, markOurStatusShipped } from "@/lib/shipmentMarketplaceSync";
+import { notifyMarketplace } from "@/lib/shipmentMarketplaceSync";
 
 // Nadanie przesyłki DHL Express (POST /shipments) — tylko Admin, Manager i Zamówienia.
 // UWAGA: na środowisku produkcyjnym to PRAWDZIWA przesyłka na koncie DHL (koszt), a DHL Express nie pozwala jej anulować przez API.
@@ -99,7 +99,6 @@ export async function POST(request: Request) {
     // Przesyłka JUŻ istnieje w DHL — oddajemy numer i etykietę, żeby nic się nie zmarnowało, i mówimy wprost, co się stało.
     // Zgłaszamy ją do marketplace'u mimo to (przesyłka jest prawdziwa niezależnie od tego, czy zapis u nas się udał).
     const sync = await notifyMarketplace(db, { marketplace: order?.marketplace ?? null, externalId: order?.externalId ?? null, carrier: "dhl_express", trackingNumber: created.trackingNumber, trackingUrl });
-    const statusResult = await markOurStatusShipped(db, { marketplace: order?.marketplace ?? null, externalId: order?.externalId ?? null, byEmail });
     return NextResponse.json({
       ok: true,
       saved: false,
@@ -110,16 +109,13 @@ export async function POST(request: Request) {
       labelFormat: created.labelFormat,
       marketplaceSynced: sync.synced,
       marketplaceSyncError: sync.error,
-      ourStatusError: statusResult.error,
     });
   }
 
-  // Zgłoszenie do marketplace'u i zmiana "Nasz status" nigdy nie failują odpowiedzi — przesyłka jest już nadana
-  // i zapisana; błąd zostaje w kolumnach shipments.marketplace_sync* (UI pokazuje ostrzeżenie z "Zgłoś ponownie" —
-  // route sync-marketplace) albo trzeba poprawić "Nasz status" ręcznie z listy Zamówień.
+  // Zgłoszenie do marketplace'u nigdy nie failuje odpowiedzi — przesyłka jest już nadana i zapisana; błąd zostaje
+  // w kolumnach shipments.marketplace_sync* (UI pokazuje ostrzeżenie z "Zgłoś ponownie" — route sync-marketplace).
   const sync = await notifyMarketplace(db, { marketplace: order?.marketplace ?? null, externalId: order?.externalId ?? null, carrier: "dhl_express", trackingNumber: created.trackingNumber, trackingUrl });
   await db.from("shipments").update({ marketplace_synced_at: sync.synced ? new Date().toISOString() : null, marketplace_sync_error: sync.error }).eq("id", row.id);
-  const statusResult = await markOurStatusShipped(db, { marketplace: order?.marketplace ?? null, externalId: order?.externalId ?? null, byEmail });
 
   return NextResponse.json({
     ok: true,
@@ -132,6 +128,5 @@ export async function POST(request: Request) {
     warnings: created.warnings,
     marketplaceSynced: sync.synced,
     marketplaceSyncError: sync.error,
-    ourStatusError: statusResult.error,
   });
 }

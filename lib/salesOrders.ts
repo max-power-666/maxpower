@@ -12,14 +12,55 @@ export const MARKETPLACES = [
   { key: "apilo", label: "Amazon (Apilo)" }, // integracja wycofana (zastąpiona bezpośrednim SP-API) — etykieta zostaje tylko dla historycznych zamówień
 ] as const;
 
-// Nasz wewnętrzny status realizacji zamówienia (niezależny od statusu kanału) — kolumna sales_orders.our_status.
-export const OUR_STATUSES = [
+// Kubełek statusu do filtrowania/wyświetlania na liście Zamówień — zastępuje dawne "Nasz status" (ręcznie
+// zmieniane pole `sales_orders.our_status`), wycofane 30.09.2026 na prośbę właściciela: zamiast ręcznie śledzić
+// postęp, korzystamy wprost ze statusu, jaki już mamy z synchronizacji każdego kanału. "Wysłane" i "Anulowane" to
+// zamknięte, jednoznaczne stany; wszystko inne (do zaakceptowania, do wysyłki, oczekuje na płatność, opłacone, za
+// pobraniem, w przygotowaniu...) to po prostu "Nowe" — wymaga jeszcze działania z naszej strony. Kolumna
+// `our_status` zostaje w bazie jako martwy, nieużywany relikt (bez migracji usuwającej) — to samo podejście co przy
+// tabeli `units` czy `apilo_orders`.
+export type StatusBucket = "nowe" | "wyslane" | "anulowane";
+export const STATUS_BUCKETS: { key: StatusBucket; label: string }[] = [
   { key: "nowe", label: "Nowe" },
-  { key: "w_realizacji", label: "W realizacji" },
   { key: "wyslane", label: "Wysłane" },
   { key: "anulowane", label: "Anulowane" },
-] as const;
-export type OurStatus = (typeof OUR_STATUSES)[number]["key"];
+];
+
+// Te same listy co przy jednorazowych porządkach z 28-29.09.2026 (patrz historia zmian) — tam ustawiały
+// "Nasz status" raz, tu klasyfikują na bieżąco, bez zapisu do bazy. refurbed FULFILLED (zrealizowane, czyli już
+// dawno wysłane) i REJECTED/RETURNED (odrzucone/zwrócone — zamknięte, jak anulowane) dopisane tu świadomie, żeby
+// nie zaśmiecały "Nowe" mimo że nie były częścią tamtego jednorazowego backfillu.
+const SHIPPED_STATUS: Record<string, string[]> = {
+  backmarket: ["9"],
+  refurbed: ["SHIPPED", "FULFILLED"],
+  octopia: ["Shipped", "Delivered"],
+  amazon: ["Shipped"],
+};
+const CANCELLED_STATUS: Record<string, string[]> = {
+  backmarket: ["cancelled", "refunded"],
+  refurbed: ["CANCELLED", "REJECTED", "RETURNED"],
+  erli: ["cancelled", "returned"],
+  allegro: ["CANCELLED"],
+  octopia: ["Cancelled", "Rejected"],
+  amazon: ["Canceled"],
+};
+
+export function statusBucket(marketplace: string, status: string): StatusBucket {
+  if ((SHIPPED_STATUS[marketplace] ?? []).includes(status)) return "wyslane";
+  if ((CANCELLED_STATUS[marketplace] ?? []).includes(status)) return "anulowane";
+  return "nowe";
+}
+
+// Fragment filtra PostgREST (do supabase-js .or()/.not()) dla danego kubełka, zbudowany z TYCH SAMYCH list co
+// statusBucket — żeby filtr na liście i etykieta w wierszu nigdy sobie nie zaprzeczyły. "Nowe" to NOT (wysłane OR
+// anulowane), więc nie potrzebuje własnej listy — patrz użycie w SalesOrdersHub.tsx.
+function bucketOrFilter(map: Record<string, string[]>): string {
+  return Object.entries(map)
+    .map(([mp, statuses]) => (statuses.length === 1 ? `and(marketplace.eq.${mp},status.eq.${statuses[0]})` : `and(marketplace.eq.${mp},status.in.(${statuses.join(",")}))`))
+    .join(",");
+}
+export const shippedOrFilter = () => bucketOrFilter(SHIPPED_STATUS);
+export const cancelledOrFilter = () => bucketOrFilter(CANCELLED_STATUS);
 
 // Stany zamówienia Back Market (dokumentacja API, tabela "Order State").
 export const BM_ORDER_STATES: Record<string, string> = {
@@ -173,7 +214,7 @@ export function bmDerivedStatus(o: any): string {
   return String(o.state);
 }
 
-// Metoda wysyłki (na razie tylko Back Market — inne kanały nie mają tego pola, our_status: null -> "—" w UI).
+// Metoda wysyłki (na razie tylko Back Market — inne kanały nie mają tego pola, null -> "—" w UI).
 // Back Market API nie ma osobnego pola "standard/express": jedyny sygnał to shipper_display, nazwa przewoźnika/
 // usługi wybrana dla zamówienia ("DHL" albo "DHL Express" w danych Recoo — potwierdzone na żywych zamówieniach,
 // zanim jeszcze cokolwiek wysłaliśmy, więc to nie echo tego, co MY zgłaszamy, tylko coś ustalone wcześniej).
