@@ -67,6 +67,18 @@ Rola jest zwykłym tekstem w `members.role` — dodanie roli nie wymaga SQL.
 Uwaga: nazwa zakładki "Bidder" to klucz `tradein`, a zakładka "Trade-in" to klucz `orders` —
 historyczne, nie mylić. Aktywna zakładka jest zapamiętywana w `localStorage`.
 
+**Dostęp do zakładek per osoba (od 30.09.2026).** Tabela wyżej to tylko DOMYŚLNY zestaw wg roli (`ROLE_ACCESS`
+w `app/page.tsx`) — Admin może go nadpisać dla KAŻDEJ osoby z osobna w zakładce Zespół: przy każdym członku zespołu
+checkbox przy każdej zakładce, zapisywane w `members.view_access` (`text[]`, `null` = jeszcze nikt nie dotykał, więc
+liczy się domyślny zestaw dla roli). `effectiveAccess(role, viewAccess)` w `app/page.tsx` liczy efektywny dostęp
+(nadpisanie, jeśli jest, inaczej `ROLE_ACCESS[role]`) i jest jedynym miejscem, które o tym decyduje — użyte zarówno
+przy filtrowaniu nawigacji/gate'owaniu widoku dla zalogowanej osoby, jak i przy renderowaniu checkboxów w Zespole
+dla każdego wiersza. "Przegląd" jest zawsze wymuszony (checkbox zablokowany, zaznaczony) — nie da się nikogo całkiem
+zablokować z aplikacji. Przycisk "Resetuj do domyślnych (rola)" czyści nadpisanie (`view_access = null`) — zmiana
+samej roli NIE resetuje automatycznie nadpisania (świadomie, żeby poprawka literówki w roli nie kasowała starannie
+dobranego dostępu; do zresetowania służy ten przycisk). Nadal tylko UI (RLS pozwala każdemu `authenticated` na
+wszystko) — twarde uprawnienia per rola są w planie rozwoju, punkt 10.
+
 ## Model danych i moduły
 
 **Magazyn.** Zakładka ma dwa podwidoki: *Podsumowanie* (liczba sztuk ze `stock_level = 1`, wartość

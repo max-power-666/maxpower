@@ -35,11 +35,13 @@ const TABS: { key: ViewKey; label: string }[] = [
   { key: "returns", label: "Zwroty" },
 ];
 
-// Kto widzi jaką zakładkę — rola = zakładka, Admin ma dostęp do wszystkiego,
-// Przegląd jest wspólną stroną startową dla każdej roli. Na razie tylko filtruje
-// nawigację w tej przeglądarce — to nie jest twarde zabezpieczenie (RLS pozwala
-// każdemu authenticated na wszystko, patrz supabase/schema.sql). Zmień tę mapę,
-// żeby dopasować dostęp do ról.
+// Kto widzi jaką zakładkę — DOMYŚLNY zestaw wg roli, Admin ma dostęp do wszystkiego,
+// Przegląd jest wspólną stroną startową dla każdej roli. Admin może to nadpisać per
+// osoba w Zespole (checkboxy przy każdej zakładce, `members.view_access` — patrz
+// `effectiveAccess`); ta mapa jest tylko domyślnym punktem startowym dla nowej roli
+// i dla osób, których nikt jeszcze nie dotknął ręcznie (view_access = NULL). Na razie
+// to tylko filtruje nawigację w tej przeglądarce — to nie jest twarde zabezpieczenie
+// (RLS pozwala każdemu authenticated na wszystko, patrz supabase/schema.sql).
 // "orders" (zakładka Trade-in — podgląd zamówień BuyBack) na razie tylko dla Admina,
 // dopóki nie ustalimy docelowej roli dla osoby przetwarzającej zamówienia.
 const ROLE_ACCESS: Record<string, ViewKey[]> = {
@@ -52,7 +54,13 @@ const ROLE_ACCESS: Record<string, ViewKey[]> = {
   Bidder: ["overview", "tradein", "backlog", "rcp", "returns"],
 };
 
-type Member = { user_id: string; role: string; email: string; name: string };
+type Member = { user_id: string; role: string; email: string; name: string; view_access: string[] | null };
+
+// Dostęp do zakładek dla danego członka zespołu: view_access (jeśli ustawiony przez Admina w Zespole) nadpisuje
+// domyślny zestaw z ROLE_ACCESS dla jego roli. NULL = jeszcze nikt tego nie dotykał, używamy domyślnego wg roli.
+function effectiveAccess(role: string, viewAccess: string[] | null | undefined, fallback: ViewKey[] = ["overview", "inventory"]): ViewKey[] {
+  return (viewAccess as ViewKey[] | null | undefined) ?? ROLE_ACCESS[role] ?? fallback;
+}
 
 type FakturowniaCategorySummary = { name: string; count: number; value: number };
 type FakturowniaSummary = { totalCount: number; totalValue: number; categories: FakturowniaCategorySummary[] };
@@ -152,6 +160,7 @@ function NoRoleScreen({ email, onRetry }: { email: string; onRetry: () => void }
 export default function Home() {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   const [role, setRole] = useState<string | undefined>(undefined);
+  const [viewAccess, setViewAccess] = useState<string[] | null>(null);
   const [roleError, setRoleError] = useState("");
   const [units, setUnits] = useState<Unit[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
@@ -222,13 +231,13 @@ export default function Home() {
   // jeśli rola nie ma już dostępu do aktualnie otwartej zakładki (np. zmieniła się rola), wróć do Przeglądu
   useEffect(() => {
     if (!role) return;
-    const allowed = ROLE_ACCESS[role] ?? ["overview", "inventory"];
+    const allowed = effectiveAccess(role, viewAccess);
     if (!allowed.includes(view)) setView("overview");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [role]);
+  }, [role, viewAccess]);
 
   async function loadRole() {
-    const attempt = () => supabase.from("members").select("role").eq("user_id", session!.user.id).maybeSingle();
+    const attempt = () => supabase.from("members").select("role, view_access").eq("user_id", session!.user.id).maybeSingle();
     let { data, error } = await attempt();
     if (error && /jwt/i.test(error.message)) {
       // Token dostępu wygasł — typowo karta była długo w tle (uśpiony komputer, zminimalizowane okno) i
@@ -252,26 +261,31 @@ export default function Home() {
     setRoleError("");
     if (data) {
       setRole(data.role ?? "");
+      setViewAccess((data.view_access as string[] | null) ?? null);
     } else {
       // Pierwsze logowanie: zakładamy wiersz z pustą rolą, żeby admin zobaczył
       // to konto w Zespole i mógł mu przypisać rolę. Sam użytkownik już jej nie wybiera.
       await supabase.from("members").insert({ user_id: session!.user.id, role: "", email: session!.user.email });
       setRole("");
+      setViewAccess(null);
     }
   }
-  // Zmiana roli / imienia innego użytkownika — wywoływane z Zespołu (tylko Admin widzi tę zakładkę).
+  // Zmiana roli / imienia / dostępu do zakładek innego użytkownika — wywoływane z Zespołu (tylko Admin widzi tę zakładkę).
   async function changeMemberRole(userId: string, r: string) {
     await supabase.from("members").update({ role: r }).eq("user_id", userId);
   }
   async function changeMemberName(userId: string, name: string) {
     await supabase.from("members").update({ name }).eq("user_id", userId);
   }
+  async function changeMemberAccess(userId: string, access: ViewKey[] | null) {
+    await supabase.from("members").update({ view_access: access }).eq("user_id", userId);
+  }
   async function loadUnits() {
     const { data } = await supabase.from("units").select("*").order("created_at", { ascending: false });
     setUnits((data as Unit[]) || []);
   }
   async function loadMembers() {
-    const { data } = await supabase.from("members").select("user_id, role, email, name").order("email");
+    const { data } = await supabase.from("members").select("user_id, role, email, name, view_access").order("email");
     setMembers((data as Member[]) || []);
   }
   // Supabase (PostgREST) domyślnie zwraca max 1000 wierszy na zapytanie — przy > 1000
@@ -377,7 +391,7 @@ export default function Home() {
       <aside className="w-44 shrink-0 bg-panel border-r border-line p-4 flex flex-col">
         <div className="font-bold text-lg mb-6">MAGAZYN</div>
         <nav className="flex flex-col gap-1">
-          {TABS.filter((t) => (ROLE_ACCESS[role] ?? ["overview", "inventory"]).includes(t.key)).map((t) => (
+          {TABS.filter((t) => effectiveAccess(role ?? "", viewAccess).includes(t.key)).map((t) => (
             <button key={t.key} onClick={() => setView(t.key)} className={`text-left px-3 py-2 rounded text-sm font-medium ${view === t.key ? "bg-white border border-line" : "text-inksoft"}`}>
               {t.label}
             </button>
@@ -455,7 +469,7 @@ export default function Home() {
               session={session}
               members={members}
               isAdmin={role === "Admin"}
-              canShip={(ROLE_ACCESS[role ?? ""] ?? []).includes("shipping")}
+              canShip={effectiveAccess(role ?? "", viewAccess, []).includes("shipping")}
               onShip={(p) => {
                 setShipPrefill(p);
                 setView("shipping");
@@ -469,6 +483,7 @@ export default function Home() {
               canEdit={role === "Admin"}
               onChangeRole={changeMemberRole}
               onChangeName={changeMemberName}
+              onChangeAccess={changeMemberAccess}
             />
           )}
 
@@ -622,12 +637,14 @@ function TeamView({
   canEdit,
   onChangeRole,
   onChangeName,
+  onChangeAccess,
 }: {
   members: Member[];
   currentUserId: string;
   canEdit: boolean; // role i imiona zmienia tylko Admin (polityka w bazie); reszta widzi listę tylko do odczytu
   onChangeRole: (userId: string, role: string) => void;
   onChangeName: (userId: string, name: string) => void;
+  onChangeAccess: (userId: string, access: ViewKey[] | null) => void;
 }) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
 
@@ -648,6 +665,15 @@ function TeamView({
     const current = members.find((m) => m.user_id === userId)?.name ?? "";
     if (value.trim() !== current.trim()) onChangeName(userId, value.trim());
     cancelEdit(userId);
+  }
+
+  // "Przegląd" jest wspólną stroną startową dla każdej roli — zawsze wymuszony, nie da się go odznaczyć
+  // (inaczej dałoby się kogoś całkiem zablokować z aplikacji).
+  function toggleAccess(m: Member, key: ViewKey) {
+    if (key === "overview") return;
+    const current = effectiveAccess(m.role, m.view_access);
+    const next = current.includes(key) ? current.filter((k) => k !== key) : [...current, key];
+    onChangeAccess(m.user_id, (next.includes("overview") ? next : ["overview", ...next]) as ViewKey[]);
   }
 
   return (
@@ -718,8 +744,28 @@ function TeamView({
                     ))}
                   </select>
                 </td>
-                <td className="p-3 text-xs text-inksoft">
-                  {(ROLE_ACCESS[m.role] ?? []).map((k) => TABS.find((t) => t.key === k)?.label).join(", ") || "—"}
+                <td className="p-3">
+                  <div className="flex flex-wrap gap-x-3 gap-y-1 max-w-md">
+                    {TABS.map((t) => {
+                      const checked = effectiveAccess(m.role, m.view_access).includes(t.key);
+                      return (
+                        <label key={t.key} className={`flex items-center gap-1 text-xs ${canEdit && t.key !== "overview" ? "cursor-pointer" : ""} ${checked ? "text-ink" : "text-inksoft"}`}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            disabled={!canEdit || t.key === "overview"}
+                            onChange={() => toggleAccess(m, t.key)}
+                          />
+                          {t.label}
+                        </label>
+                      );
+                    })}
+                  </div>
+                  {canEdit && m.view_access !== null && (
+                    <button onClick={() => onChangeAccess(m.user_id, null)} className="text-xs font-semibold text-teal hover:underline mt-1">
+                      Resetuj do domyślnych (rola)
+                    </button>
+                  )}
                 </td>
               </tr>
             );

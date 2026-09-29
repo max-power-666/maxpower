@@ -11,8 +11,10 @@ create table if not exists members (
   role text not null,
   email text default '',                -- zapisywany przy wyborze roli, żeby zakładka Zespół mogła pokazać kto jest kim
   name text default '',                 -- imię i nazwisko, ustawiane przez Admina w Zespole; skrócone (np. "Maksymilian J.") w logach
+  view_access text[],                   -- nadpisanie dostępu do zakładek (klucze ViewKey) ponad domyślny wg roli; NULL = użyj domyślnego
   created_at timestamptz default now()
 );
+alter table members add column if not exists view_access text[];
 
 -- Jednostki magazynowe (każde fizyczne urządzenie)
 create table if not exists units (
