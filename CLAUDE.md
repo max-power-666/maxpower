@@ -140,7 +140,7 @@ postęp). "Wysłane" i "Anulowane" to zamknięte, jednoznaczne statusy per kana�
 ma takiej wartości, nasz znacznik wyliczony przy synchronizacji (`bmDerivedStatus`/`erliDerivedStatus`/
 `allegroDerivedStatus`, patrz opisy kanałów niżej): Back Market `9`/`cancelled`/`refunded`, refurbed
 `SHIPPED`/`FULFILLED`/`CANCELLED`/`REJECTED`/`RETURNED`, Erli `sent`(★)/`cancelled`/`returned`, Allegro
-`SENT`(★)/`CANCELLED`/`RETURNED`(★), Octopia `Shipped`/`Delivered`/`Cancelled`/`Rejected`, Amazon `Shipped`/`Canceled`
+`SENT`(★)/`CANCELLED`/`RETURNED`(★), Octopia `Shipped`/`Delivered`/`Cancelled`/`Rejected`/`Refused`, Amazon `Shipped`/`Canceled`
 — (★) = nasz znacznik, nie wartość z API. Wszystko inne (do
 zaakceptowania, do wysyłki, oczekuje na płatność, opłacone, za pobraniem, w przygotowaniu...) to po prostu "Nowe".
 Filtr na liście (pigułki Wszystkie/Nowe/Wysłane/Anulowane) buduje z TYCH SAMYCH list (`shippedOrFilter`/
@@ -282,8 +282,12 @@ krótsza niż 100). Autoryzacja OAuth2 client_credentials na OSOBNYM serwerze (`
 każde zapytanie. Zapytania do danych niosą `Authorization: Bearer <token>` i `SellerId: <numer sprzedawcy>`. Numer zamówienia = `orderId`, data =
 `purchasedAt` (a gdy brak — `createdAt`), status = `status` (Processing/WaitingAcceptance/Accepted/Refused/InPreparation/Shipped/Delivered/Cancelled/Rejected,
 etykiety w `OCTOPIA_ORDER_STATES`), SKU = `lines[].offer.sellerProductId`; pozycja z `quantity` > 1 rozbijana na sztuki jak w pozostałych kanałach. Numer
-przesyłki = pierwszy `parcels[].parcelNumber` znaleziony w dowolnej pozycji. Nie testowane na żywym API (brak danych dostępowych w środowisku asystenta) —
-zweryfikowane na atrapie `fetch` wg specyfikacji OpenAPI (developer.octopia-io.net).
+przesyłki = pierwszy `parcels[].parcelNumber` znaleziony w dowolnej pozycji. **`Refused` ("Odrzucone") liczył się jako "Nowe" zamiast "Anulowane"
+do 30.09.2026** — zgłoszone przez właściciela (lista pełna odrzuconych zamówień z sierpnia/września w "Nowe"); sprawdzone na żywych danych: 56 z
+872 zsynchronizowanych zamówień Octopia miało status `Refused`. Dodane do `CANCELLED_STATUS.octopia` (`statusBucket`, obok już tam będących
+`Cancelled`/`Rejected`) i do `NOT_COUNTED.octopia` — **Octopia w ogóle nie miała wpisu w `NOT_COUNTED`**, więc nawet `Cancelled`/`Rejected` liczyły
+się dotąd w kafelkach "Zamówienia dzisiaj/wczoraj" jak żywe zamówienia (poprawione przy okazji tego samego zgłoszenia, ten sam brakujący wzorzec).
+Nie testowane na żywym API (brak danych dostępowych w środowisku asystenta) — zweryfikowane na atrapie `fetch` wg specyfikacji OpenAPI (developer.octopia-io.net).
 **Amazon** (`marketplace = 'amazon'`, `lib/amazon.ts`, `app/api/orders/amazon-sync`, surowe dane w `amazon_orders`) — **bezpośrednia integracja
 z Amazon Selling Partner API (SP-API)**, zastąpiła dawny most przez Apilo (integracja Apilo wycofana 28.09.2026 — patrz niżej). Amazon dzieli sprzedawców na REGIONY (EU/NA/FE), nie kraje —
 konto zarejestrowane w Europie obsługuje wszystkie rynki UE (PL, DE, FR, ES, IT, BE, NL, IE, SE — pełna lista `AMAZON_EU_MARKETPLACE_IDS`) jednym

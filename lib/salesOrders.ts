@@ -43,7 +43,7 @@ const CANCELLED_STATUS: Record<string, string[]> = {
   refurbed: ["CANCELLED", "REJECTED", "RETURNED"],
   erli: ["cancelled", "returned"],
   allegro: ["CANCELLED", "RETURNED"], // RETURNED to też nasz znacznik (allegroDerivedStatus)
-  octopia: ["Cancelled", "Rejected"],
+  octopia: ["Cancelled", "Rejected", "Refused"], // Refused (56 zamówień na żywych danych) był pomijany — leciał do "nowe"
   amazon: ["Canceled"],
 };
 
@@ -504,6 +504,7 @@ const NOT_COUNTED: Record<string, string[]> = {
   refurbed: ["CANCELLED", "REJECTED", "RETURNED"],
   erli: ["cancelled", "returned", "pending"],
   allegro: ["CANCELLED", "BOUGHT", "FILLED_IN", "RETURNED"],
+  octopia: ["Cancelled", "Rejected", "Refused"], // brakujący wpis do 30.09.2026 — te statusy liczyły się jak żywe zamówienia
 };
 
 export function isCountedOrder(marketplace: string, status: string): boolean {
