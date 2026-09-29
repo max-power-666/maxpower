@@ -201,8 +201,15 @@ data = `released_at`, status = `state` (NEW/ACCEPTED/SHIPPED/...; etykiety w `RE
 pozycja API to jedna sztuka** (klucz = `item.id`). "Nr przesyłki" to link `parcel_tracking_url` pozycji (refurbed nie ma numeru) — lista
 pokazuje go jako "śledzenie". **refurbed nie ma filtra po dacie modyfikacji**, więc przyrostowo pobieramy (A) nowe po `released_at`
 (z zapasem 10 min) i (B) ponownie zamówienia w stanach NEW/ACCEPTED/SHIPPED z ostatnich 60 dni; pełny skan od 1 stycznia idzie
-z kursorem `sales_orders_sync_meta.scan_cursor`. Nie testowane na żywym API (brak tokena w środowisku asystenta) — zweryfikowane
-na atrapie `fetch` wg swaggera (gitlab.com/refurbed-community/public-apis).
+z kursorem `sales_orders_sync_meta.scan_cursor`. **`state` zamówienia potrafi utknąć na "ACCEPTED" mimo realnie wysłanej i dostarczonej
+paczki** — nasze własne zgłoszenie wysyłki (`notifyMarketplace` -> `BatchUpdateOrderItemsState`) ustawia numer przesyłki na pozycji, ale
+NIE zmienia `state`; realny postęp pokazuje osobne pole na pozycji `items[].shipment_status` (UNSPECIFIED/INFO_RECEIVED/IN_TRANSIT/
+OUT_FOR_DELIVERY/AVAILABLE_FOR_PICKUP/DELIVERED/FAILED_ATTEMPT/EXCEPTION — wypełniane dopiero, gdy przewoźnik zacznie raportować
+zdarzenia). Zgłoszone przez właściciela 30.09.2026 (kilka zamówień z numerem przesyłki widoczne w "Nowe", część sprzed prawie roku —
+`state` nie ma tu związku z wiekiem zamówienia, po prostu nigdy się nie zmienia tą drogą). `refurbedDerivedStatus` (`lib/salesOrders.ts`,
+wywoływane w `mapRefurbedToSales`) podnosi status do `SHIPPED` (istniejąca wartość, już w `SHIPPED_STATUS`), gdy KTÓRAKOLWIEK pozycja ma
+`shipment_status` różny od `UNSPECIFIED`/pusty — `state` `CANCELLED`/`REJECTED`/`RETURNED` zostaje NADRZĘDNY. Nie testowane na żywym API
+(brak tokena w środowisku asystenta) — zweryfikowane na atrapie `fetch` wg swaggera (gitlab.com/refurbed-community/public-apis).
 **Erli** (`marketplace = 'erli'`, `lib/erli.ts`, `app/api/orders/erli-sync`, surowe dane w `erli_orders`): `POST https://erli.pl/svc/shop-api/orders/_search`,
 `Authorization: Bearer <klucz>`, odpowiedź to zwykła tablica zamówień (bez has_more — koniec listy = strona krótsza niż limit 200).
 **Sortujemy po `updated` rosnąco i idziemy kursorem** (`pagination.after` = pole `cursor` ostatniego zamówienia), a kursor trzymamy w
@@ -231,7 +238,16 @@ do `cancelled`/`returned`, gdy `sellerStatus` to `canceled`/`returned`/`returnin
 (`cancelled`/`returned`) jest przy tym NADRZĘDNY, sellerStatus już nic tam nie zmienia. **Zgłoszone przez właściciela
 30.09.2026** ("stare zamówienia z Erli które już wysłałem mają status Opłacone") — na żywych danych aż 472 zamówienia
 z `seller_status="received"` (DOSTARCZONE) miały `sales_orders.status` wciąż "purchased"; jednorazowa poprawka
-istniejących wierszy uruchomiona ręcznie w Supabase SQL Editor (poza plikami schematu). **Niezapłacone zamówienia Erli
+istniejących wierszy uruchomiona ręcznie w Supabase SQL Editor (poza plikami schematu). **Trzeci, jeszcze bardziej
+wiarygodny sygnał: `deliveryTracking.status`** — realny status śledzenia przesyłki OD PRZEWOŹNIKA (`vendor`:
+inpost/dhl/...; wartości: preparing/readyToSend/waitingForCourier/sent/readyToPickup/pickupTimeExpired/delivered/
+returned/canceled/deliveryUnsuccessful/redirected), niezależny od `sellerStatus` (które jest tylko polem "co
+sprzedawca ustawił w panelu Erli" i potrafi utknąć, mimo że przesyłka faktycznie dojechała) — dodane do
+`erliDerivedStatus` 30.09.2026, sprawdzone na żywych danych **przy tym samym zgłoszeniu**: 34 zamówienia miały
+`deliveryTracking.status` = `sent`/`delivered`, a `sellerStatus` wciąż `inProgress` (np. zamówienia sprzed
+prawie roku z numerem przesyłki, ale bez zmiany statusu — dokładnie ten przypadek zgłoszony przez właściciela).
+Oba sygnały (`sellerStatus` i `deliveryTracking.status`) sprawdzane równolegle, który pierwszy wskaże postęp,
+ten wygrywa; `returned` ma pierwszeństwo przed `sent`/`cancelled`. **Niezapłacone zamówienia Erli
 (`status = 'pending'`, "Oczekuje na płatność") są ukryte z listy "Zamówienia" w ogóle** (`OrdersList` w
 `SalesOrdersHub.tsx`, filtr PostgREST `marketplace.neq.erli,status.in.(purchased,purchased_cod,sent)`) — klient
 może się jeszcze rozmyślić i nigdy nie zapłacić, więc zaśmiecały widok "Nowe"; wciąż są zapisywane w bazie (sync ich nie pomija), tylko

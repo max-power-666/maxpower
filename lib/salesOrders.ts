@@ -301,13 +301,29 @@ const refurbedTracking = (o: any): string | null => {
   return null;
 };
 
+// Nasze własne zgłoszenie wysyłki (notifyMarketplace -> BatchUpdateOrderItemsState) ustawia numer przesyłki na
+// pozycji, ale NIE zmienia stanu zamówienia (o.state) na SHIPPED — a osobny mechanizm śledzenia po stronie
+// refurbed (item.shipment_status, wypełniany dopiero gdy przewoźnik zacznie raportować zdarzenia: INFO_RECEIVED/
+// IN_TRANSIT/OUT_FOR_DELIVERY/AVAILABLE_FOR_PICKUP/DELIVERED/FAILED_ATTEMPT/EXCEPTION) potrafi już pokazywać
+// realny postęp, podczas gdy o.state wciąż wisi na "ACCEPTED" — sprawdzone na żywych danych: zamówienie
+// zsynchronizowane 29.09.2026 miało item.shipment_status="DELIVERED" (paczka faktycznie doręczona wg DHL), a
+// o.state wciąż "ACCEPTED" (zgłoszone przez właściciela — kilka takich zamówień z numerem przesyłki w kolumnie
+// "Nowe"). refurbedDerivedStatus podnosi taki przypadek do "SHIPPED" (wartość, którą refurbed i tak czasem sam
+// zwraca — już w SHIPPED_STATUS) — o.state CANCELLED/REJECTED/RETURNED zostaje NADRZĘDNY, jak w pozostałych kanałach.
+function refurbedDerivedStatus(o: any): string {
+  const raw = String(o.state ?? "UNSPECIFIED");
+  if (raw === "CANCELLED" || raw === "REJECTED" || raw === "RETURNED") return raw;
+  const shipped = ((o.items as any[]) || []).some((it) => typeof it?.shipment_status === "string" && it.shipment_status && it.shipment_status !== "UNSPECIFIED");
+  return shipped ? "SHIPPED" : raw;
+}
+
 export function mapRefurbedToSales(o: any) {
   const skus = Array.from(new Set(((o.items as any[]) || []).map((i) => (typeof i?.sku === "string" ? i.sku.trim() : "")).filter(Boolean)));
   return {
     marketplace: "refurbed",
     external_id: String(o.id),
     order_date: o.released_at ?? null,
-    status: String(o.state ?? "UNSPECIFIED"),
+    status: refurbedDerivedStatus(o),
     sku: skus.length > 0 ? skus.join(", ") : null,
     tracking_number: refurbedTracking(o),
     country_code: normCountry(o.shipping_address?.country_code),
@@ -361,15 +377,25 @@ const erliItemSku = (it: any): string | null => {
 // inaczej sellerStatus może podnieść "purchased"/"purchased_cod" do "sent" (wysłane/w drodze/dostarczone — celowo
 // jeden wspólny znacznik, bez rozróżniania "w drodze" od "dostarczone") albo "cancelled"/"returned" (ten sam wzorzec
 // co bmDerivedStatus dla Back Marketu — zamówienie może się okazać zamknięte, mimo że jego własny `status` tego nie
-// pokazuje).
+// pokazuje). **Trzeci, jeszcze bardziej wiarygodny sygnał: `deliveryTracking.status`** — realny status śledzenia
+// przesyłki OD PRZEWOŹNIKA (InPost/DHL/...), niezależny od `sellerStatus` (który jest tylko polem "co sprzedawca
+// ustawił w panelu Erli" i potrafi utknąć, mimo że przesyłka faktycznie dojechała). Sprawdzone na żywych danych
+// 30.09.2026 (zgłoszenie właściciela — zamówienia sprzed prawie roku z numerem przesyłki wciąż pokazujące
+// "Opłacone"): 34 zamówienia miały `deliveryTracking.status` = "sent"/"delivered", a `sellerStatus` wciąż utknięty
+// na "inProgress". Oba sygnały sprawdzamy równolegle — który jako pierwszy wskaże postęp, ten wygrywa; `returned`
+// ma pierwszeństwo przed `sent`/`cancelled` (późniejszy etap cyklu życia).
 function erliDerivedStatus(o: any): string {
   const raw = String(o.status ?? "pending");
   if (raw === "cancelled" || raw === "returned") return raw;
   const base = raw === "purchased" && o.delivery?.cod === true ? "purchased_cod" : raw;
   const ss = o.sellerStatus;
-  if (ss === "sent" || ss === "readyToPickup" || ss === "received") return "sent";
-  if (ss === "canceled") return "cancelled";
-  if (ss === "returned" || ss === "returningToSender") return "returned";
+  const dt = o.deliveryTracking?.status;
+  const isReturned = ss === "returned" || ss === "returningToSender" || dt === "returned";
+  const isCancelled = ss === "canceled" || dt === "canceled";
+  const isSent = ss === "sent" || ss === "readyToPickup" || ss === "received" || dt === "sent" || dt === "readyToPickup" || dt === "delivered";
+  if (isReturned) return "returned";
+  if (isCancelled) return "cancelled";
+  if (isSent) return "sent";
   return base;
 }
 
