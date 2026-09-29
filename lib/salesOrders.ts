@@ -33,6 +33,7 @@ export const STATUS_BUCKETS: { key: StatusBucket; label: string }[] = [
 const SHIPPED_STATUS: Record<string, string[]> = {
   backmarket: ["9"],
   refurbed: ["SHIPPED", "FULFILLED"],
+  erli: ["sent"], // nasz znacznik (erliDerivedStatus) — Erli sam nie ma "wysłane" na poziomie zamówienia
   octopia: ["Shipped", "Delivered"],
   amazon: ["Shipped"],
 };
@@ -105,10 +106,14 @@ export const REFURBED_ORDER_STATES: Record<string, string> = {
 // Stany zamówienia Erli (pole status): pending = czeka na płatność, purchased = opłacone (także pobranie).
 // UWAGA: w API zamówienie za pobraniem (COD) też ma status "purchased" (tak samo jak opłacone), więc żeby ich nie mylić
 // zapisujemy je w sales_orders jako "purchased_cod" (patrz mapErliToSales) — to nasz znacznik, nie wartość z API.
+// "sent" to TEŻ nasz znacznik, nie wartość z API — Erli na poziomie zamówienia w ogóle nie ma statusu "wysłane"
+// (tylko pending/purchased/cancelled/returned); realny postęp (wysłano/dostarczono/wraca) siedzi w osobnym polu
+// sellerStatus (erli_orders.seller_status), patrz erliDerivedStatus.
 export const ERLI_ORDER_STATES: Record<string, string> = {
   pending: "Oczekuje na płatność",
   purchased: "Opłacone",
   purchased_cod: "Za pobraniem",
+  sent: "Wysłane",
   cancelled: "Anulowane",
   returned: "Zwrócone",
 };
@@ -342,6 +347,28 @@ const erliItemSku = (it: any): string | null => {
   return v || null;
 };
 
+// Status zamówienia (pending/purchased/cancelled/returned) NIE zawsze odzwierciedla realny postęp — Erli na tym
+// poziomie w ogóle nie ma wartości "wysłane". Prawdziwy postęp siedzi w osobnym polu sellerStatus (created/
+// readyToProcess/inProgress/sent/readyToPickup/received/returned/returningToSender/canceled/unknown — "Status
+// zamówienia w systemie sprzedawcy" wg dokumentacji Erli), które dociera do nas jako erli_orders.seller_status, ale
+// samo `status` go nie uwzględniało. Sprawdzone na żywych danych (30.09.2026, zgłoszenie właściciela): 472 zamówienia
+// z seller_status="received" (DOSTARCZONE) miały status zamówienia wciąż "purchased" ("Opłacone"). Priorytet:
+// cancelled/returned na poziomie ZAMÓWIENIA są jednoznaczne i nadrzędne (sellerStatus już nic tu nie zmienia);
+// inaczej sellerStatus może podnieść "purchased"/"purchased_cod" do "sent" (wysłane/w drodze/dostarczone — celowo
+// jeden wspólny znacznik, bez rozróżniania "w drodze" od "dostarczone") albo "cancelled"/"returned" (ten sam wzorzec
+// co bmDerivedStatus dla Back Marketu — zamówienie może się okazać zamknięte, mimo że jego własny `status` tego nie
+// pokazuje).
+function erliDerivedStatus(o: any): string {
+  const raw = String(o.status ?? "pending");
+  if (raw === "cancelled" || raw === "returned") return raw;
+  const base = raw === "purchased" && o.delivery?.cod === true ? "purchased_cod" : raw;
+  const ss = o.sellerStatus;
+  if (ss === "sent" || ss === "readyToPickup" || ss === "received") return "sent";
+  if (ss === "canceled") return "cancelled";
+  if (ss === "returned" || ss === "returningToSender") return "returned";
+  return base;
+}
+
 export function mapErliToSales(o: any) {
   const skus = Array.from(new Set(((o.items as any[]) || []).map(erliItemSku).filter((x): x is string => !!x)));
   const tr = o.deliveryTracking;
@@ -349,8 +376,7 @@ export function mapErliToSales(o: any) {
     marketplace: "erli",
     external_id: String(o.id),
     order_date: o.created ?? null,
-    // Za pobraniem = status "purchased" + delivery.cod. Tylko "purchased": anulowane/zwrócone zostają, jak są.
-    status: o.status === "purchased" && o.delivery?.cod === true ? "purchased_cod" : String(o.status ?? "pending"),
+    status: erliDerivedStatus(o),
     sku: skus.length > 0 ? skus.join(", ") : null,
     tracking_number: (tr?.trackingNumber && String(tr.trackingNumber).trim()) || (tr?.trackingUrl && String(tr.trackingUrl).trim()) || null,
     country_code: normCountry(o.user?.deliveryAddress?.country),

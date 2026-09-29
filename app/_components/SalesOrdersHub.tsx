@@ -443,8 +443,10 @@ function OrdersList({
     else if (statusFilter === "nowe") q = q.or(`${shippedOrFilter()},${cancelledOrFilter()}`, { foreignTable: "not" });
     if (marketplaceFilter !== "wszystkie") q = q.eq("marketplace", marketplaceFilter);
     // Erli: dopóki zamówienie nie jest opłacone (albo za pobraniem), na liście tylko zaśmieca "Nowe" — klient może
-    // się jeszcze rozmyślić i nigdy nie zapłacić. Pokazujemy je dopiero, gdy status to "Opłacone"/"Za pobraniem".
-    q = q.or("marketplace.neq.erli,status.in.(purchased,purchased_cod)");
+    // się jeszcze rozmyślić i nigdy nie zapłacić. Pokazujemy je dopiero, gdy status to "Opłacone"/"Za pobraniem"/
+    // "Wysłane" (nasz znacznik "sent" z erliDerivedStatus — samo "purchased" nie wystarczy, bo wysłane zamówienia
+    // dostają teraz ten status zamiast "purchased"; bez tego dopisania byłyby błędnie ukrywane).
+    q = q.or("marketplace.neq.erli,status.in.(purchased,purchased_cod,sent)");
     try {
       const { data, error: err, count } = await q
         .order("order_date", { ascending: false, nullsFirst: false })

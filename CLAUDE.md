@@ -207,16 +207,30 @@ mniejsza pula zamówień (tylko opłacone), więc mimo tego samego sortowania po
 skan już dawno minął. Własny kursor pod syntetycznym kluczem `erli_paid` w tej samej tabeli `sales_orders_sync_meta` (nie prawdziwy
 marketplace, tylko wewnętrzna księgowość drugiego skanu); dzieli budżet czasu funkcji z głównym skanem (`erliSweep` w `lib/erli.ts`
 przyjmuje teraz opcjonalny `filter`), pojedyncza porażka tego skanu nie psuje głównego wyniku (`paidSweepError` w odpowiedzi). Numer
-zamówienia = `Order.id`, data = `created`, status = `status` (pending/purchased/cancelled/returned, etykiety w
-`ERLI_ORDER_STATES`), SKU = `items[].sku`, a gdy brak — `items[].externalId`; pozycja z ilością > 1 rozbijana na sztuki jak w Back Market.
+zamówienia = `Order.id`, data = `created`, status = `status` (pending/purchased/cancelled/returned z API, plus nasze
+znaczniki `purchased_cod`/`sent`, etykiety w `ERLI_ORDER_STATES`), SKU = `items[].sku`, a gdy brak — `items[].externalId`;
+pozycja z ilością > 1 rozbijana na sztuki jak w Back Market.
 Numer przesyłki = `deliveryTracking.trackingNumber` (dla przesyłek Erli uzupełnia go system po wygenerowaniu etykiety), a gdy brak — link.
 **Uwaga: zamówienie za pobraniem (COD) ma w API ten sam status `purchased` co opłacone** — dlatego w `sales_orders` zapisujemy je jako
-własny status `purchased_cod` ("Za pobraniem", czerwona plakietka), a SQL poprawia stare wiersze. Kwoty w API są w groszach (dzielimy przez 100 przy wyświetlaniu). **Niezapłacone zamówienia Erli (`status = 'pending'`, "Oczekuje na płatność") są ukryte z listy "Zamówienia"
-w ogóle** (`OrdersList` w `SalesOrdersHub.tsx`, filtr PostgREST `marketplace.neq.erli,status.in.(purchased,purchased_cod)`) — klient
+własny status `purchased_cod` ("Za pobraniem", czerwona plakietka), a SQL poprawia stare wiersze. Kwoty w API są w groszach (dzielimy przez 100 przy wyświetlaniu).
+**Status zamówienia (pending/purchased/cancelled/returned) NIE ma w ogóle wartości "wysłane" — realny postęp siedzi w
+osobnym polu `sellerStatus`** ("Status zamówienia w systemie sprzedawcy": created/readyToProcess/inProgress/sent/
+readyToPickup/received/returned/returningToSender/canceled/unknown, już zbierane jako `erli_orders.seller_status`).
+`erliDerivedStatus` (`lib/salesOrders.ts`, wywoływane w `mapErliToSales`, ten sam wzorzec co `bmDerivedStatus` dla
+Back Marketu) podnosi `purchased`/`purchased_cod` do naszego znacznika `sent` ("Wysłane"), gdy `sellerStatus` to
+`sent`/`readyToPickup`/`received` (celowo jeden wspólny znacznik — nie rozróżniamy "w drodze" od "dostarczone"), albo
+do `cancelled`/`returned`, gdy `sellerStatus` to `canceled`/`returned`/`returningToSender` — `status` zamówienia
+(`cancelled`/`returned`) jest przy tym NADRZĘDNY, sellerStatus już nic tam nie zmienia. **Zgłoszone przez właściciela
+30.09.2026** ("stare zamówienia z Erli które już wysłałem mają status Opłacone") — na żywych danych aż 472 zamówienia
+z `seller_status="received"` (DOSTARCZONE) miały `sales_orders.status` wciąż "purchased"; jednorazowa poprawka
+istniejących wierszy uruchomiona ręcznie w Supabase SQL Editor (poza plikami schematu). **Niezapłacone zamówienia Erli
+(`status = 'pending'`, "Oczekuje na płatność") są ukryte z listy "Zamówienia" w ogóle** (`OrdersList` w
+`SalesOrdersHub.tsx`, filtr PostgREST `marketplace.neq.erli,status.in.(purchased,purchased_cod,sent)`) — klient
 może się jeszcze rozmyślić i nigdy nie zapłacić, więc zaśmiecały widok "Nowe"; wciąż są zapisywane w bazie (sync ich nie pomija), tylko
-niewidoczne w UI, dopóki status nie zmieni się na `purchased`/`purchased_cod` (albo `cancelled`/`returned` — te też zostają ukryte,
+niewidoczne w UI, dopóki status nie zmieni się na `purchased`/`purchased_cod`/`sent` (albo `cancelled`/`returned` — te też zostają ukryte,
 bo i tak nigdy nie doszły do realizacji). Dotyczy tylko listy — kafelki "Zamówienia dzisiaj/wczoraj" już wcześniej pomijały `pending`
-przez `NOT_COUNTED`. Nie testowane na żywym API (brak klucza w środowisku asystenta) —
+przez `NOT_COUNTED` (a teraz, dzięki `erliDerivedStatus`, poprawnie pomijają też zamówienia anulowane/zwrócone u sprzedawcy, które
+wcześniej — mimo `status` wciąż "purchased" — były błędnie liczone jako sprzedaż). Nie testowane na żywym API (brak klucza w środowisku asystenta) —
 zweryfikowane na atrapie `fetch` wg swaggera (erli.pl/svc/shop-api/doc/swagger.json).
 **Allegro** (`marketplace = 'allegro'`, `lib/allegro.ts`, `lib/allegroServer.ts`, route'y `orders/allegro-*`, surowe dane w `allegro_orders`):
 zamówienia to *checkout forms* (`GET https://api.allegro.pl/order/checkout-forms`, `Accept: application/vnd.allegro.public.v1+json`, sortowanie
