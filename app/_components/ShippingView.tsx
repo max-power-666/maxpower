@@ -337,15 +337,24 @@ export default function ShippingView({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Nie udało się nadać przesyłki.");
-      // Packing slip Back Marketu (delivery_note): pojawia się w ich API dopiero po akceptacji zamówienia (stan
-      // "Do wysyłki" i dalej — potwierdzone na żywych danych), więc na tym etapie (po nadaniu przesyłki) prawie
-      // zawsze już tam jest. Bierzemy to, co już mamy zsynchronizowane (bez osobnego wywołania do Back Marketu) —
-      // link jest podpisany i ważny 5 dni od momentu, gdy go zsynchronizowaliśmy, co przy typowym czasie między
-      // akceptacją a nadaniem z zapasem starcza.
+      // Packing slip Back Marketu (delivery_note): pojawia się w ich API DOKŁADNIE w momencie akceptacji zamówienia
+      // (stan "Do wysyłki" i dalej — potwierdzone na żywych danych: zero opóźnienia po stronie Back Marketu), więc
+      // najpierw sprawdzamy to, co już mamy zsynchronizowane (bez zbędnego wywołania). Ale jeśli akceptacja i
+      // nadanie nastąpiły w krótszym odstępie niż nasz cron (15 min), nasza kopia może być jeszcze sprzed akceptacji
+      // — wtedy dociągamy zamówienie na żądanie (bm-refresh), zamiast pokazywać brak packing slipu bez potrzeby.
       let deliveryNoteUrl: string | null = null;
       if (order?.marketplace === "backmarket") {
         const { data: bm } = await supabase.from("bm_orders").select("delivery_note").eq("order_id", order.externalId).maybeSingle();
         deliveryNoteUrl = (bm?.delivery_note as string | null) ?? null;
+        if (!deliveryNoteUrl) {
+          try {
+            const noteRes = await fetch("/api/orders/bm-refresh", { method: "POST", headers: auth, body: JSON.stringify({ orderId: order.externalId }) });
+            const noteData = await noteRes.json().catch(() => ({}));
+            if (noteRes.ok) deliveryNoteUrl = noteData.deliveryNote ?? null;
+          } catch {
+            /* brak packing slipu nie blokuje nadania — przycisk po prostu się nie pokaże */
+          }
+        }
       }
       setDone({
         trackingNumber: data.trackingNumber,
