@@ -406,6 +406,7 @@ function OrdersList({
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<OurStatus | "wszystkie">("nowe");
+  const [marketplaceFilter, setMarketplaceFilter] = useState<string | "wszystkie">("wszystkie");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   // Zapisy idą jeden po drugim na najświeższym wierszu, żeby szybkie skanowanie kilku pól pod rząd
@@ -442,7 +443,7 @@ function OrdersList({
       supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, pageSize, search, statusFilter, reloadKey]);
+  }, [page, pageSize, search, statusFilter, marketplaceFilter, reloadKey]);
 
   async function load() {
     const seq = ++loadSeq.current;
@@ -451,6 +452,7 @@ function OrdersList({
     let q = supabase.from("sales_orders").select(SALES_COLUMNS, { count: "exact" });
     if (search) q = q.ilike("external_id", `%${escapeLike(search)}%`);
     if (statusFilter !== "wszystkie") q = q.eq("our_status", statusFilter);
+    if (marketplaceFilter !== "wszystkie") q = q.eq("marketplace", marketplaceFilter);
     // Erli: dopóki zamówienie nie jest opłacone (albo za pobraniem), na liście tylko zaśmieca "Nowe" — klient może
     // się jeszcze rozmyślić i nigdy nie zapłacić. Pokazujemy je dopiero, gdy status to "Opłacone"/"Za pobraniem".
     q = q.or("marketplace.neq.erli,status.in.(purchased,purchased_cod)");
@@ -609,6 +611,12 @@ function OrdersList({
         placeholder="Szukaj po numerze zamówienia"
         className="w-72 border border-line bg-white px-3 py-2 rounded text-sm font-mono mb-3"
       />
+      <div className="flex items-center gap-2 flex-wrap mb-3">
+        <button onClick={() => { setMarketplaceFilter("wszystkie"); setPage(1); }} className={smallPill(marketplaceFilter === "wszystkie")}>Wszystkie</button>
+        {MARKETPLACES.map((m) => (
+          <button key={m.key} onClick={() => { setMarketplaceFilter(m.key); setPage(1); }} className={smallPill(marketplaceFilter === m.key)}>{m.label}</button>
+        ))}
+      </div>
       <Pager
         page={page}
         pageSize={pageSize}
