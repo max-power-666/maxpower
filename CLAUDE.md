@@ -146,7 +146,7 @@ Na górze zakładki są kafelki **Zamówienia dzisiaj / wczoraj** (`DaySummary`,
 i nieopłacone (`NOT_COUNTED` — nowy kanał trzeba tam dopisać); zamówienie za pobraniem się liczy.
 Numer zamówienia na liście jest linkiem do **karty zamówienia** (`SalesOrderCard.tsx`, panel boczny): dane z API
 (pozycje, daty, dostawa, adres dostawy — z surowej tabeli kanału), dane pracownicze (edytowalne) i numerowany log zmian;
-edycje z listy i z karty trafiają do tego samego logu (wzór: karta zamówienia Trade-in). Na górze karty link "Otwórz w Back Market" (`https://www.backmarket.fr/bo-seller/orders/all?page=1&pageSize=10&endDate={dziś}&orderId={numer}`).
+edycje z listy i z karty trafiają do tego samego logu (wzór: karta zamówienia Trade-in). Na górze karty link "Otwórz w Back Market" (`https://www.backmarket.fr/bo-seller/orders/all?page=1&pageSize=10&endDate={dziś}&orderId={numer}`). Dla Amazon analogicznie "Otwórz w Amazon" (`https://sellercentral.amazon.pl/orders-v3/order/{numer}`) — domena `.pl` (nasze konto) działa dla zamówień z DOWOLNEGO rynku UE (potwierdzone przez właściciela na żywym zamówieniu z rynku FR), bo konto sprzedawcy UE jest wspólne dla wszystkich rynków — ten sam wzorzec co jedna domena `.fr` dla wszystkich rynków Back Marketu.
 **refurbed** (`marketplace = 'refurbed'`, `lib/refurbed.ts`, `app/api/orders/refurbed-sync`, surowe dane w `refurbed_orders`): API tylko POST,
 `https://api.refurbed.com/refb.merchant.v1.OrderService/ListOrders`, nagłówek `Authorization: Plain <token>`, limit 10 zapytań/s
 (429 -> ponowienie), paginacja kursorem (`starting_after` = id, `has_more`), sortujemy po ID rosnąco. Numer zamówienia = `Order.id`,

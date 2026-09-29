@@ -124,6 +124,13 @@ function backMarketOrderUrl(orderId: string) {
   return `https://www.backmarket.fr/bo-seller/orders/all?page=1&pageSize=10&endDate=${endDate}&orderId=${encodeURIComponent(orderId)}`;
 }
 
+// Karta zamówienia w Seller Central. Domena .pl (nasze konto) działa dla zamówień z DOWOLNEGO rynku UE — potwierdzone
+// na żywo przez właściciela (zamówienie z rynku FR otwarte przez sellercentral.amazon.pl) — konto sprzedawcy UE jest
+// wspólne dla wszystkich rynków, więc jedna domena wystarcza, tak jak jedna domena .fr wystarcza dla Back Marketu.
+function amazonOrderUrl(orderId: string) {
+  return `https://sellercentral.amazon.pl/orders-v3/order/${encodeURIComponent(orderId)}`;
+}
+
 // Zamówienie refurbed (pola z API, patrz swagger Order/OrderItem) — czytamy z kolumny raw tabeli refurbed_orders.
 type RefurbedAddress = {
   first_name?: string;
@@ -535,6 +542,11 @@ export default function SalesOrderCard({
               {marketplace === "backmarket" && (
                 <a href={backMarketOrderUrl(externalId)} target="_blank" rel="noreferrer" className="text-xs font-semibold text-teal hover:underline">
                   Otwórz w Back Market ↗
+                </a>
+              )}
+              {marketplace === "amazon" && (
+                <a href={amazonOrderUrl(externalId)} target="_blank" rel="noreferrer" className="text-xs font-semibold text-teal hover:underline">
+                  Otwórz w Amazon ↗
                 </a>
               )}
             </div>
