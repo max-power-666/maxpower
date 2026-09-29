@@ -383,7 +383,15 @@ const erliItemSku = (it: any): string | null => {
 // 30.09.2026 (zgłoszenie właściciela — zamówienia sprzed prawie roku z numerem przesyłki wciąż pokazujące
 // "Opłacone"): 34 zamówienia miały `deliveryTracking.status` = "sent"/"delivered", a `sellerStatus` wciąż utknięty
 // na "inProgress". Oba sygnały sprawdzamy równolegle — który jako pierwszy wskaże postęp, ten wygrywa; `returned`
-// ma pierwszeństwo przed `sent`/`cancelled` (późniejszy etap cyklu życia).
+// ma pierwszeństwo przed `sent`/`cancelled` (późniejszy etap cyklu życia). **`readyToSend`/`waitingForCourier`
+// też liczą się jako "wysłane"**, nie tylko `sent`/`readyToPickup`/`delivered` — enum `deliveryTracking.status`
+// wg dokumentacji Erli sugeruje kolejność `preparing < readyToSend < waitingForCourier < sent < readyToPickup <
+// ... < delivered` (czyli formalnie to jeszcze etap przed nadaniem), ale na żywych danych (30.09.2026, potwierdzone
+// przez właściciela na 3 konkretnych zamówieniach — w tym jednym wysłanym poza naszą integracją Paczkomatów, z
+// realnym numerem przesyłki UPS) paczka była już fizycznie wysłana, mimo że Erli samo nie zdążyło jeszcze przesunąć
+// statusu dalej niż `readyToSend`. Dla naszych potrzeb liczy się fakt istnienia numeru przesyłki, nie dokładny etap
+// u przewoźnika — ten sam "jeden wspólny znacznik" co przy `sent`/`readyToPickup`/`delivered`. Jedyny etap PRZED
+// faktycznym nadaniem to `preparing` (label jeszcze nie gotowy) — ten świadomie zostaje bez zmian.
 function erliDerivedStatus(o: any): string {
   const raw = String(o.status ?? "pending");
   if (raw === "cancelled" || raw === "returned") return raw;
@@ -392,7 +400,8 @@ function erliDerivedStatus(o: any): string {
   const dt = o.deliveryTracking?.status;
   const isReturned = ss === "returned" || ss === "returningToSender" || dt === "returned";
   const isCancelled = ss === "canceled" || dt === "canceled";
-  const isSent = ss === "sent" || ss === "readyToPickup" || ss === "received" || dt === "sent" || dt === "readyToPickup" || dt === "delivered";
+  const dtSent = dt === "sent" || dt === "readyToPickup" || dt === "delivered" || dt === "readyToSend" || dt === "waitingForCourier";
+  const isSent = ss === "sent" || ss === "readyToPickup" || ss === "received" || dtSent;
   if (isReturned) return "returned";
   if (isCancelled) return "cancelled";
   if (isSent) return "sent";

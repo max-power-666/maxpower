@@ -247,7 +247,12 @@ sprzedawca ustawił w panelu Erli" i potrafi utknąć, mimo że przesyłka fakty
 `deliveryTracking.status` = `sent`/`delivered`, a `sellerStatus` wciąż `inProgress` (np. zamówienia sprzed
 prawie roku z numerem przesyłki, ale bez zmiany statusu — dokładnie ten przypadek zgłoszony przez właściciela).
 Oba sygnały (`sellerStatus` i `deliveryTracking.status`) sprawdzane równolegle, który pierwszy wskaże postęp,
-ten wygrywa; `returned` ma pierwszeństwo przed `sent`/`cancelled`. **Niezapłacone zamówienia Erli
+ten wygrywa; `returned` ma pierwszeństwo przed `sent`/`cancelled`. **`readyToSend`/`waitingForCourier` też liczą
+się jako "wysłane"** (nie tylko `sent`/`readyToPickup`/`delivered`) — formalnie wg enumu Erli to jeszcze etap
+PRZED nadaniem, ale na żywych danych (30.09.2026, potwierdzone przez właściciela na 3 konkretnych zamówieniach —
+w tym jednym wysłanym poza naszą integracją Paczkomatów, z numerem przesyłki UPS) paczka była już fizycznie
+wysłana, mimo że Erli samo nie zdążyło jeszcze przesunąć statusu dalej niż `readyToSend`; jedyny etap, który
+świadomie zostaje bez zmian, to `preparing` (label jeszcze nie gotowy). **Niezapłacone zamówienia Erli
 (`status = 'pending'`, "Oczekuje na płatność") są ukryte z listy "Zamówienia" w ogóle** (`OrdersList` w
 `SalesOrdersHub.tsx`, filtr PostgREST `marketplace.neq.erli,status.in.(purchased,purchased_cod,sent)`) — klient
 może się jeszcze rozmyślić i nigdy nie zapłacić, więc zaśmiecały widok "Nowe"; wciąż są zapisywane w bazie (sync ich nie pomija), tylko
