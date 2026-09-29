@@ -445,14 +445,17 @@ const allegroOrderDate = (o: any): string | null => {
 // przypadek zgłoszony przez właściciela 30.09.2026, zamówienie z fulfillment.status=SENT pokazywało w kolumnie Status
 // wciąż "Opłacone"). Ten sam wzorzec co erliDerivedStatus dla Erli: status zamówienia (CANCELLED) jest NADRZĘDNY —
 // fulfillment już nic tam nie zmienia; inaczej SENT/PICKED_UP (odebrane przez kuriera z paczkomatu — też koniec drogi
-// u nas, jeden wspólny znacznik jak przy Erli) -> "SENT", RETURNED (całość zwrócona i zrefundowana, ustawiane tylko
-// automatycznie przez Allegro) -> "RETURNED".
+// u nas, jeden wspólny znacznik jak przy Erli) -> "SENT", fulfillment.status CANCELLED (seller anulował realizację już
+// opłaconego zamówienia — sprawdzone na żywych danych: 4 zamówienia w tym stanie) -> nasz "CANCELLED" (ta sama etykieta
+// co anulowanie na poziomie zamówienia), RETURNED (całość zwrócona i zrefundowana, ustawiane tylko automatycznie przez
+// Allegro) -> "RETURNED".
 function allegroDerivedStatus(o: any): string {
   const raw = String(o.status ?? "BOUGHT");
   if (raw === "CANCELLED") return raw;
   const base = raw === "READY_FOR_PROCESSING" && o.payment?.type === "CASH_ON_DELIVERY" ? "READY_FOR_PROCESSING_COD" : raw;
   const fs = o.fulfillment?.status;
   if (fs === "SENT" || fs === "PICKED_UP") return "SENT";
+  if (fs === "CANCELLED") return "CANCELLED";
   if (fs === "RETURNED") return "RETURNED";
   return base;
 }

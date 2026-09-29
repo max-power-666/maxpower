@@ -260,9 +260,12 @@ je jako `READY_FOR_PROCESSING_COD` ("Za pobraniem"). **Status zamówienia (BOUGH
 numer przesyłki i sprzedawca ma włączoną automatyczną zmianę statusu; `RETURNED` też tylko automatycznie, gdy całość zwrócona i zrefundowana —
 nie da się go ustawić ręcznie). `allegroDerivedStatus` (`lib/salesOrders.ts`, wywoływane w `mapAllegroToSales`, ten sam wzorzec co
 `erliDerivedStatus`) podnosi bazowy status do naszego znacznika `SENT` ("Wysłane"), gdy `fulfillment.status` to `SENT` lub `PICKED_UP` (odebrane
-przez kuriera z paczkomatu — jeden wspólny znacznik jak przy Erli, bez rozróżniania), albo do `RETURNED` ("Zwrócone"), gdy `fulfillment.status`
+przez kuriera z paczkomatu — jeden wspólny znacznik jak przy Erli, bez rozróżniania), do `CANCELLED` (nasz znacznik, ta sama etykieta co
+anulowanie zamówienia), gdy `fulfillment.status` to `CANCELLED` — sprawdzone na żywych danych: 4 zamówienia miały status `READY_FOR_PROCESSING`
+(opłacone), a `fulfillment.status` już `CANCELLED` (sprzedawca anulował realizację), albo do `RETURNED` ("Zwrócone"), gdy `fulfillment.status`
 to `RETURNED` — status zamówienia `CANCELLED` jest przy tym NADRZĘDNY, fulfillment już nic tam nie zmienia. **Zgłoszone przez właściciela
-30.09.2026** (zamówienie z `fulfillment.status = SENT` pokazywało w kolumnie Status wciąż "Opłacone") — poprawka obejmuje tylko przyszłe
+30.09.2026** (zamówienie z `fulfillment.status = SENT` pokazywało w kolumnie Status wciąż "Opłacone"; na żywych danych 298 z 322 zsynchronizowanych
+zamówień miało `fulfillment.status = SENT`/`PICKED_UP` mimo statusu zamówienia wciąż "Opłacone") — poprawka obejmuje tylko przyszłe
 synchronizacje; `RETURNED` dodane też do listy statusów pomijanych w kafelkach "Zamówienia dzisiaj/wczoraj" (`NOT_COUNTED.allegro`), bo to w
 pełni zwrócone i zrefundowane zamówienie, tak samo jak anulowane. Nie testowane na żywym API (brak konta/aplikacji w środowisku asystenta) — zweryfikowane na atrapie
 `fetch` wg swaggera (developer.allegro.pl/swagger.yaml).
