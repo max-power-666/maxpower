@@ -130,6 +130,13 @@ function amazonOrderUrl(orderId: string) {
   return `https://sellercentral.amazon.pl/orders-v3/order/${encodeURIComponent(orderId)}`;
 }
 
+// Karta zamówienia w panelu merchant.refurbed.com. Przykład od właściciela miał doklejone tableOptions/
+// freeSearchOptions (stan widoku listy, z której kliknął w zamówienie) — to nie jest specyficzne dla zamówienia,
+// pomijamy, sam /orders/details/{id} wystarcza do otwarcia karty.
+function refurbedOrderUrl(orderId: string) {
+  return `https://merchant.refurbed.com/orders/details/${encodeURIComponent(orderId)}`;
+}
+
 // Zamówienie refurbed (pola z API, patrz swagger Order/OrderItem) — czytamy z kolumny raw tabeli refurbed_orders.
 type RefurbedAddress = {
   first_name?: string;
@@ -546,6 +553,11 @@ export default function SalesOrderCard({
               {marketplace === "amazon" && (
                 <a href={amazonOrderUrl(externalId)} target="_blank" rel="noreferrer" className="text-xs font-semibold text-teal hover:underline">
                   Otwórz w Amazon ↗
+                </a>
+              )}
+              {marketplace === "refurbed" && (
+                <a href={refurbedOrderUrl(externalId)} target="_blank" rel="noreferrer" className="text-xs font-semibold text-teal hover:underline">
+                  Otwórz w refurbed ↗
                 </a>
               )}
               {marketplace === "octopia" && (
