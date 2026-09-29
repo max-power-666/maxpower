@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { requireRole } from "@/lib/serverAuth";
 import { erliShipConfigFromEnv, erliCreateParcel, ErliShipError } from "@/lib/erliShipping";
+import { erliSearchOrders, type ErliClient } from "@/lib/erli";
+import { mapErliOrder, mapErliToSales, mapErliItems, uniqueBy } from "@/lib/salesOrders";
 
 // Nadanie przesyłki Erli — Paczkomaty InPost 24/7 (POST /shipping/parcels/, typeId "erliPaczkomat") — tylko
 // Admin, Manager i Zamówienia. UWAGA: Erli nie ma środowiska testowego — każda przesyłka jest prawdziwa i płatna
@@ -97,6 +99,24 @@ export async function POST(request: Request) {
       trackingNumber,
       parcelId: parcel.id,
     });
+  }
+
+  // Odśwież zamówienie w erli_orders/sales_orders na miejscu — nadanie nie musi wcale ruszyć pola `updated` po
+  // stronie Erli, więc zwykły cykliczny skan (kursor po `updated`) mógłby to zamówienie już nigdy nie złapać
+  // (ten sam wzorzec problemu co przy zmianie statusu płatności — patrz orders/erli-sync/route.ts). Best-effort:
+  // błąd tutaj nie może zepsuć odpowiedzi, przesyłka w Erli już istnieje i jest nadana.
+  try {
+    const cfg2: ErliClient = { apiKey: process.env.ERLI_API_KEY!, userAgent: process.env.ERLI_UA || "recoo-erp", baseUrl: process.env.ERLI_BASE_URL || undefined };
+    const orders = await erliSearchOrders(cfg2, { filter: { field: "id", operator: "=", value: externalId } });
+    const fresh = orders.find((o) => String(o?.id) === externalId);
+    if (fresh) {
+      await db.from("erli_orders").upsert(mapErliOrder(fresh));
+      await db.from("sales_orders").upsert(mapErliToSales(fresh));
+      const items = uniqueBy(mapErliItems(fresh), (i) => i.item_key);
+      if (items.length > 0) await db.from("sales_order_items").upsert(items);
+    }
+  } catch {
+    /* nie blokuje odpowiedzi — zawsze można odświeżyć ręcznie z karty zamówienia */
   }
 
   return NextResponse.json({

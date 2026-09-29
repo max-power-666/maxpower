@@ -342,6 +342,7 @@ export default function SalesOrderCard({
   const [drafts, setDrafts] = useState<Record<string, ItemDraft>>({});
   const [saving, setSaving] = useState(false);
   const [accepting, setAccepting] = useState(false);
+  const [refreshingErli, setRefreshingErli] = useState(false);
 
   useEffect(() => {
     load();
@@ -424,6 +425,30 @@ export default function SalesOrderCard({
       setError(e.message || "Nie udało się zaakceptować zamówienia.");
     } finally {
       setAccepting(false);
+    }
+  }
+
+  // Ręczne odświeżenie zamówienia Erli (erli-refresh) — zwykły cykliczny skan idzie kursorem po polu `updated`
+  // zamówienia, a to pole nie musi się wcale ruszyć ani przy nadaniu przesyłki przez naszą integrację Paczkomatów
+  // InPost, ani przy wysyłce zamówienia całkiem poza naszą aplikacją (np. wprost z panelu Erli) — takie zamówienie
+  // może zostać trwale niewidoczne dla zwykłego skanu (ten sam wzorzec problemu co przy zmianie statusu płatności).
+  // Zgłoszone przez właściciela 30.09.2026 na kilku takich zamówieniach.
+  async function refreshErliOrder() {
+    setRefreshingErli(true);
+    setError("");
+    try {
+      const res = await fetch("/api/orders/erli-refresh", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId: externalId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.error) throw new Error(data?.error || "Nie udało się odświeżyć zamówienia.");
+      await load();
+    } catch (e: any) {
+      setError(e.message || "Nie udało się odświeżyć zamówienia.");
+    } finally {
+      setRefreshingErli(false);
     }
   }
 
@@ -564,6 +589,11 @@ export default function SalesOrderCard({
                 <a href="https://seller.octopia.com/order/all" target="_blank" rel="noreferrer" className="text-xs font-semibold text-teal hover:underline">
                   Otwórz listę zamówień w Octopia ↗
                 </a>
+              )}
+              {marketplace === "erli" && (
+                <button onClick={refreshErliOrder} disabled={refreshingErli} className="text-xs font-semibold text-teal hover:underline disabled:opacity-50">
+                  {refreshingErli ? "Odświeżanie…" : "Odśwież status z Erli ↻"}
+                </button>
               )}
             </div>
 
