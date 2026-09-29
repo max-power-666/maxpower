@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 
@@ -34,9 +34,108 @@ function fmtDateTime(iso: string | null) {
   return new Date(iso).toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+/* ---------------- podsumowanie: zamówienia dziś i wczoraj (wg rynku) ---------------- */
+
+type MarketDayCount = { total: number; byMarket: Record<string, number> };
+
+const startOfYesterdayIso = (now: Date = new Date()) => new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1).toISOString();
+
+// Liczy zamówienia z dzisiejszej i wczorajszej doby (czas lokalny) wg daty utworzenia, z podziałem na rynek.
+function summarizeMarketDays(
+  rows: { market: string | null; creation_date: string }[],
+  now: Date = new Date()
+): { today: MarketDayCount; yesterday: MarketDayCount } {
+  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const startYesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1).getTime();
+  const out = { today: { total: 0, byMarket: {} as Record<string, number> }, yesterday: { total: 0, byMarket: {} as Record<string, number> } };
+  for (const r of rows) {
+    const t = Date.parse(r.creation_date);
+    const bucket = t >= startToday ? out.today : t >= startYesterday ? out.yesterday : null;
+    if (!bucket || t >= startToday + 24 * 3600 * 1000 + 3600 * 1000) continue; // przyszłe daty (błędne dane) pomijamy
+    bucket.total += 1;
+    const key = r.market || "—";
+    bucket.byMarket[key] = (bucket.byMarket[key] ?? 0) + 1;
+  }
+  return out;
+}
+
+function TradeInDaySummary() {
+  const [days, setDays] = useState<{ today: MarketDayCount; yesterday: MarketDayCount } | null>(null);
+  const [error, setError] = useState("");
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    load();
+    // Synchronizacja zmienia setki wierszy naraz — odświeżamy z opóźnieniem, jednym zapytaniem.
+    const schedule = () => {
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = setTimeout(load, 3000);
+    };
+    const channel = supabase
+      .channel("tradein-day-summary")
+      .on("postgres_changes", { event: "*", schema: "public", table: "buyback_orders" }, schedule)
+      .subscribe();
+    return () => {
+      if (timer.current) clearTimeout(timer.current);
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  async function load() {
+    try {
+      const since = startOfYesterdayIso();
+      const rows: { market: string | null; creation_date: string }[] = [];
+      // PostgREST oddaje max 1000 wierszy na zapytanie — czytamy stronami.
+      for (let from = 0; ; from += 1000) {
+        const { data, error: err } = await supabase
+          .from("buyback_orders")
+          .select("market, creation_date")
+          .gte("creation_date", since)
+          .order("creation_date", { ascending: false })
+          .range(from, from + 999);
+        if (err) throw new Error(err.message);
+        rows.push(...((data as typeof rows) || []));
+        if (!data || data.length < 1000) break;
+      }
+      setDays(summarizeMarketDays(rows));
+      setError("");
+    } catch (e: any) {
+      setError(`Nie udało się policzyć zamówień: ${e.message || e}`);
+    }
+  }
+
+  const tile = (label: string, d: MarketDayCount | undefined) => (
+    <div className="border border-line bg-white px-4 py-3 min-w-[13rem]">
+      <div className="text-xs font-semibold text-inksoft">{label}</div>
+      <div className="text-3xl font-semibold font-mono">{d ? d.total : "—"}</div>
+      <div className="flex flex-wrap gap-1 mt-1 min-h-[1.5rem]">
+        {d &&
+          Object.entries(d.byMarket)
+            .sort((a, b) => a[0].localeCompare(b[0]))
+            .map(([market, n]) => (
+              <span key={market} className="text-xs font-semibold px-2 py-0.5 rounded-full bg-paper text-inksoft border border-line">
+                {market} {n}
+              </span>
+            ))}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="mb-5">
+      <div className="flex flex-wrap gap-3">
+        {tile("Zamówienia dzisiaj", days?.today)}
+        {tile("Zamówienia wczoraj", days?.yesterday)}
+      </div>
+      {error && <p className="text-rust text-xs mt-2">{error}</p>}
+    </div>
+  );
+}
+
 export default function TradeInOrdersView({ session, onOpenOrder }: { session: Session; onOpenOrder?: (id: string) => void }) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [limit, setLimit] = useState(20);
+  const [page, setPage] = useState(1);
   const [totalCount, setTotalCount] = useState<number | null>(null);
   const [lastSynced, setLastSynced] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -55,7 +154,7 @@ export default function TradeInOrdersView({ session, onOpenOrder }: { session: S
       supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [limit]);
+  }, [limit, page]);
 
   async function loadMeta() {
     const { data } = await supabase.from("buyback_orders_sync_meta").select("last_synced_at").eq("id", 1).maybeSingle();
@@ -66,6 +165,7 @@ export default function TradeInOrdersView({ session, onOpenOrder }: { session: S
     setLoading(true);
     setError("");
     try {
+      const from = (page - 1) * limit;
       const [{ data, error: err, count }, meta] = await Promise.all([
         supabase
           .from("buyback_orders")
@@ -74,10 +174,17 @@ export default function TradeInOrdersView({ session, onOpenOrder }: { session: S
             { count: "exact" }
           )
           .order("creation_date", { ascending: false })
-          .limit(limit),
+          .range(from, from + limit - 1),
         supabase.from("buyback_orders_sync_meta").select("last_synced_at").eq("id", 1).maybeSingle(),
       ]);
-      if (err) throw err;
+      if (err) {
+        // strona poza zakresem (np. po synchronizacji ubyło wierszy) — wróć na początek
+        if (err.code === "PGRST103" && page > 1) {
+          setPage(1);
+          return;
+        }
+        throw err;
+      }
       setOrders((data as Order[]) || []);
       setTotalCount(count ?? null);
       setLastSynced((meta.data?.last_synced_at as string) ?? null);
@@ -114,14 +221,21 @@ export default function TradeInOrdersView({ session, onOpenOrder }: { session: S
     }
   }
 
+  const totalPages = Math.max(1, Math.ceil((totalCount ?? 0) / limit));
+
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      <TradeInDaySummary />
+
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div className="flex items-center gap-3">
           <label className="text-xs text-inksoft">Pokaż</label>
           <select
             value={limit}
-            onChange={(e) => setLimit(Number(e.target.value))}
+            onChange={(e) => {
+              setLimit(Number(e.target.value));
+              setPage(1);
+            }}
             className="border border-line bg-white px-2 py-1.5 rounded text-sm font-semibold"
           >
             {PAGE_SIZES.map((n) => (
@@ -129,8 +243,22 @@ export default function TradeInOrdersView({ session, onOpenOrder }: { session: S
             ))}
           </select>
           <span className="text-xs text-inksoft">
-            {totalCount !== null ? `z ${totalCount} zamówień łącznie` : ""}
+            {totalCount !== null ? `z ${totalCount} zamówień łącznie · strona ${Math.min(page, totalPages)} z ${totalPages}` : ""}
           </span>
+          <button
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={page <= 1 || loading}
+            className="bg-white border border-line px-3 py-1.5 rounded text-sm font-semibold text-ink disabled:opacity-40"
+          >
+            ‹ Poprzednia
+          </button>
+          <button
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={page >= totalPages || loading}
+            className="bg-white border border-line px-3 py-1.5 rounded text-sm font-semibold text-ink disabled:opacity-40"
+          >
+            Następna ›
+          </button>
         </div>
         <div className="flex items-center gap-3">
           <button

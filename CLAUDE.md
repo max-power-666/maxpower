@@ -98,9 +98,14 @@ przywrócenia cen po ubitej funkcji. Historia cen tylko przy zmianie ceny. Stary
 Macu jest wyłączony; bidder działa na produkcji, włącznik: `buyback_settings.enabled`.
 
 **Trade-in** (zakładka Trade-in, `TradeInHub.tsx`) — dwa podwidoki:
-- *Raw data*: podgląd zsynchronizowanych zamówień BuyBack (`buyback_orders`, sync co 15 min
+- *Raw data* (`TradeInOrdersView.tsx`): podgląd zsynchronizowanych zamówień BuyBack (`buyback_orders`, sync co 15 min
   z `GET /ws/buyback/v1/orders`: pełny skan od 1 stycznia przez `creationDate` w porcjach z kursorem,
-  potem przyrostowo przez `modificationDate` — łapie nowe i zmiany statusu). Zapis tylko serwer.
+  potem przyrostowo przez `modificationDate` — łapie nowe i zmiany statusu). Zapis tylko serwer. Lista jest
+  stronicowana po stronie serwera (`.range()`, 10/20/50, przyciski Poprzednia/Następna — 30.09.2026, wcześniej
+  `.limit()` bez offsetu pokazywał zawsze tylko pierwszą stronę z 17 tys.+ zamówień, wzorzec jak w `InventoryRawView.tsx`).
+  Nad listą kafelki **Zamówienia dzisiaj / wczoraj** (`TradeInDaySummary`, po dacie utworzenia, podział na rynek
+  DE/ES/FR/IT zamiast marketplace'u — analogiczny wzorzec do `DaySummary` w `SalesOrdersHub.tsx`, ale bez filtrowania
+  statusów, bo to skup, nie sprzedaż).
 - *Wprowadzanie*: obsługa paczek przez pracowników. Pracownik podaje numer zamówienia LUB
   przesyłki, aplikacja znajduje zamówienie (`buyback_order_intake`, unikalne na
   `order_public_id` — ta sama paczka nie zaliczy się dwa razy). Status:
