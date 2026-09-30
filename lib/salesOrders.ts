@@ -173,6 +173,11 @@ const num = (v: unknown): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
+// Wspólny kształt wiersza sales_order_items produkowanego przez każdy mapItems (jedna sztuka = jeden wiersz).
+// price to cena JEDNOSTKOWA tej sztuki (nie suma dla całej pozycji przy quantity > 1) — patrz komentarz przy
+// mapBmItems, gdzie część kanałów zwraca cenę już za całą pozycję i trzeba ją podzielić przez quantity.
+type SalesItemRow = { marketplace: string; external_id: string; item_key: string; position: number; sku: string | null; price: number | null; currency: string | null };
+
 // Kod kraju odbiorcy (adres dostawy) do jednolitej postaci: 2 litery, wielkie, bez spacji. Niepełne/dziwne
 // wartości (np. pełna nazwa kraju zamiast kodu) zostają odrzucone zamiast pokazywać coś mylącego.
 const normCountry = (v: unknown): string | null => {
@@ -258,13 +263,19 @@ export function mapBmToSales(o: any) {
 // Pozycje zamówienia -> wiersze sales_order_items. Jedna sztuka = jeden wiersz (pozycja z ilością > 1 jest
 // rozbijana), klucz to id pozycji z API ("id", dla kolejnych sztuk "id-2", "id-3"). Ta sama zasada kluczy
 // i kolejności jest w jednorazowym uzupełnieniu w supabase/sales-orders.sql — zmieniając jedno, zmień drugie.
+// orderline.price to cena CAŁEJ pozycji (przy quantity > 1 już zsumowana dla wszystkich sztuk — sprawdzone na
+// żywym zamówieniu: quantity=2, price="1250.00" = suma, nie cena jednej sztuki), więc dzielimy przez quantity,
+// żeby każda rozbita sztuka dostała swoją cenę jednostkową, nie zdublowaną sumę.
 export function mapBmItems(o: any) {
-  const items: { marketplace: string; external_id: string; item_key: string; position: number; sku: string | null }[] = [];
+  const items: SalesItemRow[] = [];
   const lines: any[] = Array.isArray(o.orderlines) ? o.orderlines : [];
   lines.forEach((l, i) => {
     const qty = Math.max(Number.isFinite(Number(l?.quantity)) ? Math.trunc(Number(l.quantity)) : 1, 1);
     const base = String(l?.id ?? i + 1);
     const sku = typeof l?.listing === "string" && l.listing.trim() ? l.listing.trim() : null;
+    const lineTotal = num(l?.price);
+    const unitPrice = lineTotal === null ? null : lineTotal / qty;
+    const currency = typeof l?.currency === "string" && l.currency.trim() ? l.currency.trim() : null;
     for (let k = 1; k <= qty; k++) {
       items.push({
         marketplace: "backmarket",
@@ -272,6 +283,8 @@ export function mapBmItems(o: any) {
         item_key: k > 1 ? `${base}-${k}` : base,
         position: items.length + 1,
         sku,
+        price: unitPrice,
+        currency,
       });
     }
   });
@@ -333,13 +346,17 @@ export function mapRefurbedToSales(o: any) {
 }
 
 // W refurbed każda sztuka to osobna pozycja (order_item) z własnym id — to jest klucz pozycji.
-export function mapRefurbedItems(o: any) {
+// refurbed nie rozbija ilości (każda pozycja to zawsze jedna sztuka), więc total_charged na pozycji już JEST
+// ceną jednostkową — bez dzielenia, inaczej niż w kanałach, które eksplodują quantity > 1 na kilka wierszy.
+export function mapRefurbedItems(o: any): SalesItemRow[] {
   return ((o.items as any[]) || []).map((it, i) => ({
     marketplace: "refurbed",
     external_id: String(o.id),
     item_key: String(it?.id ?? i + 1),
     position: i + 1,
     sku: typeof it?.sku === "string" && it.sku.trim() ? it.sku.trim() : null,
+    price: num(it?.total_charged),
+    currency: typeof it?.currency_code === "string" && it.currency_code.trim() ? it.currency_code.trim() : null,
   }));
 }
 
@@ -425,11 +442,16 @@ export function mapErliToSales(o: any) {
 }
 
 // Pozycja Erli z ilością > 1 jest rozbijana na osobne sztuki (jak w Back Market): klucz "id", "id-2", "id-3"...
+// unitPrice jest już ceną JEDNOSTKOWĄ (nazwa pola i żywe dane się zgadzają: quantity=2, unitPrice się nie
+// dubluje) — bez dzielenia, tylko konwersja z groszy. Waluta jest wyłącznie na poziomie CAŁEGO zamówienia
+// (o.currency), nie na pozycji — stąd bierzemy ją z "o", nie z "it".
 export function mapErliItems(o: any) {
-  const items: { marketplace: string; external_id: string; item_key: string; position: number; sku: string | null }[] = [];
+  const items: SalesItemRow[] = [];
+  const currency = typeof o.currency === "string" && o.currency.trim() ? o.currency.trim() : null;
   ((o.items as any[]) || []).forEach((it, i) => {
     const qty = Math.max(Number.isFinite(Number(it?.quantity)) ? Math.trunc(Number(it.quantity)) : 1, 1);
     const base = String(it?.id ?? i + 1);
+    const price = num(it?.unitPrice);
     for (let k = 1; k <= qty; k++) {
       items.push({
         marketplace: "erli",
@@ -437,6 +459,8 @@ export function mapErliItems(o: any) {
         item_key: k > 1 ? `${base}-${k}` : base,
         position: items.length + 1,
         sku: erliItemSku(it),
+        price: price === null ? null : price / 100,
+        currency,
       });
     }
   });
@@ -513,11 +537,16 @@ export function mapAllegroToSales(o: any) {
 }
 
 // Pozycja z ilością > 1 jest rozbijana na osobne sztuki: klucz "id", "id-2", "id-3"...
+// price.amount jest już ceną JEDNOSTKOWĄ — sprawdzone na żywym zamówieniu z dwiema pozycjami tego samego
+// produktu (quantity 1 i 2, obie price.amount="19.99"): suma 19.99×1 + 19.99×2 = 59.97 zgadza się co do grosza
+// z summary.totalToPay, więc to nie cena już przemnożona przez quantity — bez dzielenia.
 export function mapAllegroItems(o: any) {
-  const items: { marketplace: string; external_id: string; item_key: string; position: number; sku: string | null }[] = [];
+  const items: SalesItemRow[] = [];
   ((o.lineItems as any[]) || []).forEach((li, i) => {
     const qty = Math.max(Number.isFinite(Number(li?.quantity)) ? Math.trunc(Number(li.quantity)) : 1, 1);
     const base = String(li?.id ?? i + 1);
+    const price = num(li?.price?.amount);
+    const currency = typeof li?.price?.currency === "string" && li.price.currency.trim() ? li.price.currency.trim() : null;
     for (let k = 1; k <= qty; k++) {
       items.push({
         marketplace: "allegro",
@@ -525,6 +554,8 @@ export function mapAllegroItems(o: any) {
         item_key: k > 1 ? `${base}-${k}` : base,
         position: items.length + 1,
         sku: allegroItemSku(li),
+        price,
+        currency,
       });
     }
   });
@@ -630,14 +661,20 @@ export function mapOctopiaToSales(o: any) {
 }
 
 // Każda pozycja Octopia to jedna sztuka (quantity > 1 rozbijamy jak w pozostałych kanałach): klucz "orderLineId", "id-2"...
+// unitSalesPrice (na sellingPrice albo offerPrice) jest ceną JEDNOSTKOWĄ — sprawdzone na żywym zamówieniu z
+// quantity=2: unitSalesPrice=144.99, totalPrice.sellingPrice=289.98=144.99×2 — więc unitSalesPrice już jest tym,
+// czego potrzebujemy, bez dzielenia (totalPrice tam obok to suma dla całej pozycji, celowo jej nie używamy).
+// Waluta jest wyłącznie na poziomie CAŁEGO zamówienia (o.currencyCode), nie na pozycji.
 export function mapOctopiaItems(o: any) {
-  const items: { marketplace: string; external_id: string; item_key: string; position: number; sku: string | null }[] = [];
+  const items: SalesItemRow[] = [];
+  const currency = typeof o.currencyCode === "string" && o.currencyCode.trim() ? o.currencyCode.trim() : null;
   ((o.lines as any[]) || []).forEach((l, i) => {
     const qty = Math.max(Number.isFinite(Number(l?.quantity)) ? Math.trunc(Number(l.quantity)) : 1, 1);
     const base = String(l?.orderLineId ?? i + 1);
     const sku = typeof l?.offer?.sellerProductId === "string" && l.offer.sellerProductId.trim() ? l.offer.sellerProductId.trim() : null;
+    const price = num(l?.sellingPrice?.unitSalesPrice ?? l?.offerPrice?.unitSalesPrice);
     for (let k = 1; k <= qty; k++) {
-      items.push({ marketplace: "octopia", external_id: String(o.orderId), item_key: k > 1 ? `${base}-${k}` : base, position: items.length + 1, sku });
+      items.push({ marketplace: "octopia", external_id: String(o.orderId), item_key: k > 1 ? `${base}-${k}` : base, position: items.length + 1, sku, price, currency });
     }
   });
   return items;
@@ -677,14 +714,19 @@ export function mapAmazonToSales(o: any) {
 
 // Pozycje jednego zamówienia (z osobnego zapytania GET orderItems) -> wiersze sales_order_items. Ilość > 1 rozbijamy
 // jak w pozostałych kanałach; klucz to OrderItemId (stały, nie zależy od kolejności w odpowiedzi).
+// ItemPrice.Amount jest ceną dla CAŁEJ pozycji (unit price × QuantityOrdered — udokumentowane zachowanie SP-API,
+// nie zgadywane), więc dzielimy przez quantity, tak samo jak przy Back Marketcie.
 export function mapAmazonItems(orderId: string, items: any[]) {
-  const rows: { marketplace: string; external_id: string; item_key: string; position: number; sku: string | null }[] = [];
+  const rows: SalesItemRow[] = [];
   items.forEach((it, i) => {
     const qty = Math.max(Number.isFinite(Number(it?.QuantityOrdered)) ? Math.trunc(Number(it.QuantityOrdered)) : 1, 1);
     const base = String(it?.OrderItemId ?? i + 1);
     const sku = typeof it?.SellerSKU === "string" && it.SellerSKU.trim() ? it.SellerSKU.trim() : null;
+    const lineTotal = num(it?.ItemPrice?.Amount);
+    const price = lineTotal === null ? null : lineTotal / qty;
+    const currency = typeof it?.ItemPrice?.CurrencyCode === "string" && it.ItemPrice.CurrencyCode.trim() ? it.ItemPrice.CurrencyCode.trim() : null;
     for (let k = 1; k <= qty; k++) {
-      rows.push({ marketplace: "amazon", external_id: orderId, item_key: k > 1 ? `${base}-${k}` : base, position: rows.length + 1, sku });
+      rows.push({ marketplace: "amazon", external_id: orderId, item_key: k > 1 ? `${base}-${k}` : base, position: rows.length + 1, sku, price, currency });
     }
   });
   return rows;

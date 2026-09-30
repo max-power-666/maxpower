@@ -303,10 +303,14 @@ create table if not exists sales_order_items (
   serial_number text,                        -- numer seryjny urządzenia
   pads int check (pads is null or pads >= 0),  -- liczba padów w zestawie (konsole); 0 = bez padów
   pad_serials text[],                        -- numery seryjne padów: element i = pad i+1
+  price numeric,                             -- cena JEDNOSTKOWA tej sztuki (nie suma dla całej pozycji przy quantity > 1), tylko odczyt
+  currency text,                             -- waluta ceny; niektóre kanały (Erli, Octopia) mają ją tylko na poziomie zamówienia, nie pozycji
   primary key (marketplace, external_id, item_key),
   foreign key (marketplace, external_id) references sales_orders (marketplace, external_id) on delete cascade
 );
 create index if not exists sales_order_items_order_idx on sales_order_items (marketplace, external_id, position);
+alter table sales_order_items add column if not exists price numeric;
+alter table sales_order_items add column if not exists currency text;
 
 -- Jednorazowe uzupełnienie pozycji dla zamówień pobranych zanim ta tabela powstała (z surowych danych bm_orders).
 -- Ta sama zasada kluczy i kolejności co w lib/salesOrders.ts (mapBmItems); powtórne uruchomienie niczego nie zmienia.
@@ -323,6 +327,92 @@ from (
   cross join lateral generate_series(1, greatest(coalesce((t.l->>'quantity')::int, 1), 1)) as k(k)
 ) x
 on conflict (marketplace, external_id, item_key) do nothing;
+
+-- Uzupełnienie ceny/waluty pozycji dla wierszy zapisanych zanim te kolumny powstały (z już zsynchronizowanych
+-- surowych danych) — jedna aktualizacja per kanał, ta sama logika kluczy/cen co w odpowiednim mapXItems w
+-- lib/salesOrders.ts (zmieniając jedno, zmień drugie). Bezpieczne uruchomić wielokrotnie (`is distinct from`).
+update sales_order_items i
+   set price = round((t.l->>'price')::numeric / greatest(coalesce((t.l->>'quantity')::int, 1), 1), 2),
+       currency = nullif(btrim(t.l->>'currency'), '')
+  from sales_orders s
+  join bm_orders o on s.marketplace = 'backmarket' and o.order_id::text = s.external_id
+  cross join lateral jsonb_array_elements(case when jsonb_typeof(o.orderlines) = 'array' then o.orderlines else '[]'::jsonb end)
+       with ordinality as t(l, n)
+  cross join lateral generate_series(1, greatest(coalesce((t.l->>'quantity')::int, 1), 1)) as k(k)
+ where i.marketplace = 'backmarket' and i.external_id = s.external_id
+   and i.item_key = coalesce(t.l->>'id', t.n::text) || case when k.k > 1 then '-' || k.k else '' end
+   and (i.price is distinct from round((t.l->>'price')::numeric / greatest(coalesce((t.l->>'quantity')::int, 1), 1), 2)
+        or i.currency is distinct from nullif(btrim(t.l->>'currency'), ''));
+
+-- refurbed: total_charged na pozycji już jest ceną jednostkową (każda pozycja to zawsze jedna sztuka).
+update sales_order_items i
+   set price = nullif(t.it->>'total_charged', '')::numeric,
+       currency = nullif(btrim(t.it->>'currency_code'), '')
+  from sales_orders s
+  join refurbed_orders o on s.marketplace = 'refurbed' and o.id = s.external_id
+  cross join lateral jsonb_array_elements(case when jsonb_typeof(o.raw->'items') = 'array' then o.raw->'items' else '[]'::jsonb end)
+       with ordinality as t(it, n)
+ where i.marketplace = 'refurbed' and i.external_id = s.external_id
+   and i.item_key = coalesce(t.it->>'id', t.n::text)
+   and (i.price is distinct from nullif(t.it->>'total_charged', '')::numeric
+        or i.currency is distinct from nullif(btrim(t.it->>'currency_code'), ''));
+
+-- Erli: unitPrice jest już jednostkowy (w groszach — dzielimy przez 100); waluta tylko na poziomie zamówienia.
+update sales_order_items i
+   set price = round((t.it->>'unitPrice')::numeric / 100, 2),
+       currency = nullif(btrim(o.raw->>'currency'), '')
+  from sales_orders s
+  join erli_orders o on s.marketplace = 'erli' and o.id = s.external_id
+  cross join lateral jsonb_array_elements(case when jsonb_typeof(o.raw->'items') = 'array' then o.raw->'items' else '[]'::jsonb end)
+       with ordinality as t(it, n)
+  cross join lateral generate_series(1, greatest(coalesce((t.it->>'quantity')::int, 1), 1)) as k(k)
+ where i.marketplace = 'erli' and i.external_id = s.external_id
+   and i.item_key = coalesce(t.it->>'id', t.n::text) || case when k.k > 1 then '-' || k.k else '' end
+   and (i.price is distinct from round((t.it->>'unitPrice')::numeric / 100, 2)
+        or i.currency is distinct from nullif(btrim(o.raw->>'currency'), ''));
+
+-- Allegro: price.amount na pozycji jest już jednostkowy (sprawdzone na żywym zamówieniu, patrz mapAllegroItems).
+update sales_order_items i
+   set price = nullif(t.li->'price'->>'amount', '')::numeric,
+       currency = nullif(btrim(t.li->'price'->>'currency'), '')
+  from sales_orders s
+  join allegro_orders o on s.marketplace = 'allegro' and o.id = s.external_id
+  cross join lateral jsonb_array_elements(case when jsonb_typeof(o.raw->'lineItems') = 'array' then o.raw->'lineItems' else '[]'::jsonb end)
+       with ordinality as t(li, n)
+  cross join lateral generate_series(1, greatest(coalesce((t.li->>'quantity')::int, 1), 1)) as k(k)
+ where i.marketplace = 'allegro' and i.external_id = s.external_id
+   and i.item_key = coalesce(t.li->>'id', t.n::text) || case when k.k > 1 then '-' || k.k else '' end
+   and (i.price is distinct from nullif(t.li->'price'->>'amount', '')::numeric
+        or i.currency is distinct from nullif(btrim(t.li->'price'->>'currency'), ''));
+
+-- Octopia: unitSalesPrice (sellingPrice albo offerPrice) jest jednostkowy; waluta tylko na poziomie zamówienia.
+update sales_order_items i
+   set price = coalesce((t.l->'sellingPrice'->>'unitSalesPrice')::numeric, (t.l->'offerPrice'->>'unitSalesPrice')::numeric),
+       currency = nullif(btrim(o.raw->>'currencyCode'), '')
+  from sales_orders s
+  join octopia_orders o on s.marketplace = 'octopia' and o.id = s.external_id
+  cross join lateral jsonb_array_elements(case when jsonb_typeof(o.raw->'lines') = 'array' then o.raw->'lines' else '[]'::jsonb end)
+       with ordinality as t(l, n)
+  cross join lateral generate_series(1, greatest(coalesce((t.l->>'quantity')::int, 1), 1)) as k(k)
+ where i.marketplace = 'octopia' and i.external_id = s.external_id
+   and i.item_key = coalesce(t.l->>'orderLineId', t.n::text) || case when k.k > 1 then '-' || k.k else '' end
+   and (i.price is distinct from coalesce((t.l->'sellingPrice'->>'unitSalesPrice')::numeric, (t.l->'offerPrice'->>'unitSalesPrice')::numeric)
+        or i.currency is distinct from nullif(btrim(o.raw->>'currencyCode'), ''));
+
+-- Amazon: ItemPrice.Amount to cena CAŁEJ pozycji (unit price x QuantityOrdered, udokumentowane zachowanie SP-API)
+-- — dzielimy przez quantity, tak samo jak w mapAmazonItems. Pozycje dochodzą osobną fazą (orderItems w raw).
+update sales_order_items i
+   set price = round((t.it->'ItemPrice'->>'Amount')::numeric / greatest(coalesce((t.it->>'QuantityOrdered')::int, 1), 1), 2),
+       currency = nullif(btrim(t.it->'ItemPrice'->>'CurrencyCode'), '')
+  from sales_orders s
+  join amazon_orders o on s.marketplace = 'amazon' and o.id = s.external_id
+  cross join lateral jsonb_array_elements(case when jsonb_typeof(o.raw->'orderItems') = 'array' then o.raw->'orderItems' else '[]'::jsonb end)
+       with ordinality as t(it, n)
+  cross join lateral generate_series(1, greatest(coalesce((t.it->>'QuantityOrdered')::int, 1), 1)) as k(k)
+ where i.marketplace = 'amazon' and i.external_id = s.external_id
+   and i.item_key = coalesce(t.it->>'OrderItemId', t.n::text) || case when k.k > 1 then '-' || k.k else '' end
+   and (i.price is distinct from round((t.it->'ItemPrice'->>'Amount')::numeric / greatest(coalesce((t.it->>'QuantityOrdered')::int, 1), 1), 2)
+        or i.currency is distinct from nullif(btrim(t.it->'ItemPrice'->>'CurrencyCode'), ''));
 
 -- Migracja z poprzedniej wersji, w której numer seryjny i pady były na całym zamówieniu (sales_orders):
 -- przenieś je na pierwszą pozycję i usuń stare kolumny. Powtórne uruchomienie: kolumn już nie ma, więc nic się nie dzieje.
@@ -452,8 +542,9 @@ begin
   if auth.role() = 'authenticated' and (
        new.marketplace is distinct from old.marketplace or new.external_id is distinct from old.external_id
        or new.item_key is distinct from old.item_key or new.position is distinct from old.position
-       or new.sku is distinct from old.sku) then
-    raise exception 'Pola pochodzące z marketplace (SKU, kolejność pozycji) zmienia tylko synchronizacja.' using errcode = '42501';
+       or new.sku is distinct from old.sku or new.price is distinct from old.price
+       or new.currency is distinct from old.currency) then
+    raise exception 'Pola pochodzące z marketplace (SKU, kolejność pozycji, cena) zmienia tylko synchronizacja.' using errcode = '42501';
   end if;
   return new;
 end $$;

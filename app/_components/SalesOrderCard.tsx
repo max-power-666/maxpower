@@ -25,6 +25,8 @@ export type SalesItem = {
   serial_number: string | null;
   pads: number | null;
   pad_serials: string[] | null;
+  price: number | null;
+  currency: string | null;
 };
 
 type WorkerData = {
@@ -354,7 +356,7 @@ export default function SalesOrderCard({
       supabase.from("sales_orders").select("*").eq("marketplace", marketplace).eq("external_id", externalId).maybeSingle(),
       supabase
         .from("sales_order_items")
-        .select("item_key, position, sku, serial_number, pads, pad_serials")
+        .select("item_key, position, sku, serial_number, pads, pad_serials, price, currency")
         .eq("marketplace", marketplace)
         .eq("external_id", externalId)
         .order("position"),

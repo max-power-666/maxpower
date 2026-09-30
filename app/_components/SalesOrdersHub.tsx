@@ -31,6 +31,10 @@ function fmtNumber(n: number | null) {
   if (n === null || n === undefined) return "—";
   return Number(n).toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
+function fmtPrice(n: number | null, currency: string | null) {
+  if (n === null || n === undefined) return "—";
+  return fmtNumber(n) + (currency ? " " + currency : "");
+}
 
 // Wspólny pasek stron: ile na stronę + poprzednia/następna.
 function Pager({
@@ -331,7 +335,7 @@ type SalesRow = {
   sales_order_items: SalesItem[];
 };
 const SALES_COLUMNS =
-  "marketplace, external_id, order_date, planned_shipping_date, status, sku, tracking_number, country_code, shipping_method, sales_order_items(item_key, position, sku, serial_number, pads, pad_serials)";
+  "marketplace, external_id, order_date, planned_shipping_date, status, sku, tracking_number, country_code, shipping_method, sales_order_items(item_key, position, sku, serial_number, pads, pad_serials, price, currency)";
 const rowKey = (r: { marketplace: string; external_id: string }) => `${r.marketplace}:${r.external_id}`;
 
 // Kolor plakietki kanału — żeby na liście od razu było widać, skąd jest zamówienie (inne barwy niż statusy).
@@ -593,6 +597,7 @@ function OrdersList({
               <th className="p-3">Metoda wysyłki</th>
               <th className="p-3">SKU</th>
               <th className="p-3 text-right">Ilość</th>
+              <th className="p-3 text-right">Cena</th>
               <th className="p-3">Numer seryjny</th>
               <th className="p-3">Pady</th>
               <th className="p-3">Nr seryjny padów</th>
@@ -600,7 +605,7 @@ function OrdersList({
           </thead>
           <tbody>
             {!loading && rows.length === 0 && (
-              <tr><td colSpan={12} className="p-6 text-center text-inksoft text-sm">{search ? "Nic nie znaleziono dla tego numeru." : "Brak zamówień — kliknij Odśwież, żeby pobrać je z Back Market."}</td></tr>
+              <tr><td colSpan={13} className="p-6 text-center text-inksoft text-sm">{search ? "Nic nie znaleziono dla tego numeru." : "Brak zamówień — kliknij Odśwież, żeby pobrać je z Back Market."}</td></tr>
             )}
             {rows.map((r) => {
               // Zamówienie bez pozycji (jeszcze nie zsynchronizowane) pokazujemy jednym wierszem z samym SKU.
@@ -649,6 +654,7 @@ function OrdersList({
                   {it ? (
                     <>
                       <td className="p-3 text-right font-mono">{skuCounts.get(it.sku ?? "")}</td>
+                      <td className="p-3 text-right font-mono whitespace-nowrap">{fmtPrice(it.price, it.currency)}</td>
                       <td className="p-3">
                         <InlineEditCell value={it.serial_number} placeholder="Dodaj numer" className="w-44 font-mono" onSave={(v) => saveSerial(r, it, v)} />
                       </td>
@@ -660,7 +666,7 @@ function OrdersList({
                       </td>
                     </>
                   ) : (
-                    <td colSpan={4} className="p-3 text-xs text-inksoft">—</td>
+                    <td colSpan={5} className="p-3 text-xs text-inksoft">—</td>
                   )}
                 </tr>
               ));

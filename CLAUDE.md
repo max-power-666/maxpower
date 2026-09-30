@@ -163,7 +163,26 @@ myliło: np. dwie różne sztuki (SKU A ×1, SKU B ×1) pokazywały łączne "2"
 że to 2 sztuki SKU A. Zgłoszone przez właściciela na żywym przykładzie (zamówienie refurbed z dwoma różnymi
 kolorami tego samego modelu). Poprawione: "Ilość" jest teraz kolumną PER POZYCJA (nie `rowSpan` na całe
 zamówienie) — dla pojedynczych SKU zawsze pokaże 1, a >1 tylko gdy naprawdę kilka wierszy w tym zamówieniu
-dzieli ten sam SKU (czyli oryginalna pozycja z API miała `quantity` > 1 i została rozbita). **Nr przesyłki i "Etap" (kubełek statusu, patrz niżej) ukryte z listy 30.09.2026** — na prośbę właściciela, żeby lista była mniej zatłoczona; dane
+dzieli ten sam SKU (czyli oryginalna pozycja z API miała `quantity` > 1 i została rozbita). **Cena** (30.09.2026,
+zaraz po Ilości) — `sales_order_items.price`/`currency`, cena JEDNOSTKOWA tej sztuki. **Kluczowa pułapka, sprawdzona
+na żywych danych zamiast zgadywana:** część kanałów zwraca w API cenę CAŁEJ pozycji (już przemnożoną przez
+`quantity`), część od razu jednostkową — pomylenie tego dawałoby 2x/3x zawyżoną cenę dla rozbitych pozycji.
+Back Market `orderline.price` — CAŁA pozycja (zamówienie z `quantity=2`, `price="1250.00"` = suma obu sztuk, nie
+cena jednej) → dzielimy przez `quantity` w `mapBmItems`. Amazon `ItemPrice.Amount` — też CAŁA pozycja
+(`unit price × QuantityOrdered`, udokumentowane wprost w SP-API, nie mamy w naszych danych żywego zamówienia z
+`QuantityOrdered` > 1 do potwierdzenia, ale zachowanie jest oficjalnie opisane) → też dzielimy przez quantity.
+Erli `item.unitPrice` (grosze), Allegro `lineItem.price.amount` i Octopia `line.sellingPrice.unitSalesPrice` (a gdy
+brak — `offerPrice.unitSalesPrice`) są już JEDNOSTKOWE — potwierdzone na żywych zamówieniach z `quantity` > 1:
+Allegro (dwie pozycje tego samego produktu, `quantity` 1 i 2, obie `price.amount="19.99"` — suma 19.99+2×19.99=59.97
+zgadza się co do grosza z `summary.totalToPay`) i Octopia (`quantity=2`, `unitSalesPrice=144.99`,
+`totalPrice.sellingPrice=289.98=144.99×2` — więc `totalPrice` to suma, a `unitSalesPrice` obok niej to dokładnie to,
+czego potrzebujemy, świadomie NIE używamy `totalPrice`) — żadnego dzielenia. refurbed `item.total_charged` też bez
+dzielenia, ale z innego powodu: refurbed w ogóle nie rozbija `quantity` (każda pozycja to zawsze jedna sztuka).
+**Waluta nie zawsze jest na pozycji** — Erli i Octopia mają ją tylko na poziomie CAŁEGO zamówienia (`o.currency`/
+`o.currencyCode`), więc mapper bierze ją stamtąd, nie z pozycji. Kolumna "Cena" na liście pokazuje `"kwota waluta"`
+(`fmtPrice` w `SalesOrdersHub.tsx`), "—" gdy nie ma danych. Uzupełnienie dla starych wierszy w `sales-orders.sql`
+(po jednym `update` per kanał, ta sama logika co w odpowiednim `mapXItems`) — `price`/`currency` chronione tym
+samym triggerem co SKU/pozycja (tylko synchronizacja może je zmieniać). **Nr przesyłki i "Etap" (kubełek statusu, patrz niżej) ukryte z listy 30.09.2026** — na prośbę właściciela, żeby lista była mniej zatłoczona; dane
 i tak zostają: `sales_orders.tracking_number` dalej widoczne na karcie zamówienia (`Row label="Numer przesyłki"` per kanał), a Etap dalej rządzi pigułkami filtra (Wszystkie/Nowe/Wysłane/Anulowane), tylko nie ma już własnej kolumny w tabeli. Przy okazji: numer zamówienia na liście dostał mniejszą czcionkę (`text-xs`, wcześniej dziedziczył `text-sm` z tabeli). Etap = kubełek statusu liczony WPROST ze statusu kanału (`statusBucket` w `lib/salesOrders.ts`: Nowe /
 Wysłane / Anulowane), **nie osobna kolumna** — zastąpił dawne ręcznie zmieniane `sales_orders.our_status`, wycofane
 30.09.2026 na prośbę właściciela ("korzystajmy ze statusów dostępnych w marketplace'ach", zamiast ręcznie śledzić
