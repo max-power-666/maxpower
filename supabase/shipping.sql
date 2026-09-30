@@ -26,8 +26,12 @@ create table if not exists shipping_settings (
   phone text not null,
   email text,
   default_description text not null default 'Used electronics',   -- opis zawartości, gdy szablon nie ma własnego
+  zebra_printer_name text,          -- nazwa drukarki (dokładnie jak w Windows/QZ Tray) do druku etykiet ZPL
+  a4_printer_name text,             -- nazwa drukarki A4 do druku delivery note/packing slipu
   constraint shipping_settings_singleton check (id = 1)
 );
+alter table shipping_settings add column if not exists zebra_printer_name text;
+alter table shipping_settings add column if not exists a4_printer_name text;
 -- Dane nadawcy Recoo (widnieją na etykiecie). Wstawiane tylko gdy wiersza jeszcze nie ma — późniejsze zmiany Admina zostają.
 insert into shipping_settings (id, shipper_company, shipper_name, street, postal_code, city, country_code, phone, email)
 values (1, 'M13 Maksymilian Jonkisz', 'Maksymilian Jonkisz', 'ul. Karola Olszewskiego 20', '25-663', 'Kielce', 'PL', '579510490', 'hello@recoo.io')

@@ -7,6 +7,7 @@ import { COUNTRY_NAMES, DHL_EU_COUNTRIES, isEconomySelect, type DhlMoney, type D
 import { base64ToBlobUrl, defaultShippingDate, type ShipPrefill } from "@/lib/shipping";
 import { MARKETPLACES } from "@/lib/salesOrders";
 import { escapeLike } from "@/lib/search";
+import { printRawToZebra, printPdf, listPrinters, PrintAgentError } from "@/lib/printAgent";
 
 // Zakładka Wysyłka: nadawanie przesyłek DHL Express (MyDHL API) — formularz z wyceną, szablony paczek, ustawienia nadawcy i lista nadanych
 // przesyłek z etykietami (PDF 10x15 na Zebrę). Dostęp: Admin i Manager. Klucze i numer konta są tylko na serwerze
@@ -40,6 +41,8 @@ type Settings = {
   phone: string;
   email: string | null;
   default_description: string;
+  zebra_printer_name: string | null;
+  a4_printer_name: string | null;
 };
 type Template = { id: number; name: string; weight_kg: number; length_cm: number; width_cm: number; height_cm: number; description: string | null };
 type Carrier = "parcel" | "express";
@@ -64,6 +67,7 @@ type ShipmentRow = {
   carrier: string;
   cancelled_at: string | null;
   has_label?: boolean;
+  label_format?: string | null;
   created_at: string;
   created_by_email: string | null;
   environment: string;
@@ -115,7 +119,9 @@ export default function ShippingView({
   const [chosen, setChosen] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const [done, setDone] = useState<{ trackingNumber: string; trackingUrl: string | null; price: string; env: string; saved: boolean; labelBase64?: string | null; id?: number; error?: string; carrier: Carrier; marketplaceSyncError?: string | null; deliveryNoteUrl?: string | null } | null>(null);
+  const [done, setDone] = useState<{ trackingNumber: string; trackingUrl: string | null; price: string; env: string; saved: boolean; labelBase64?: string | null; labelFormat?: string | null; id?: number; error?: string; carrier: Carrier; marketplaceSyncError?: string | null; deliveryNoteUrl?: string | null } | null>(null);
+  const [directPrint, setDirectPrint] = useState(false);
+  const [printBusy, setPrintBusy] = useState(false);
   const requestId = useRef<string>(crypto.randomUUID());
 
   useEffect(() => {
@@ -129,8 +135,14 @@ export default function ShippingView({
       .catch(() => setParcel({ configured: false, sandbox: false, version: null }));
     loadSettings();
     loadTemplates();
+    // Przełącznik drukowania bezpośredniego: wybór per przeglądarkę/stanowisko, nie współdzielone ustawienie.
+    setDirectPrint(localStorage.getItem("shipping-direct-print") === "1");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem("shipping-direct-print", directPrint ? "1" : "0");
+  }, [directPrint]);
 
   // Wyszukiwanie po numerze przesyłki: debounce, resetuje stronę na 1 (wzorzec jak w InventoryRawView).
   useEffect(() => {
@@ -374,6 +386,7 @@ export default function ShippingView({
         env: data.environment ?? "test",
         saved: data.saved !== false,
         labelBase64: data.labelBase64 ?? null,
+        labelFormat: data.labelFormat ?? null,
         id: data.id,
         error: data.saved === false ? data.error : data.labelError ? `Przesyłka nadana, ale nie udało się pobrać etykiety: ${data.labelError}. Kliknij „Otwórz etykietę”, aby spróbować ponownie.` : undefined,
         carrier: quote.carrier,
@@ -413,34 +426,93 @@ export default function ShippingView({
     if (!data?.synced) setError(data?.error || "Nie udało się zgłosić numeru przesyłki do marketplace'u.");
   }
 
-  async function openLabel(id: number | undefined, base64?: string | null) {
+  // Obsługa etykiety — albo otwiera PDF do ręcznego wydruku (dziś: DHL Express etykietę trzyma jako ZPL, więc
+  // podgląd renderujemy z niego przez Labelary), albo (przełącznik "Drukowanie bezpośrednie") wysyła prosto na
+  // etykieciarkę Zebra przez QZ Tray: surowy ZPL, gdy jest dostępny (DHL Express od razu; DHL Parcel dociąga go
+  // na żądanie, ZBLP, bez zmiany trybu tworzenia przesyłki — patrz dhl-parcel/label z format="zpl"), a dla
+  // formatów bez ZPL (Erli) — PDF wprost na tę samą drukarkę przez jej sterownik Windows.
+  async function handleLabel(id: number | undefined, base64?: string | null, format?: string | null) {
     setError("");
-    let data = base64 ?? null;
-    if (!data && id !== undefined) {
-      const { data: row, error: err } = await supabase.from("shipments").select("label_data, carrier").eq("id", id).maybeSingle();
-      if (err) return setError(`Nie udało się wczytać etykiety: ${err.message}`);
-      data = (row?.label_data as string | null) ?? null;
-      // DHL Parcel: gdy etykiety nie udało się pobrać przy nadaniu, pobieramy ją teraz od DHL i zapisujemy.
-      if (!data && row?.carrier === "dhl_parcel") {
-        const res = await fetch("/api/shipping/dhl-parcel/label", { method: "POST", headers: auth, body: JSON.stringify({ id }) });
-        const j = await res.json().catch(() => ({}));
-        if (!res.ok) return setError(j?.error || "Nie udało się pobrać etykiety.");
-        data = j.labelBase64 ?? null;
-        await loadShipments();
+    setPrintBusy(true);
+    try {
+      let data = base64 ?? null;
+      let fmt = format ?? null;
+      let carrierType: string | undefined;
+      if (!data && id !== undefined) {
+        const { data: row, error: err } = await supabase.from("shipments").select("label_data, label_format, carrier").eq("id", id).maybeSingle();
+        if (err) throw new Error(`Nie udało się wczytać etykiety: ${err.message}`);
+        data = (row?.label_data as string | null) ?? null;
+        fmt = (row?.label_format as string | null) ?? null;
+        carrierType = row?.carrier as string | undefined;
+        // DHL Parcel: gdy etykiety nie udało się pobrać przy nadaniu, pobieramy ją teraz od DHL i zapisujemy.
+        if (!data && row?.carrier === "dhl_parcel") {
+          const res = await fetch("/api/shipping/dhl-parcel/label", { method: "POST", headers: auth, body: JSON.stringify({ id }) });
+          const j = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(j?.error || "Nie udało się pobrać etykiety.");
+          data = j.labelBase64 ?? null;
+          fmt = "pdf";
+          await loadShipments();
+        }
+        // Erli: etykieta praktycznie nigdy nie jest gotowa od razu przy nadaniu — dopytujemy, a jeśli jeszcze jej
+        // nie ma, mówimy to wprost zamiast ogólnego "brak etykiety".
+        if (!data && row?.carrier === "erli_paczkomat") {
+          const res = await fetch("/api/shipping/erli/label", { method: "POST", headers: auth, body: JSON.stringify({ id }) });
+          const j = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(j?.error || "Nie udało się pobrać etykiety.");
+          if (!j.ready) throw new Error("Erli jeszcze nie przygotowało etykiety — spróbuj ponownie za chwilę.");
+          data = j.labelBase64 ?? null;
+          fmt = "pdf";
+          await loadShipments();
+        }
       }
-      // Erli: etykieta praktycznie nigdy nie jest gotowa od razu przy nadaniu — dopytujemy, a jeśli jeszcze jej
-      // nie ma, mówimy to wprost zamiast ogólnego "brak etykiety".
-      if (!data && row?.carrier === "erli_paczkomat") {
-        const res = await fetch("/api/shipping/erli/label", { method: "POST", headers: auth, body: JSON.stringify({ id }) });
-        const j = await res.json().catch(() => ({}));
-        if (!res.ok) return setError(j?.error || "Nie udało się pobrać etykiety.");
-        if (!j.ready) return setError("Erli jeszcze nie przygotowało etykiety — spróbuj ponownie za chwilę.");
-        data = j.labelBase64 ?? null;
-        await loadShipments();
+      if (!data) throw new Error("Brak etykiety dla tej przesyłki.");
+
+      if (directPrint) {
+        if (!settings?.zebra_printer_name) throw new Error("Ustaw nazwę drukarki Zebra w danych nadawcy (Admin), żeby drukować bezpośrednio.");
+        if (fmt === "zpl") {
+          await printRawToZebra(atob(data), settings.zebra_printer_name);
+        } else if (id !== undefined && carrierType === "dhl_parcel") {
+          const res = await fetch("/api/shipping/dhl-parcel/label", { method: "POST", headers: auth, body: JSON.stringify({ id, format: "zpl" }) });
+          const j = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(j?.error || "Nie udało się pobrać etykiety ZPL.");
+          await printRawToZebra(atob(j.zplBase64), settings.zebra_printer_name);
+        } else {
+          await printPdf(data, settings.zebra_printer_name);
+        }
+      } else {
+        let pdfBase64 = data;
+        if (fmt === "zpl") {
+          const res = await fetch("/api/shipping/render-zpl", { method: "POST", headers: auth, body: JSON.stringify({ zpl: atob(data) }) });
+          const j = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(j?.error || "Nie udało się wyrenderować podglądu etykiety.");
+          pdfBase64 = j.pdfBase64;
+        }
+        window.open(base64ToBlobUrl(pdfBase64), "_blank"); // 10x15 — drukuj (Ctrl+P) na Zebrze, rozmiar strony 100×150 mm
       }
+    } catch (e: any) {
+      setError(e instanceof PrintAgentError ? e.message : e.message || "Nie udało się obsłużyć etykiety.");
+    } finally {
+      setPrintBusy(false);
     }
-    if (!data) return setError("Brak etykiety dla tej przesyłki.");
-    window.open(base64ToBlobUrl(data), "_blank"); // PDF 10x15 — drukuj (Ctrl+P) na Zebrze, rozmiar strony 100×150 mm
+  }
+
+  // Packing slip Back Marketu: albo otwiera link w nowej karcie (dziś), albo (przełącznik) dociąga PDF przez
+  // nasz serwerowy proxy (unika CORS na S3) i drukuje wprost na drukarkę A4 przez QZ Tray.
+  async function handlePackingSlip(url: string) {
+    if (!directPrint) return void window.open(url, "_blank");
+    setError("");
+    if (!settings?.a4_printer_name) return setError("Ustaw nazwę drukarki A4 w danych nadawcy (Admin), żeby drukować bezpośrednio.");
+    setPrintBusy(true);
+    try {
+      const res = await fetch("/api/shipping/fetch-remote-pdf", { method: "POST", headers: auth, body: JSON.stringify({ url }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j?.error || "Nie udało się pobrać packing slipu.");
+      await printPdf(j.base64, settings.a4_printer_name);
+    } catch (e: any) {
+      setError(e instanceof PrintAgentError ? e.message : e.message || "Nie udało się wydrukować packing slipu.");
+    } finally {
+      setPrintBusy(false);
+    }
   }
 
   function reset() {
@@ -490,6 +562,22 @@ export default function ShippingView({
 
       {(parcel?.configured || express?.configured) && settings && (
         <>
+          {/* Przełącznik: drukowanie bezpośrednie (QZ Tray, bez okna drukowania) vs generowanie PDF (dzisiejszy
+              ręczny wydruk) — "na wszelki wypadek", gdyby drukowanie bezpośrednie nie zadziałało. Wybór per
+              przeglądarkę/stanowisko (localStorage), nie współdzielone ustawienie w bazie. */}
+          <div className="flex items-center gap-2 mb-4">
+            <button
+              onClick={() => setDirectPrint((v) => !v)}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ${directPrint ? "bg-teal" : "bg-line"}`}
+              title="Przełącz między drukowaniem bezpośrednim (QZ Tray) a generowaniem PDF do ręcznego wydruku"
+            >
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${directPrint ? "translate-x-6" : "translate-x-1"}`} />
+            </button>
+            <span className="text-xs font-semibold text-inksoft">
+              {directPrint ? "Drukowanie bezpośrednie (QZ Tray)" : "Generuj PDF (ręczny wydruk)"}
+            </span>
+            {printBusy && <span className="text-xs text-inksoft">drukowanie…</span>}
+          </div>
           {/* wynik nadania */}
           {done && (
             <div className={`border p-4 mb-6 ${done.saved ? "border-teal bg-tealsoft" : "border-rust bg-rustsoft"}`}>
@@ -502,13 +590,17 @@ export default function ShippingView({
                 <p className="text-rust text-sm font-semibold mb-2">Problem ze zgłoszeniem do marketplace'u: {done.marketplaceSyncError} (można ponowić niżej, w liście nadanych przesyłek).</p>
               )}
               <div className="flex gap-2">
-                <button onClick={() => openLabel(done.id, done.labelBase64)} className={btnPrimary}>Otwórz etykietę (PDF)</button>
+                <button onClick={() => handleLabel(done.id, done.labelBase64, done.labelFormat)} disabled={printBusy} className={btnPrimary}>
+                  {directPrint ? "Drukuj etykietę (Zebra)" : "Otwórz etykietę (PDF)"}
+                </button>
                 {done.deliveryNoteUrl && (
-                  <a href={done.deliveryNoteUrl} target="_blank" rel="noreferrer" className={`${btnGhost} inline-block`}>Otwórz packing slip (PDF)</a>
+                  <button onClick={() => handlePackingSlip(done.deliveryNoteUrl!)} disabled={printBusy} className={btnGhost}>
+                    {directPrint ? "Drukuj packing slip (A4)" : "Otwórz packing slip (PDF)"}
+                  </button>
                 )}
                 <button onClick={reset} className={btnGhost}>Nowa przesyłka</button>
               </div>
-              <p className="text-xs text-inksoft mt-2">Wydrukuj etykietę na Zebrze: w oknie druku wybierz drukarkę i rozmiar strony 100 × 150 mm, skala 100%.</p>
+              {!directPrint && <p className="text-xs text-inksoft mt-2">Wydrukuj etykietę na Zebrze: w oknie druku wybierz drukarkę i rozmiar strony 100 × 150 mm, skala 100%.</p>}
             </div>
           )}
 
@@ -729,7 +821,11 @@ Cena to wycena wg cennika konta (DHL Parcel: kwota NETTO w PLN, już z doliczon�
                       </td>
                       <td className="p-3 text-xs">{s.created_by_email || "—"}</td>
                       <td className="p-3 whitespace-nowrap text-right">
-                        {!s.cancelled_at && <button onClick={() => openLabel(s.id)} className="text-xs font-semibold text-teal hover:underline">{s.has_label === false ? "Pobierz etykietę" : "Etykieta"}</button>}
+                        {!s.cancelled_at && (
+                          <button onClick={() => handleLabel(s.id, null, s.label_format)} disabled={printBusy} className="text-xs font-semibold text-teal hover:underline disabled:opacity-50">
+                            {s.has_label === false ? "Pobierz etykietę" : directPrint ? "Drukuj" : "Etykieta"}
+                          </button>
+                        )}
                         {!s.cancelled_at && (s.carrier === "dhl_parcel" || s.carrier === "erli_paczkomat") && (
                           <button onClick={() => cancelShipment(s)} className="ml-3 text-xs font-semibold text-rust hover:underline">Anuluj</button>
                         )}
@@ -840,6 +936,22 @@ function SenderPanel({ settings, onSaved, onError }: { settings: Settings; onSav
   const [open, setOpen] = useState(false);
   const [f, setF] = useState(settings);
   const [saving, setSaving] = useState(false);
+  const [printers, setPrinters] = useState<string[] | null>(null);
+  const [detecting, setDetecting] = useState(false);
+
+  // Pomocniczo: lista drukarek widocznych dla QZ Tray NA TYM komputerze — żeby nie zgadywać dokładnej nazwy
+  // z Windowsa. Wymaga zainstalowanego i uruchomionego QZ Tray (patrz CLAUDE.md).
+  async function detectPrinters() {
+    onError("");
+    setDetecting(true);
+    try {
+      setPrinters(await listPrinters());
+    } catch (e: any) {
+      onError(e.message || "Nie udało się wykryć drukarek — czy QZ Tray jest uruchomiony na tym komputerze?");
+    } finally {
+      setDetecting(false);
+    }
+  }
 
   async function save() {
     onError("");
@@ -858,6 +970,8 @@ function SenderPanel({ settings, onSaved, onError }: { settings: Settings; onSav
         phone: f.phone.trim(),
         email: f.email?.trim() || null,
         default_description: f.default_description.trim() || "Used electronics",
+        zebra_printer_name: f.zebra_printer_name?.trim() || null,
+        a4_printer_name: f.a4_printer_name?.trim() || null,
       })
       .eq("id", 1)
       .select("id");
@@ -882,6 +996,30 @@ function SenderPanel({ settings, onSaved, onError }: { settings: Settings; onSav
             <div><label className={label}>Telefon</label><input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} className={inputCls} /></div>
             <div><label className={label}>E-mail</label><input value={f.email ?? ""} onChange={(e) => setF({ ...f, email: e.target.value })} className={inputCls} /></div>
             <div className="md:col-span-4"><label className={label}>Domyślny opis zawartości</label><input value={f.default_description} onChange={(e) => setF({ ...f, default_description: e.target.value })} className={inputCls} /></div>
+          </div>
+          <div className="flex items-center justify-between mb-1 mt-2">
+            <h3 className="text-xs font-semibold text-inksoft">Drukowanie bezpośrednie (QZ Tray)</h3>
+            <button onClick={detectPrinters} disabled={detecting} className="text-xs font-semibold text-teal hover:underline disabled:opacity-50">
+              {detecting ? "Wykrywanie…" : "Wykryj drukarki na tym komputerze"}
+            </button>
+          </div>
+          <p className="text-xs text-inksoft mb-2">Dokładna nazwa drukarki (jak w Windowsie) — wymagane tylko, gdy przełącznik "Drukowanie bezpośrednie" jest włączony. "Wykryj" działa na komputerze, na którym jest zainstalowany i uruchomiony QZ Tray.</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+            <div>
+              <label className={label}>Drukarka etykiet (Zebra)</label>
+              <input value={f.zebra_printer_name ?? ""} onChange={(e) => setF({ ...f, zebra_printer_name: e.target.value })} list="zebra-printers" className={inputCls} />
+            </div>
+            <div>
+              <label className={label}>Drukarka A4 (delivery note)</label>
+              <input value={f.a4_printer_name ?? ""} onChange={(e) => setF({ ...f, a4_printer_name: e.target.value })} list="a4-printers" className={inputCls} />
+            </div>
+            {printers && (
+              <>
+                <datalist id="zebra-printers">{printers.map((p) => <option key={p} value={p} />)}</datalist>
+                <datalist id="a4-printers">{printers.map((p) => <option key={p} value={p} />)}</datalist>
+                {printers.length === 0 && <p className="text-xs text-rust md:col-span-2">QZ Tray nie zgłosił żadnej drukarki.</p>}
+              </>
+            )}
           </div>
           <button onClick={save} disabled={saving} className={btnPrimary}>{saving ? "Zapisywanie…" : "Zapisz dane nadawcy"}</button>
         </div>

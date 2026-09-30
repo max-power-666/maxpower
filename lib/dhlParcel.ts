@@ -215,8 +215,10 @@ export async function dhlParcelCreate(cfg: DhlParcelConfig, i: CreateParcelInput
   }
 }
 
-export async function dhlParcelLabel(cfg: DhlParcelConfig, shipmentId: string): Promise<{ base64: string; mime: string }> {
-  const r = await soapCall(cfg, "getLabels", el("itemsToPrint", [el("item", [el("labelType", "BLP"), el("shipmentId", shipmentId)])]));
+// labelType: BLP = PDF (domyślnie, podgląd/druk przez okno przeglądarki), ZBLP = ZPL (druk bezpośredni na Zebrze
+// przez QZ Tray) — niezależne od tworzenia przesyłki, można doćiągnąć w dowolnym formacie w dowolnym momencie.
+export async function dhlParcelLabel(cfg: DhlParcelConfig, shipmentId: string, labelType: "BLP" | "ZBLP" = "BLP"): Promise<{ base64: string; mime: string }> {
+  const r = await soapCall(cfg, "getLabels", el("itemsToPrint", [el("item", [el("labelType", labelType), el("shipmentId", shipmentId)])]));
   const item = (r?.item as any[] | undefined)?.[0];
   const data = s(item?.labelData);
   if (!data) throw new DhlParcelError(`Nie udało się pobrać etykiety${item ? `: ${Object.values(item).map(s).filter(Boolean).join("; ")}` : "."}`);

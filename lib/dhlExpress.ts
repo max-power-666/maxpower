@@ -271,7 +271,11 @@ export function buildShipmentRequest(cfg: Pick<DhlExpressConfig, "account">, inp
       unitOfMeasurement: "metric",
     },
     outputImageProperties: {
-      encodingFormat: "pdf",
+      // ZPL zamiast PDF (30.09.2026) — do bezpośredniego druku na Zebrze przez QZ Tray, bez okna drukowania.
+      // DHL Express (inaczej niż DHL Parcel) nie pozwala doćiągnąć etykiety w innym formacie PO utworzeniu
+      // przesyłki — format wybiera się raz, tutaj. Podgląd na ekranie renderujemy z tego ZPL przez Labelary
+      // (patrz app/api/shipping/render-zpl), zamiast prosić DHL o PDF wprost.
+      encodingFormat: "zpl",
       imageOptions: [{ typeCode: "label", templateName: input.labelTemplate || DEFAULT_LABEL_TEMPLATE }],
     },
     getRateEstimates: false,

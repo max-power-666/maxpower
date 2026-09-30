@@ -27,7 +27,7 @@ numerach seryjnych, wielokanałowa synchronizacja stanów, naprawy, auto-wycena)
   `ServiceView.tsx` (Serwis), `TestsView.tsx` (Testy), `ProductCardDrawer.tsx` (karta produktu), `TradeInHub.tsx` + `TradeInOrdersView.tsx` (Trade-in),
   `TradeInView.tsx` (Bidder), `SalesOrdersHub.tsx` (Zamówienia, karta zamówienia w `SalesOrderCard.tsx`), `ErliParcelPanel.tsx` (nadawanie Paczkomatów InPost 24/7 przez Erli, osadzony na karcie zamówienia Erli), `ShippingView.tsx` (Wysyłka DHL).
 - `app/api/*/route.ts` — endpointy serwerowe (sekrety tylko tu, nigdy w przeglądarce):
-  `fakturownia/sync`, `tradein/bidder`, `tradein/competitors`, `tradein/orders-sync`, `tradein/validate`, `orders/bm-sync`, `orders/refurbed-sync`, `orders/erli-sync`, `orders/allegro-sync`, `orders/allegro-auth`, `orders/allegro-callback`, `orders/octopia-sync`, `orders/amazon-sync`, `orders/validate`, `orders/bm-refresh`, `orders/erli-refresh`, `shipping/dhl-express/{check,create}`, `shipping/dhl-parcel/{check,create,label,cancel}`, `shipping/erli/{create,label,cancel}`, `shipping/sync-marketplace`.
+  `fakturownia/sync`, `tradein/bidder`, `tradein/competitors`, `tradein/orders-sync`, `tradein/validate`, `orders/bm-sync`, `orders/refurbed-sync`, `orders/erli-sync`, `orders/allegro-sync`, `orders/allegro-auth`, `orders/allegro-callback`, `orders/octopia-sync`, `orders/amazon-sync`, `orders/validate`, `orders/bm-refresh`, `orders/erli-refresh`, `shipping/dhl-express/{check,create}`, `shipping/dhl-parcel/{check,create,label,cancel}`, `shipping/erli/{create,label,cancel}`, `shipping/sync-marketplace`, `shipping/render-zpl`, `shipping/fetch-remote-pdf`.
 - `lib/` — `supabaseClient.ts`, `buyback.ts` (logika biddera + `isAuthorized`),
   `displayName.ts` (skrócone imię: "Maksymilian J."), `workLog.ts` (interwały Dziś/7/30 dni,
   liczenie czasu i **etykiety typów czynności/statusów** — jedno źródło dla list i karty produktu),
@@ -369,8 +369,8 @@ adres (`express.api.dhl.com/mydhlapi/test` vs `/mydhlapi`), **domyślnie testowe
 Przepływ: formularz (odbiorca z zamówienia albo ręcznie, paczka z **szablonu** albo ręcznie, data nadania) → **wycena** `GET /rates` (produkty na naszym koncie z ceną
 w walucie rozliczeniowej i PLN, waga taryfowa, składniki ceny; Economy Select = kod `W`/`H`, domyślnie zaznaczony) → wybór produktu → `POST /shipments` (bez okna potwierdzenia
 w przeglądarce — usunięte 30.09.2026 na prośbę właściciela, zbędny dodatkowy klik; info o środowisku testowym/produkcyjnym zostaje jako zwykły tekst pod tabelą wyceny) →
-etykieta **PDF 6x4 cala (10x15 cm, szablon `ECOM26_64_001`, zmienna `DHL_EXPRESS_LABEL_TEMPLATE`)** do wydruku na Zebrze przez sterownik (rozmiar strony
-100x150 mm) → zapis w `shipments` (numer, link śledzenia, odbiorca, paczka, opłaty, etykieta base64). Zabezpieczenia: wymagane `confirm: true` w body żądania (parametr API,
+etykieta **ZPL (szablon `ECOM26_64_001`, zmienna `DHL_EXPRESS_LABEL_TEMPLATE`; PDF zamieniony na ZPL 30.09.2026 —
+patrz niżej, druk bezpośredni) → zapis w `shipments` (numer, link śledzenia, odbiorca, paczka, opłaty, etykieta base64). Zabezpieczenia: wymagane `confirm: true` w body żądania (parametr API,
 niezależny od usuniętego okna w przeglądarce); `client_request_id` (unikalny) chroni
 przed podwójnym nadaniem tym samym kliknięciem; gdy DHL nada, a zapis w bazie się nie uda, odpowiedź zwraca numer i etykietę, żeby nic się nie zmarnowało; e-mail autora z konta, nie z żądania;
 tabela `shipments` bez UPDATE/DELETE (zapis księgowy, tylko serwer). **Blok "PRZEWOŹNICY" u góry zakładki (status konfiguracji DHL Parcel/Express)
@@ -378,7 +378,56 @@ jest ukryty, dopóki wszystko działa — pokazuje się tylko, gdy któryś prze
 brakuje danych nadawcy** (30.09.2026, na prośbę właściciela — w normalnym stanie zajmował miejsce bez informacji wartej uwagi); linijka z adresem
 nadawcy w tym miejscu usunięta na stałe (dane nadawcy i tak są dostępne pod "Zmień dane nadawcy (Admin)" niżej). **Lista "Nadane przesyłki" ma
 paginację (`.range()`, 20/stronę) i wyszukiwarkę po numerze przesyłki** (`ilike` na `tracking_number`, z debounce 300 ms — wcześniej `.limit(50)`
-bez offsetu pokazywał tylko najświeższe 50 przesyłek bez możliwości przejścia dalej). **Na razie tylko kraje UE** (bez odprawy celnej, `isCustomsDeclarable: false`, incoterm DAP), **w tym Polska** (`DHL_EU_COUNTRIES`
+bez offsetu pokazywał tylko najświeższe 50 przesyłek bez możliwości przejścia dalej).
+
+**Drukowanie bezpośrednie (30.09.2026)** — etykieta na etykieciarkę Zebra i delivery note (packing slip Back
+Marketu) na zwykłą drukarkę A4, bez okna drukowania przeglądarki. Jeden lokalny agent obsługuje oba przypadki:
+**QZ Tray** (qz.io, darmowy, open-source; paczka npm `qz-tray`, wrapper w `lib/printAgent.ts`) — Admin/pracownik
+musi go RĘCZNIE zainstalować na każdym komputerze, który ma drukować (instrukcja Windows: patrz sekcja niżej w
+tym pliku albo poproś asystenta o jej ponowne wysłanie). Bez podpisywania żądań (`qz.security.setCertificatePromise`)
+— dla wewnętrznego zespołu to nadmiarowa infrastruktura; QZ Tray i tak pyta raz o zgodę (checkbox "zapamiętaj").
+**Etykieta = ZPL, nie PDF:** DHL Express nie pozwala doćiągnąć etykiety w innym formacie PO utworzeniu przesyłki
+(format wybiera się raz, przy tworzeniu — `outputImageProperties.encodingFormat` w `lib/dhlExpress.ts`, zmienione
+z `"pdf"` na `"zpl"`), więc etykieta DHL Express jest teraz ZAWSZE w ZPL. DHL Parcel (`lib/dhlParcel.ts`,
+`dhlParcelLabel(cfg, shipmentId, labelType)`) zostaje przy PDF (BLP) przy tworzeniu — bez zmiany, zero ryzyka dla
+działającego procesu — a ZPL (ZBLP) dociąga NA ŻĄDANIE dopiero przy kliknięciu druku bezpośredniego (niezależnie
+od tworzenia przesyłki, więc bez zmiany schematu; nie zapisywane w bazie — świeże przy każdym druku). **Podgląd
+PDF w trybie "Generuj PDF"** dla etykiety w ZPL (czyli zawsze dla DHL Express) idzie przez darmowe publiczne API
+**Labelary** (`app/api/shipping/render-zpl`, `api.labelary.com/v1/printers/8dpmm/labels/4x6/0/`, `Accept:
+application/pdf`) zamiast prosić DHL o PDF wprost. **Przełącznik "Drukowanie bezpośrednie ↔ Generuj PDF"**
+w `ShippingView.tsx` (localStorage `shipping-direct-print`, per przeglądarkę/stanowisko, nie w bazie) — na wyraźną
+prośbę właściciela, "na wszelki wypadek": wyłączony wraca do dzisiejszego zachowania (otwórz PDF, ręczny Ctrl+P).
+**Nazwy drukarek** (dokładnie jak w Windowsie) w `shipping_settings.zebra_printer_name`/`a4_printer_name` —
+nowe nullable kolumny, Admin ustawia w panelu "Zmień dane nadawcy", z przyciskiem "Wykryj drukarki" (`listPrinters()`
+w `lib/printAgent.ts`, wymaga uruchomionego QZ Tray na komputerze, na którym klika Admin). **Delivery note przez
+serwerowy proxy** (`app/api/shipping/fetch-remote-pdf`) zamiast fetch wprost z przeglądarki — omija nieprzewidywalne
+CORS na S3 Back Marketu; prosta ochrona przed SSRF (tylko https, blokada hostów prywatnych/lokalnych), route i tak
+dostępny tylko dla zalogowanego, uprawnionego zespołu. Etykiety bez ZPL (dziś: Erli) w trybie bezpośrednim lecą jako
+PDF wprost na drukarkę Zebra przez jej sterownik Windows (`printPdf` w `lib/printAgent.ts`, ta sama funkcja co dla
+A4 — nazwa drukarki decyduje, nie funkcja). `next.config.mjs`: alias webpack `lna: false` — qz-tray opcjonalnie
+`require('lna')` (biblioteka Local Network Access dla nowszych Chrome, nieinstalowana — qz-tray sam łapie brak w
+try/catch), bez aliasu webpack tylko ostrzegał przy każdym buildzie. Nie testowane z prawdziwą drukarką/QZ Tray
+(brak dostępu do sprzętu w środowisku asystenta) — zweryfikowane budowaniem projektu i testami jednostkowymi
+(`dhl.test.js`/`shipping.test.js`/`parcel.test.js` w scratchpadzie).
+
+**Instrukcja instalacji QZ Tray (Windows, dla każdego stanowiska, które ma drukować bezpośrednio):**
+1. Pobierz instalator ze strony **qz.io/download** (oficjalna strona QZ Tray — nie z innego źródła).
+2. Uruchom instalator, zaakceptuj domyślne ustawienia (instalacja jako aplikacja w tle + start z Windowsem).
+3. Po instalacji QZ Tray pojawia się jako ikona w zasobniku systemowym (obok zegara) — musi tam być widoczna,
+   żeby drukowanie bezpośrednie działało (uruchamia się automatycznie przy starcie Windows).
+4. W Magazyn ERP, w zakładce Wysyłka → "Zmień dane nadawcy (Admin)" → "Wykryj drukarki na tym komputerze" —
+   powinna pokazać się lista drukarek zainstalowanych w Windows na TYM komputerze; wybierz dokładną nazwę
+   drukarki etykiet (Zebra) i drukarki A4.
+5. Przy pierwszym wydruku z tej przeglądarki QZ Tray może pokazać okienko z prośbą o zgodę na połączenie —
+   zaznacz "zapamiętaj" (żeby pytało tylko raz na ten komputer/przeglądarkę).
+6. Gotowe — przełącznik "Drukowanie bezpośrednie" w Wysyłce włącza druk bez okna dialogowego.
+
+Uwaga: nazwy drukarek trzeba ustawić OSOBNO na każdym stanowisku, jeśli różne komputery mają różne drukarki
+podłączone pod inną nazwą w Windows — `shipping_settings` to dziś jeden wspólny wiersz w bazie (jedna para nazw
+dla wszystkich), więc jeśli w magazynie pracuje więcej niż jedno stanowisko z różnymi drukarkami, trzeba to
+uwzględnić osobno (np. jedna nazwa drukarki ustawiona tak samo w Windows na każdym stanowisku).
+
+**Na razie tylko kraje UE** (bez odprawy celnej, `isCustomsDeclarable: false`, incoterm DAP), **w tym Polska** (`DHL_EU_COUNTRIES`
 w `lib/dhlExpress.ts` — była z niej wcześniej wyłączona, bo krajowe zamówienia Allegro/Erli mają inną obsługę, ale to
 wykluczało też Back Market/refurbed z odbiorcą w Polsce, które takiej alternatywy nie mają; poprawione, zgłoszone przez
 właściciela na realnym zamówieniu refurbed do Polski); poza UE wymaga danych
