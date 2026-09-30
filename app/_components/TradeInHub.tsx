@@ -510,8 +510,7 @@ function IntakeView({
         </button>
       </div>
 
-      <div className="flex items-center justify-between mb-2">
-        <h2 className="text-xs font-semibold text-inksoft">OSTATNIE PACZKI</h2>
+      <div className="mb-2">
         <input
           value={searchInput}
           onChange={(e) => setSearchInput(e.target.value)}
