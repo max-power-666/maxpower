@@ -562,20 +562,25 @@ export default function ShippingView({
 
       {(parcel?.configured || express?.configured) && settings && (
         <>
-          {/* Przełącznik: drukowanie bezpośrednie (QZ Tray, bez okna drukowania) vs generowanie PDF (dzisiejszy
+          {/* Wybór trybu: drukowanie bezpośrednie (QZ Tray, bez okna drukowania) vs generowanie PDF (dzisiejszy
               ręczny wydruk) — "na wszelki wypadek", gdyby drukowanie bezpośrednie nie zadziałało. Wybór per
-              przeglądarkę/stanowisko (localStorage), nie współdzielone ustawienie w bazie. */}
+              przeglądarkę/stanowisko (localStorage), nie współdzielone ustawienie w bazie. Dwie pigułki zamiast
+              suwaka (wcześniejsza wersja) — suwak bez stałego opisu obok mylił: nie było widać, który stan jest
+              który, tylko tekst się zmieniał (zgłoszone przez właściciela po pierwszym teście). */}
           <div className="flex items-center gap-2 mb-4">
+            <span className="text-xs font-semibold text-inksoft mr-1">Drukowanie:</span>
             <button
-              onClick={() => setDirectPrint((v) => !v)}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ${directPrint ? "bg-teal" : "bg-line"}`}
-              title="Przełącz między drukowaniem bezpośrednim (QZ Tray) a generowaniem PDF do ręcznego wydruku"
+              onClick={() => setDirectPrint(false)}
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${!directPrint ? "bg-ink text-paper border-ink" : "bg-white border-line text-inksoft"}`}
             >
-              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${directPrint ? "translate-x-6" : "translate-x-1"}`} />
+              Generuj PDF (ręczny wydruk)
             </button>
-            <span className="text-xs font-semibold text-inksoft">
-              {directPrint ? "Drukowanie bezpośrednie (QZ Tray)" : "Generuj PDF (ręczny wydruk)"}
-            </span>
+            <button
+              onClick={() => setDirectPrint(true)}
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${directPrint ? "bg-ink text-paper border-ink" : "bg-white border-line text-inksoft"}`}
+            >
+              Drukowanie bezpośrednie (QZ Tray)
+            </button>
             {printBusy && <span className="text-xs text-inksoft">drukowanie…</span>}
           </div>
           {/* wynik nadania */}
