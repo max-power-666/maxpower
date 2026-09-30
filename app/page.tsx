@@ -16,7 +16,7 @@ import TestsView from "./_components/TestsView";
 import InventoryRawView from "./_components/InventoryRawView";
 import { displayNameForEmail } from "@/lib/displayName";
 
-const ROLES = ["Admin", "Manager", "Magazyn", "Zamówienia", "Serwis", "Testy", "Bidder"];
+const ROLES = ["Admin", "Manager", "Magazyn", "Zamówienia", "Serwis", "Testy", "Bidder", "Trade-in"];
 
 type ViewKey = "overview" | "inventory" | "sales" | "team" | "service" | "tests" | "tradein" | "orders" | "backlog" | "shipping" | "rcp" | "returns";
 
@@ -52,6 +52,7 @@ const ROLE_ACCESS: Record<string, ViewKey[]> = {
   Serwis: ["overview", "service", "backlog", "rcp", "returns"],
   Testy: ["overview", "tests", "backlog", "rcp", "returns"],
   Bidder: ["overview", "tradein", "backlog", "rcp", "returns"],
+  "Trade-in": ["overview", "orders", "backlog", "rcp", "returns"],
 };
 
 type Member = { user_id: string; role: string; email: string; name: string; view_access: string[] | null };

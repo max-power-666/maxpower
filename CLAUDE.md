@@ -40,7 +40,7 @@ numerach seryjnych, wielokanałowa synchronizacja stanów, naprawy, auto-wycena)
 
 ## Zakładki i role
 
-Role: **Admin, Manager, Magazyn, Zamówienia, Serwis, Testy, Bidder**. Rolę nadaje Admin w zakładce Zespół (tam też
+Role: **Admin, Manager, Magazyn, Zamówienia, Serwis, Testy, Bidder, Trade-in**. Rolę nadaje Admin w zakładce Zespół (tam też
 imię i nazwisko — `members.name`). Nowa osoba po pierwszym logowaniu dostaje pusty wiersz
 w `members` i ekran "poproś administratora o rolę" (`NoRoleScreen`); sama roli nie wybiera.
 Rola odświeża się sama po nadaniu/zmianie przez Admina (realtime na `members` — wymaga bloku publikacji z `schema.sql`;
@@ -62,7 +62,7 @@ Rola jest zwykłym tekstem w `members.role` — dodanie roli nie wymaga SQL.
 | Serwis | `service` | Admin, Manager, Serwis |
 | Testy | `tests` | Admin, Manager, Testy |
 | Bidder | `tradein` | Admin, Manager, Bidder |
-| Trade-in | `orders` | Admin, Manager (nie ma jeszcze roli "Trade-in") |
+| Trade-in | `orders` | Admin, Manager, Trade-in |
 
 Uwaga: nazwa zakładki "Bidder" to klucz `tradein`, a zakładka "Trade-in" to klucz `orders` —
 historyczne, nie mylić. Aktywna zakładka jest zapamiętywana w `localStorage`.
@@ -654,7 +654,7 @@ Configuration) musi być aktualny adres produkcyjny, inaczej magic link nie zadz
 2. ⬜ Zamówienia z marketplace (karta jak w Trade-in, ten sam wzorzec logu)
 3. ✅ Serwis: rejestr napraw i punktacja · ⬜ Serwis jako moduł napraw sprzętu z magazynu
 4. ✅ Bidder skupu Back Market (na produkcji)
-5. ✅ Trade-in: zamówienia BuyBack + obsługa paczek z punktacją · ⬜ rola "Trade-in"
+5. ✅ Trade-in: zamówienia BuyBack + obsługa paczek z punktacją + rola "Trade-in"
 6. 🟡 Karta produktu po numerze seryjnym: odczyt + log z testów/serwisu/Trade-in zrobione · ⬜ własne edytowalne dane produktu
 7. ✅ Testy: rejestr i punktacja · ⬜ łączne podsumowanie miesięczne ze wszystkich obszarów
 8. ⬜ Ewidencja czasu pracy → wydajność pkt/h i premia z regulaminu
