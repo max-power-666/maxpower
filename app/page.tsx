@@ -14,6 +14,7 @@ import type { ShipPrefill } from "@/lib/shipping";
 import ServiceView from "./_components/ServiceView";
 import TestsView from "./_components/TestsView";
 import InventoryRawView from "./_components/InventoryRawView";
+import ThemeSwitcher from "./_components/ThemeSwitcher";
 import { displayNameForEmail } from "@/lib/displayName";
 
 const ROLES = ["Admin", "Manager", "Magazyn", "Zamówienia", "Serwis", "Testy", "Bidder", "Trade-in"];
@@ -131,6 +132,9 @@ function LoginScreen() {
             {error && <p className="text-rust text-xs mt-2">{error}</p>}
           </>
         )}
+        <div className="mt-10">
+          <ThemeSwitcher />
+        </div>
       </div>
     </div>
   );
@@ -402,6 +406,9 @@ export default function Home() {
           <div className="font-semibold text-ink truncate" title={session.user.email ?? undefined}>{displayNameForEmail(session.user.email, members)}</div>
           <div>{role}</div>
           <button onClick={() => supabase.auth.signOut()} className="mt-2 underline">Wyloguj</button>
+          <div className="mt-4">
+            <ThemeSwitcher compact />
+          </div>
         </div>
       </aside>
 

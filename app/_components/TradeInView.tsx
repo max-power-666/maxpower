@@ -640,7 +640,7 @@ function PriceChart({ history, from }: { history: HistoryRow[]; from: number }) 
         <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" onMouseMove={onMove} onMouseLeave={() => setHoverT(null)}>
           {ticks.map((v, i) => (
             <g key={i}>
-              <line x1={L} x2={W - R} y1={y(v)} y2={y(v)} stroke="#C7CCB9" strokeWidth={1} strokeDasharray={i === 0 ? undefined : "2 3"} />
+              <line x1={L} x2={W - R} y1={y(v)} y2={y(v)} stroke="var(--color-line)" strokeWidth={1} strokeDasharray={i === 0 ? undefined : "2 3"} />
               <text x={L - 6} y={y(v) + 3} textAnchor="end" className="fill-inksoft" style={{ fontSize: 10 }}>{Math.round(v)}</text>
             </g>
           ))}
@@ -651,7 +651,7 @@ function PriceChart({ history, from }: { history: HistoryRow[]; from: number }) 
           ))}
           {hoverT !== null && (
             <g>
-              <line x1={x(hoverT)} x2={x(hoverT)} y1={T} y2={H - B} stroke="#57614F" strokeWidth={1} />
+              <line x1={x(hoverT)} x2={x(hoverT)} y1={T} y2={H - B} stroke="var(--color-inksoft)" strokeWidth={1} />
               {hoverVals.map((h) => (
                 <circle key={h.m} cx={x(hoverT)} cy={y(h.v!)} r={4} fill={MARKET_COLORS[h.m]} stroke="#fff" strokeWidth={2} />
               ))}

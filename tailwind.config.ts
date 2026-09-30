@@ -5,17 +5,22 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        paper: "#EEF0E7",
-        panel: "#E4E7DB",
-        ink: "#1A231F",
-        inksoft: "#57614F",
-        line: "#C7CCB9",
-        amber: "#C97B25",
-        ambersoft: "#F2DEC0",
-        teal: "#2C6E68",
-        tealsoft: "#D6E6E0",
-        rust: "#AD4536",
-        rustsoft: "#EFD7CF",
+        // Wartości to zmienne CSS (globals.css) — trzy motywy (Obecny/Nowy/Tryb nocny) przełączane atrybutem
+        // data-theme na <html> (lib/theme.ts), bez zmiany żadnej klasy w komponentach. "white" jest tu specjalnie
+        // NADPISANE (poza swoim zwykłym #fff) — w tym kodzie bg-white oznacza zawsze "powierzchnia karty/tabeli",
+        // nigdy dosłowną biel, więc musi też ciemnieć w Trybie nocnym.
+        paper: "var(--color-paper)",
+        panel: "var(--color-panel)",
+        ink: "var(--color-ink)",
+        inksoft: "var(--color-inksoft)",
+        line: "var(--color-line)",
+        amber: "var(--color-amber)",
+        ambersoft: "var(--color-ambersoft)",
+        teal: "var(--color-teal)",
+        tealsoft: "var(--color-tealsoft)",
+        rust: "var(--color-rust)",
+        rustsoft: "var(--color-rustsoft)",
+        white: "var(--color-card)",
       },
     },
   },

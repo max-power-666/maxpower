@@ -626,6 +626,40 @@ Zasady, które kształtują Serwis i Trade-in (pełny PDF ma właściciel):
 Punkty z różnych obszarów mają się sumować w jeden wynik
 miesięczny (§2 ust. 6) — dziś każdy obszar ma osobną tabelę i podsumowanie.
 
+## Motyw kolorystyczny (30.09.2026)
+
+Trzy przełączane motywy — **sama kolorystyka, układ ekranów bez zmian** (świadoma decyzja właściciela: pełny
+redesign na wzór panelu refurbed to osobny, dużo większy projekt, nie zrobiony). Przełącznik (`ThemeSwitcher.tsx`,
+`lib/theme.ts`) pokazuje się na ekranie logowania (pod przyciskiem) i w stopce paska bocznego (pod "Wyloguj") —
+w obu miejscach, bo wybór w `localStorage` (`erp-theme`, nie w bazie — jak `magazyn-view`) przetrwa między
+niezalogowanym a zalogowanym stanem, więc ma sens zmieniać go z obu miejsc. Warianty: **Obecny** (domyślny,
+dotychczasowe wartości), **Nowy** (jasny, inspirowany insight-panelem refurbed — biel/jasny fiolet zamiast
+ziemistej zieleni, `teal`→indygo `#4F46E5` jako główny akcent), **Tryb nocny** (przygaszony, świadomie BEZ czystej
+czerni/bieli — `paper`/`ink` to stonowane grafitowo-zielone odcienie, nie kontrastowe skrajności, żeby nie męczyć
+oczu, zgodnie z wprost wyrażoną prośbą).
+
+**Mechanizm:** wszystkie nazwane kolory z `tailwind.config.ts` (`paper`, `panel`, `ink`, `inksoft`, `line`, `amber`,
+`ambersoft`, `teal`, `tealsoft`, `rust`, `rustsoft`) wskazują na zmienne CSS (`app/globals.css`), zdefiniowane raz
+pod `:root` (motyw domyślny) i nadpisane pod `:root[data-theme="new"]`/`:root[data-theme="dark"]`. Przełącznik
+(`applyTheme` w `lib/theme.ts`) tylko ustawia atrybut `data-theme` na `<html>` — **żaden plik komponentu nie został
+dotknięty** (klasy typu `bg-paper`/`text-inksoft` zostają identyczne, ~770 użyć w całym `app/`), zmienia się tylko
+wartość zmiennej, którą przeglądarka już renderuje. `app/layout.tsx` ma dodatkowo synchroniczny inline `<script>`
+(`THEME_INIT_SCRIPT`) czytający `localStorage` PRZED hydracją Reacta — bez tego przy twardym odświeżeniu strona
+mignęłaby na ułamek sekundy motywem domyślnym, zanim JS zdążyłby przełączyć atrybut.
+
+**`white` jest specjalnie nadpisane w `tailwind.config.ts`** (`white: "var(--color-card)"`) — w tym kodzie
+`bg-white` nigdzie nie oznacza dosłownej bieli, tylko "powierzchnia karty/tabeli/inputu" (potwierdzone: `text-white`
+nie występuje ani razu w całym `app/`, więc nadpisanie nie psuje kontrastu tekstu na kolorowych przyciskach). Bez
+tego 16 plików z `bg-white` zostałoby jaskrawo białych na ciemnym tle Trybu nocnego, mimo reszty motywu.
+
+**Świadomie NIE objęte motywem** (rozważone, odrzucone jako zbyt duży dodatkowy zakres na tę prośbę): kolorowe
+plakietki marketplace'ów/statusów w `SalesOrdersHub.tsx`/`BacklogView.tsx` (hardkodowane heksy typu
+`bg-[#e3ecf9] text-[#2a6bb5]`, jedna stała paleta niezależna od motywu) i palety wykresów kołowych/liniowych
+(`FAKTUROWNIA_PALETTE`, `MARKET_COLORS` w `page.tsx`/`TradeInView.tsx`) — w Trybie nocnym będą wyglądać jak
+jasne plakietki na ciemnym tle (czytelne, tylko niespójne z resztą motywu). Dwa hardkodowane heksy siatki i linii
+najechania na wykresie Biddera (`TradeInView.tsx`, `#C7CCB9`/`#57614F`) zostały przestawione na `var(--color-line)`/
+`var(--color-inksoft)` przy okazji tej zmiany, bo inaczej byłyby całkiem niewidoczne na ciemnym tle.
+
 ## Wzorce w kodzie (używaj ich przy nowych modułach)
 
 - **Log zmian w jsonb:** `history` = `[{action: "created"|"edited", by_email, at, changes?:
