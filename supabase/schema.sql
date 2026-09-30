@@ -7,7 +7,7 @@ create extension if not exists "pgcrypto";
 -- Członkowie zespołu i ich role (Magazyn / Serwis / Obsługa klienta / Manager)
 create table if not exists members (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid references auth.users(id) not null unique,
+  user_id uuid references auth.users(id) on delete cascade not null unique,
   role text not null,
   email text default '',                -- zapisywany przy wyborze roli, żeby zakładka Zespół mogła pokazać kto jest kim
   name text default '',                 -- imię i nazwisko, ustawiane przez Admina w Zespole; skrócone (np. "Maksymilian J.") w logach
@@ -15,6 +15,14 @@ create table if not exists members (
   created_at timestamptz default now()
 );
 alter table members add column if not exists view_access text[];
+-- ON DELETE CASCADE (30.09.2026) — bez tego usunięcie użytkownika w Supabase Auth (Authentication -> Users ->
+-- Delete) kończyło się "Database error deleting user": auth.users jest referencjonowane stąd i z kilku innych
+-- tabel (units.created_by, service_log/test_log.employee_user_id, buyback_order_intake.entered_by_user_id,
+-- backlog_items/backlog_attachments, shipments.created_by_user_id) bez ON DELETE, więc domyślne NO ACTION
+-- blokowało kasowanie. Wiersz w members traci sens bez żywego konta — kasujemy go razem z użytkownikiem;
+-- pozostałe tabele (historia pracy/zamówień) dostają ON DELETE SET NULL niżej, żeby zachować rekordy.
+alter table members drop constraint if exists members_user_id_fkey;
+alter table members add constraint members_user_id_fkey foreign key (user_id) references auth.users(id) on delete cascade;
 
 -- Jednostki magazynowe (każde fizyczne urządzenie)
 create table if not exists units (
@@ -28,9 +36,11 @@ create table if not exists units (
   fields jsonb default '{}'::jsonb,      -- pola zależne od kategorii (imei, grade, battery, ...)
   status text not null default 'Przyjęte',
   history jsonb default '[]'::jsonb,     -- [{status, user_id, at}]
-  created_by uuid references auth.users(id),
+  created_by uuid references auth.users(id) on delete set null,
   created_at timestamptz default now()
 );
+alter table units drop constraint if exists units_created_by_fkey;
+alter table units add constraint units_created_by_fkey foreign key (created_by) references auth.users(id) on delete set null;
 
 create index if not exists units_status_idx on units (status);
 create index if not exists units_category_idx on units (category);

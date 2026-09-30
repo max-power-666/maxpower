@@ -9,7 +9,7 @@
 
 create table if not exists test_log (
   id bigint generated always as identity primary key,
-  employee_user_id uuid not null references auth.users(id),
+  employee_user_id uuid references auth.users(id) on delete set null,
   employee_email text,
   serial_number text not null,
   status text not null default 'w_trakcie',  -- w_trakcie | przetestowane | przerwany
@@ -23,6 +23,11 @@ create table if not exists test_log (
 );
 
 alter table test_log add column if not exists notes text;
+-- ON DELETE SET NULL (30.09.2026) — patrz wyjaśnienie w schema.sql (members.user_id) i service.sql; employee_email
+-- jest już zapisany osobno, więc "kto to zrobił" zostaje widoczne mimo zerwania linku do konta.
+alter table test_log alter column employee_user_id drop not null;
+alter table test_log drop constraint if exists test_log_employee_user_id_fkey;
+alter table test_log add constraint test_log_employee_user_id_fkey foreign key (employee_user_id) references auth.users(id) on delete set null;
 
 -- To samo urządzenie nie może mieć dwóch aktywnych wpisów naraz: trwającego albo już
 -- zaliczonego (Regulamin §2 ust. 3 i §9 ust. 2: wielokrotne rejestrowanie tego samego

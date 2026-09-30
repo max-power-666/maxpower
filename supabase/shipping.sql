@@ -58,7 +58,7 @@ create table if not exists shipments (
   client_request_id uuid not null unique,             -- klucz z formularza: to samo kliknięcie nie nada dwóch przesyłek
   carrier text not null default 'dhl_express',
   created_at timestamptz not null default now(),
-  created_by_user_id uuid references auth.users(id),
+  created_by_user_id uuid references auth.users(id) on delete set null,
   created_by_email text,
   environment text not null,                          -- test | production (przesyłki testowe nie są prawdziwe)
   marketplace text,                                   -- z którego zamówienia (opcjonalnie)
@@ -82,6 +82,10 @@ alter table shipments add column if not exists marketplace_synced_at timestamptz
 alter table shipments add column if not exists marketplace_sync_error text;
 create index if not exists shipments_created_idx on shipments (created_at desc);
 create index if not exists shipments_order_idx on shipments (marketplace, order_external_id);
+-- ON DELETE SET NULL (30.09.2026) — patrz wyjaśnienie w schema.sql (members.user_id); created_by_email jest już
+-- zapisany osobno, więc "kto nadał" zostaje widoczne mimo zerwania linku do konta.
+alter table shipments drop constraint if exists shipments_created_by_user_id_fkey;
+alter table shipments add constraint shipments_created_by_user_id_fkey foreign key (created_by_user_id) references auth.users(id) on delete set null;
 
 alter table shipping_settings enable row level security;
 alter table shipping_templates enable row level security;

@@ -91,7 +91,7 @@ create table if not exists buyback_order_intake (
   pad_serials text[],                        -- numery seryjne padów: element i = pad i+1 (osobne pole na każdy pad, skanery)
   docs boolean not null default false,       -- kolumna "dok." (checkbox)
   notes text default '',
-  entered_by_user_id uuid references auth.users(id),
+  entered_by_user_id uuid references auth.users(id) on delete set null,
   entered_by_email text,
   entered_at timestamptz not null default now(),
   history jsonb not null default '[]'::jsonb,  -- [{action: "created"|"edited", by_email, at, changes?}, ...]
@@ -111,6 +111,10 @@ alter table buyback_order_intake add column if not exists status text not null d
 alter table buyback_order_intake add column if not exists finished_at timestamptz;
 alter table buyback_order_intake add column if not exists points numeric not null default (100.0 / 6.0);
 alter table buyback_order_intake add column if not exists pads int;
+-- ON DELETE SET NULL (30.09.2026) — patrz wyjaśnienie w schema.sql (members.user_id); entered_by_email jest już
+-- zapisany osobno, więc "kto to zrobił" zostaje widoczne mimo zerwania linku do konta.
+alter table buyback_order_intake drop constraint if exists buyback_order_intake_entered_by_user_id_fkey;
+alter table buyback_order_intake add constraint buyback_order_intake_entered_by_user_id_fkey foreign key (entered_by_user_id) references auth.users(id) on delete set null;
 alter table buyback_order_intake add column if not exists pad_serials text[];
 alter table buyback_order_intake add column if not exists docs boolean not null default false;
 -- Wcześniejsza wersja trzymała numery padów w jednym polu tekstowym (po przecinku) — zamień na tablicę.

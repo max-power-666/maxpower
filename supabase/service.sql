@@ -14,7 +14,7 @@
 
 create table if not exists service_log (
   id bigint generated always as identity primary key,
-  employee_user_id uuid not null references auth.users(id),
+  employee_user_id uuid references auth.users(id) on delete set null,
   employee_email text,
   task_type text not null,                   -- joycon_pair | ps4_controller | xbox_controller | ps5_controller | console_cleaning
   points numeric not null,                   -- migawka punktów wg typu czynności (gdyby regulamin się zmienił, stare wpisy zostają poprawne)
@@ -35,6 +35,12 @@ end $$;
 alter table service_log add column if not exists status text not null default 'w_naprawie';
 alter table service_log add column if not exists finished_at timestamptz;
 alter table service_log add column if not exists notes text;
+-- ON DELETE SET NULL (30.09.2026) — usuwanie użytkownika w Supabase Auth blokowało się na tej FK (domyślne NO
+-- ACTION); employee_email jest już zapisany osobno, więc "kto to zrobił" zostaje widoczne mimo zerwania linku
+-- do konta. Patrz ten sam wzorzec i pełne wyjaśnienie w schema.sql (members.user_id).
+alter table service_log alter column employee_user_id drop not null;
+alter table service_log drop constraint if exists service_log_employee_user_id_fkey;
+alter table service_log add constraint service_log_employee_user_id_fkey foreign key (employee_user_id) references auth.users(id) on delete set null;
 
 create index if not exists service_log_employee_idx on service_log (employee_user_id, started_at desc);
 create index if not exists service_log_started_idx on service_log (started_at desc);

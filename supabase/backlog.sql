@@ -16,7 +16,7 @@ create table if not exists backlog_items (
   description text not null default '',
   acceptance text not null default '',         -- kryteria akceptacji: po czym poznamy, że zrobione
   assignee_email text,                         -- kto ma to zrobić (opcjonalnie)
-  created_by_user_id uuid references auth.users(id),
+  created_by_user_id uuid references auth.users(id) on delete set null,
   created_by_email text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -25,6 +25,10 @@ create table if not exists backlog_items (
 );
 create index if not exists backlog_items_status_idx on backlog_items (status, priority);
 create index if not exists backlog_items_created_idx on backlog_items (created_at desc);
+-- ON DELETE SET NULL (30.09.2026) — patrz wyjaśnienie w schema.sql (members.user_id); created_by_email jest już
+-- zapisany osobno, więc autor zostaje widoczny mimo zerwania linku do konta.
+alter table backlog_items drop constraint if exists backlog_items_created_by_user_id_fkey;
+alter table backlog_items add constraint backlog_items_created_by_user_id_fkey foreign key (created_by_user_id) references auth.users(id) on delete set null;
 
 alter table backlog_items enable row level security;
 
@@ -108,11 +112,16 @@ create table if not exists backlog_attachments (
   filename text not null,                      -- oryginalna nazwa do wyświetlenia
   mime_type text,
   size_bytes bigint,
-  uploaded_by_user_id uuid references auth.users(id),
+  uploaded_by_user_id uuid references auth.users(id) on delete set null,
   uploaded_by_email text,
   created_at timestamptz not null default now()
 );
 create index if not exists backlog_attachments_item_idx on backlog_attachments (item_id);
+-- ON DELETE SET NULL (30.09.2026) — patrz wyjaśnienie w schema.sql (members.user_id); uploaded_by_email jest już
+-- zapisany osobno. Po zerwaniu linku do konta załącznik może usunąć już tylko Admin (polityka niżej porównuje
+-- uploaded_by_user_id = auth.uid(), co dla NULL nigdy nie jest prawdą) — to celowe, oryginalny autor już nie istnieje.
+alter table backlog_attachments drop constraint if exists backlog_attachments_uploaded_by_user_id_fkey;
+alter table backlog_attachments add constraint backlog_attachments_uploaded_by_user_id_fkey foreign key (uploaded_by_user_id) references auth.users(id) on delete set null;
 alter table backlog_attachments enable row level security;
 
 drop policy if exists "authenticated read backlog_attachments" on backlog_attachments;

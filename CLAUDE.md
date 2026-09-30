@@ -609,6 +609,27 @@ To świadomy stan MVP — twarde uprawnienia per rola są zaplanowane.
 Pliki SQL innych modułów używają `is_admin()`, więc `schema.sql` musi być uruchomiony pierwszy.
 Ważne przy Bidderze: zmienia ceny na żywym Back Markecie, więc to pierwszy kandydat do kolejnego zaostrzenia.
 
+**Usuwanie użytkownika w Supabase Auth (Authentication → Users → Delete) do 30.09.2026 kończyło się "Database
+error deleting user"** — zgłoszone przez właściciela. Przyczyna: `auth.users` jest referencjonowane z ośmiu
+kolumn (`members.user_id`, `units.created_by`, `service_log`/`test_log.employee_user_id`,
+`buyback_order_intake.entered_by_user_id`, `backlog_items.created_by_user_id`,
+`backlog_attachments.uploaded_by_user_id`, `shipments.created_by_user_id`) bez `on delete`, czyli domyślnym
+`NO ACTION` — Postgres blokował kasowanie, dopóki istniał choć jeden odwołujący się wiersz (w praktyce zawsze,
+bo `members` ma wiersz dla każdego, kto się kiedykolwiek zalogował). Naprawione: `members.user_id` dostał
+**`ON DELETE CASCADE`** (wiersz w members traci sens bez żywego konta, kasuje się razem z nim), reszta —
+**`ON DELETE SET NULL`** (historia pracy/zamówień zostaje, tylko traci link do konta; każda z tych tabel ma
+osobno zapisany e-mail — `employee_email`/`created_by_email`/`entered_by_email`/`uploaded_by_email` — więc
+"kto to zrobił" zostaje widoczne). `service_log.employee_user_id`/`test_log.employee_user_id` musiały dodatkowo
+stracić `NOT NULL` (wymagane dla `SET NULL`). Migracja idempotentna (`drop constraint if exists` + `add
+constraint`) w każdym z odpowiednich plików — nazwy ograniczeń to domyślne Postgresowe `<tabela>_<kolumna>_fkey`.
+Zweryfikowane testem w PGlite (usunięcie z `auth.users`, sprawdzenie że `members` znika, a `service_log`/
+`shipments` zostają z wyzerowanym `*_user_id`).
+
+**Magic link — "email rate limit exceeded"**: to nie błąd kodu, tylko limit wbudowanego (darmowego) mailera
+Supabase — bardzo restrykcyjny, pomyślany do testów, nie do realnego użytku zespołu. Jedyna trwała naprawa:
+Supabase → Authentication → Settings → SMTP Settings — podłączyć własny SMTP (Resend, Postmark, SendGrid,
+skrzynka firmowa...). Bez tego magic linki będą się od czasu do czasu blokować przy kilku logowaniach pod rząd.
+
 ## Zmienne środowiskowe (tylko nazwy; wartości w `.env.local` i w Vercel)
 
 `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`,
