@@ -10,6 +10,8 @@ import BacklogView from "./_components/BacklogView";
 import ShippingView from "./_components/ShippingView";
 import RcpView from "./_components/RcpView";
 import ReturnsView from "./_components/ReturnsView";
+import ShopProductsView from "./_components/ShopProductsView";
+import ShopStockView from "./_components/ShopStockView";
 import type { ShipPrefill } from "@/lib/shipping";
 import ServiceView from "./_components/ServiceView";
 import TestsView from "./_components/TestsView";
@@ -17,11 +19,20 @@ import InventoryRawView from "./_components/InventoryRawView";
 import ThemeSwitcher from "./_components/ThemeSwitcher";
 import { displayNameForEmail } from "@/lib/displayName";
 
-const ROLES = ["Admin", "Manager", "Magazyn", "Zamówienia", "Serwis", "Testy", "Bidder", "Trade-in"];
+const ROLES = ["Admin", "Manager", "Magazyn", "Zamówienia", "Serwis", "Testy", "Bidder", "Trade-in", "Sklep"];
 
-type ViewKey = "overview" | "inventory" | "sales" | "team" | "service" | "tests" | "tradein" | "orders" | "backlog" | "shipping" | "rcp" | "returns";
+type ViewKey =
+  | "overview" | "inventory" | "sales" | "team" | "service" | "tests" | "tradein" | "orders" | "backlog" | "shipping" | "rcp" | "returns"
+  // Recoo Sklep (backoffice sklepu, przełącznik w pasku bocznym):
+  | "shop_products" | "shop_stock";
 
-const TABS: { key: ViewKey; label: string }[] = [
+// Dwie przestrzenie w jednej aplikacji: ERP i backoffice sklepu. Przełącznik to nazwa w lewym górnym rogu;
+// pasek boczny pokazuje tylko zakładki bieżącej przestrzeni. Dostęp do zakładek sklepu — jak do każdej innej
+// (ROLE_ACCESS / view_access w Zespole).
+type Space = "erp" | "shop";
+const SPACE_NAMES: Record<Space, string> = { erp: "Recoo ERP", shop: "Recoo Sklep" };
+
+const TABS: { key: ViewKey; label: string; space?: Space }[] = [
   { key: "overview", label: "Przegląd" },
   { key: "inventory", label: "Magazyn" },
   { key: "sales", label: "Zamówienia" },
@@ -34,6 +45,8 @@ const TABS: { key: ViewKey; label: string }[] = [
   { key: "shipping", label: "Wysyłka" },
   { key: "rcp", label: "RCP" },
   { key: "returns", label: "Zwroty" },
+  { key: "shop_products", label: "Produkty", space: "shop" },
+  { key: "shop_stock", label: "Magazyn", space: "shop" },
 ];
 
 // Kto widzi jaką zakładkę — DOMYŚLNY zestaw wg roli, Admin ma dostęp do wszystkiego,
@@ -46,15 +59,19 @@ const TABS: { key: ViewKey; label: string }[] = [
 // "orders" (zakładka Trade-in — podgląd zamówień BuyBack) na razie tylko dla Admina,
 // dopóki nie ustalimy docelowej roli dla osoby przetwarzającej zamówienia.
 const ROLE_ACCESS: Record<string, ViewKey[]> = {
-  Admin: ["overview", "inventory", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "rcp", "returns"],
-  Manager: ["overview", "inventory", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "rcp", "returns"], // wszystko; Zespół tylko do odczytu, usuwa tylko Admin
+  Admin: ["overview", "inventory", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "rcp", "returns", "shop_products", "shop_stock"],
+  Manager: ["overview", "inventory", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "rcp", "returns", "shop_products", "shop_stock"], // wszystko; Zespół tylko do odczytu, usuwa tylko Admin
   Magazyn: ["overview", "inventory", "backlog", "rcp", "returns"],
   Zamówienia: ["overview", "sales", "shipping", "backlog", "rcp", "returns"],
   Serwis: ["overview", "service", "backlog", "rcp", "returns"],
   Testy: ["overview", "tests", "backlog", "rcp", "returns"],
   Bidder: ["overview", "tradein", "backlog", "rcp", "returns"],
   "Trade-in": ["overview", "orders", "backlog", "rcp", "returns"],
+  // Obsługa sklepu: katalog i stany. Edycję w bazie pilnuje can_edit_shop() (supabase/shop.sql) — Admin/Manager/Sklep.
+  Sklep: ["overview", "shop_products", "shop_stock", "backlog", "rcp"],
 };
+
+const spaceOf = (k: ViewKey): Space => TABS.find((t) => t.key === k)?.space ?? "erp";
 
 type Member = { user_id: string; role: string; email: string; name: string; view_access: string[] | null };
 
@@ -191,6 +208,7 @@ export default function Home() {
   }, []);
   useEffect(() => {
     localStorage.setItem("magazyn-view", view);
+    localStorage.setItem(`magazyn-view-${spaceOf(view)}`, view);
   }, [view]);
 
   useEffect(() => {
@@ -394,9 +412,21 @@ export default function Home() {
   return (
     <div className="min-h-screen flex">
       <aside className="w-36 shrink-0 bg-panel border-r border-line p-3 flex flex-col">
-        <div className="font-bold text-lg mb-6">Recoo ERP</div>
+        <SpaceSwitcher
+          current={spaceOf(view)}
+          allowed={effectiveAccess(role ?? "", viewAccess)}
+          onSwitch={(space) => {
+            const allowed = effectiveAccess(role ?? "", viewAccess);
+            const saved = localStorage.getItem(`magazyn-view-${space}`) as ViewKey | null;
+            const target =
+              saved && spaceOf(saved) === space && allowed.includes(saved)
+                ? saved
+                : TABS.find((t) => spaceOf(t.key) === space && allowed.includes(t.key))?.key;
+            if (target) setView(target);
+          }}
+        />
         <nav className="flex flex-col gap-1">
-          {TABS.filter((t) => effectiveAccess(role ?? "", viewAccess).includes(t.key)).map((t) => (
+          {TABS.filter((t) => spaceOf(t.key) === spaceOf(view) && effectiveAccess(role ?? "", viewAccess).includes(t.key)).map((t) => (
             <button key={t.key} onClick={() => setView(t.key)} className={`text-left px-2 py-2 rounded text-sm font-medium ${view === t.key ? "bg-white border border-line" : "text-inksoft"}`}>
               {t.label}
             </button>
@@ -508,6 +538,10 @@ export default function Home() {
           {view === "rcp" && <RcpView />}
 
           {view === "returns" && <ReturnsView />}
+
+          {view === "shop_products" && <ShopProductsView session={session} members={members} isAdmin={role === "Admin"} />}
+
+          {view === "shop_stock" && <ShopStockView />}
 
           {view === "backlog" && <BacklogView session={session} members={members} isAdmin={role === "Admin"} />}
 
@@ -764,7 +798,7 @@ function TeamView({
                             disabled={!canEdit || t.key === "overview"}
                             onChange={() => toggleAccess(m, t.key)}
                           />
-                          {t.label}
+                          {t.space === "shop" ? `Sklep: ${t.label}` : t.label}
                         </label>
                       );
                     })}
@@ -780,6 +814,48 @@ function TeamView({
           })}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+/* ---------------- przełącznik Recoo ERP / Recoo Sklep ---------------- */
+
+// Nazwa w lewym górnym rogu. Gdy osoba ma dostęp tylko do jednej przestrzeni, to zwykły napis (bez przełącznika).
+function SpaceSwitcher({ current, allowed, onSwitch }: { current: Space; allowed: ViewKey[]; onSwitch: (s: Space) => void }) {
+  const [open, setOpen] = useState(false);
+  const spaces = (Object.keys(SPACE_NAMES) as Space[]).filter((s) => TABS.some((t) => spaceOf(t.key) === s && allowed.includes(t.key)));
+  if (spaces.length < 2) return <div className="font-bold text-lg mb-6">{SPACE_NAMES[current]}</div>;
+  return (
+    <div className="relative mb-6">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Przełącz: Recoo ERP / Recoo Sklep"
+        className="w-full flex items-center justify-between gap-1 font-bold text-lg text-left rounded px-1 -mx-1 hover:bg-white"
+      >
+        <span className="truncate">{SPACE_NAMES[current]}</span>
+        <span className="text-xs text-inksoft">{open ? "▲" : "▼"}</span>
+      </button>
+      {open && (
+        <div role="menu" className="absolute left-0 right-0 top-full mt-1 z-20 border border-line bg-white rounded shadow-sm py-1">
+          {spaces.map((s) => (
+            <button
+              key={s}
+              role="menuitemradio"
+              aria-checked={s === current}
+              onClick={() => {
+                setOpen(false);
+                if (s !== current) onSwitch(s);
+              }}
+              className={`w-full text-left px-2 py-1.5 text-sm ${s === current ? "font-semibold" : "text-inksoft hover:text-ink"}`}
+            >
+              {s === current ? "✓ " : ""}
+              {SPACE_NAMES[s]}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

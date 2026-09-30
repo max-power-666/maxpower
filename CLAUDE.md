@@ -650,6 +650,29 @@ w kolejności czasu ("Test rozpoczęty przez…", "Serwis (…) zakończony: Nap
 Numery łączy bez rozróżniania wielkości liter, ale muszą być wpisane identycznie w każdym module.
 Nie ma jeszcze własnych, edytowalnych danych produktu — to odczyt.
 
+## Recoo Sklep — backoffice sklepu (od 30.09.2026)
+
+Sklep internetowy to osobne repo (`~/Downloads/recoo-sklep`, `github.com/max-power-666/recoo-sklep`, https://recoo-sklep.vercel.app),
+ale jego **backoffice jest w tym ERP** (decyzja właściciela: wspólne logowanie, role, dostęp per osoba, dziennik; zamówienia i
+wysyłka i tak są tutaj). **Przełącznik "Recoo ERP ⇄ Recoo Sklep"** to nazwa w lewym górnym rogu paska bocznego (`SpaceSwitcher`
+w `app/page.tsx`): zakładki mają pole `space` (`TABS`), pasek pokazuje tylko zakładki bieżącej przestrzeni, ostatnia zakładka
+każdej przestrzeni pamiętana w `localStorage` (`magazyn-view-erp`/`magazyn-view-shop`). Osoba z dostępem tylko do jednej
+przestrzeni widzi zwykły napis zamiast przełącznika. Zakładki sklepu: **Produkty** (`shop_products`, `ShopProductsView.tsx` +
+panel `ShopProductEditor.tsx`) i **Magazyn** (`shop_stock`, `ShopStockView.tsx` — na razie szkielet, następny krok). Dostęp domyślnie
+Admin, Manager i nowa rola **"Sklep"**; w Zespole checkboxy z prefiksem "Sklep:".
+
+Dane: `supabase/shop.sql` — `shop_categories` (ukryta = nie ma jej w sklepie), `shop_models` (published = widoczny; nowy startuje
+jako szkic), `shop_variants` (opcja × stan wizualny jak-nowy/bardzo-dobry/dobry, cena, cena nowego, **ręczny stan `stock`** —
+decyzja właściciela, BEZ powiązania z numerami seryjnymi z Fakturowni), `shop_images` (url względny `/produkty/...` = plik w repo
+sklepu, albo pełny adres z publicznego bucketu Storage `shop-images`), `shop_log` (dziennik zmian zapisywany przez TRIGGERY —
+pola, które się zmieniły, autor z `auth.jwt()`; przy usunięciu modelu jeden wpis, bez szumu z kaskady). Uprawnienia:
+`can_edit_shop()` (Admin/Manager/Sklep) edytuje, usuwanie modelu i kategorii tylko Admin; anon (sklep) czyta tylko opublikowane
+modele, aktywne warianty i kategorie. Dane startowe w tym samym pliku = katalog przeniesiony 1:1 z `lib/catalog.ts` sklepu (te same
+slugi i SKU), `on conflict do nothing`, więc ponowne uruchomienie nie nadpisuje zmian z backoffice. Zdjęcia dodawane w ERP są
+**automatycznie przycinane** z przezroczystych marginesów (`trimTransparent` w `ShopProductEditor.tsx`) — sklep opiera na tym
+efekt "produkt wychodzi ponad kolorowy panel". SKU: `PREFIKS-OPCJA-STAN` (`skuFor` w `lib/shop.ts`, ta sama zasada co w sklepie).
+Zweryfikowane w PGlite (idempotentność, log z autorem, RLS: Manager nie usunie modelu, Magazyn nie edytuje, anon nie widzi szkiców).
+
 ## Regulamin premiowania (12.10.2026) — co z niego wynika dla kodu
 
 Zasady, które kształtują Serwis i Trade-in (pełny PDF ma właściciel):
