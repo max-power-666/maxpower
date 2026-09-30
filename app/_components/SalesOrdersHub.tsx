@@ -591,8 +591,8 @@ function OrdersList({
               <th className="p-3">Status</th>
               <th className="p-3">Kraj</th>
               <th className="p-3">Metoda wysyłki</th>
-              <th className="p-3 text-right">Ilość</th>
               <th className="p-3">SKU</th>
+              <th className="p-3 text-right">Ilość</th>
               <th className="p-3">Numer seryjny</th>
               <th className="p-3">Pady</th>
               <th className="p-3">Nr seryjny padów</th>
@@ -605,6 +605,14 @@ function OrdersList({
             {rows.map((r) => {
               // Zamówienie bez pozycji (jeszcze nie zsynchronizowane) pokazujemy jednym wierszem z samym SKU.
               const items: (SalesItem | null)[] = r.sales_order_items.length > 0 ? r.sales_order_items : [null];
+              // Ilość = liczba sztuk TEGO SKU w zamówieniu (pozycja z ilością > 1 jest rozbita na tyle wierszy —
+              // patrz mapBmItems i inne mappery w lib/salesOrders.ts — więc to po prostu liczność grupy po SKU,
+              // NIE suma wszystkich sztuk w całym zamówieniu niezależnie od SKU).
+              const skuCounts = new Map<string, number>();
+              for (const it of items) {
+                const key = it?.sku ?? "";
+                skuCounts.set(key, (skuCounts.get(key) ?? 0) + 1);
+              }
               return items.map((it, idx) => (
                 <tr
                   key={`${rowKey(r)}#${it?.item_key ?? "none"}`}
@@ -635,12 +643,12 @@ function OrdersList({
                       </td>
                       <td rowSpan={items.length} className="p-3 text-xs font-mono whitespace-nowrap">{r.country_code || "—"}</td>
                       <td rowSpan={items.length} className="p-3 text-xs whitespace-nowrap">{r.shipping_method || "—"}</td>
-                      <td rowSpan={items.length} className="p-3 text-right font-mono">{r.sales_order_items.length > 0 ? r.sales_order_items.length : "—"}</td>
                     </>
                   )}
                   <td className="p-3 font-mono whitespace-nowrap">{it ? it.sku || "—" : r.sku || "—"}</td>
                   {it ? (
                     <>
+                      <td className="p-3 text-right font-mono">{skuCounts.get(it.sku ?? "")}</td>
                       <td className="p-3">
                         <InlineEditCell value={it.serial_number} placeholder="Dodaj numer" className="w-44 font-mono" onSave={(v) => saveSerial(r, it, v)} />
                       </td>
@@ -652,7 +660,7 @@ function OrdersList({
                       </td>
                     </>
                   ) : (
-                    <td colSpan={3} className="p-3 text-xs text-inksoft">—</td>
+                    <td colSpan={4} className="p-3 text-xs text-inksoft">—</td>
                   )}
                 </tr>
               ));
