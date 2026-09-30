@@ -658,7 +658,14 @@ wysyłka i tak są tutaj). **Przełącznik "Recoo ERP ⇄ Recoo Sklep"** to nazw
 w `app/page.tsx`): zakładki mają pole `space` (`TABS`), pasek pokazuje tylko zakładki bieżącej przestrzeni, ostatnia zakładka
 każdej przestrzeni pamiętana w `localStorage` (`magazyn-view-erp`/`magazyn-view-shop`). Osoba z dostępem tylko do jednej
 przestrzeni widzi zwykły napis zamiast przełącznika. Zakładki sklepu: **Produkty** (`shop_products`, `ShopProductsView.tsx` +
-panel `ShopProductEditor.tsx`) i **Magazyn** (`shop_stock`, `ShopStockView.tsx` — na razie szkielet, następny krok). Dostęp domyślnie
+panel `ShopProductEditor.tsx`) i **Magazyn** (`shop_stock`, `ShopStockView.tsx`): lista wszystkich wariantów ze stanem, kafelki (sztuki na stanie,
+wartość wg cen sprzedaży, warianty w sprzedaży, brak na stanie), szybkie − / + (wydanie/przyjęcie 1 szt.) i „Więcej…”
+(przyjęcie / wydanie / korekta do konkretnej liczby + notatka), historia ruchów (ostatnie albo jednego SKU). **Stan zmienia
+wyłącznie funkcja bazy `shop_stock_change(variant, kind, qty, note)`** (security definer, `can_edit_shop()`, `select … for update`
+— dwie osoby naraz nie nadpiszą wyniku, pilnuje zera, zapisuje ruch w `shop_stock_moves` w tej samej transakcji); bezpośredni
+UPDATE `stock` odrzuca trigger `shop_stock_guard` (flaga `shop.stock_rpc` ustawiana tylko w tej funkcji), więc historia ruchów
+jest zawsze kompletna — przyszłe zamówienia ze sklepu też muszą zdejmować stan tą funkcją. Ruchy są nieedytowalne (brak polityk
+zapisu). Dostęp domyślnie
 Admin, Manager i nowa rola **"Sklep"**; w Zespole checkboxy z prefiksem "Sklep:".
 
 Dane: `supabase/shop.sql` — `shop_categories` (ukryta = nie ma jej w sklepie), `shop_models` (published = widoczny; nowy startuje

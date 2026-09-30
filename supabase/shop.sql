@@ -221,6 +221,91 @@ begin
   begin alter publication supabase_realtime add table shop_variants; exception when duplicate_object then null; end;
 end $$;
 
+-- ——— Magazyn sklepu (zakładka Magazyn w Recoo Sklep) ———
+-- Stan wariantu (shop_variants.stock) to RĘCZNY licznik (decyzja właściciela). Każda zmiana = ruch w shop_stock_moves
+-- (rodzaj, ilość, stan przed/po, notatka, kto, kiedy). Zmieniać stan wolno WYŁĄCZNIE funkcją shop_stock_change():
+-- blokuje wiersz (dwie osoby naraz nie nadpiszą sobie wyniku), pilnuje zera i zapisuje ruch w tej samej transakcji.
+-- Bezpośredni UPDATE stock (z aplikacji czy SQL) odrzuca trigger — historia ruchów jest przez to zawsze kompletna.
+
+create table if not exists shop_stock_moves (
+  id bigserial primary key,
+  variant_id uuid references shop_variants (id) on delete set null,
+  sku text not null,                                   -- zapisane osobno: ruch zostaje czytelny po usunięciu wariantu
+  model_name text,
+  kind text not null check (kind in ('przyjecie', 'wydanie', 'korekta')),
+  delta int not null,                                  -- o ile zmienił się stan (+/-)
+  stock_before int not null,
+  stock_after int not null check (stock_after >= 0),
+  note text,
+  by_email text,
+  at timestamptz not null default now()
+);
+create index if not exists shop_stock_moves_at_idx on shop_stock_moves (at desc);
+create index if not exists shop_stock_moves_variant_idx on shop_stock_moves (variant_id, at desc);
+
+create or replace function shop_stock_guard() returns trigger language plpgsql as $$
+begin
+  if new.stock is distinct from old.stock and coalesce(current_setting('shop.stock_rpc', true), '') <> '1' then
+    raise exception 'Stan magazynowy zmieniaj w zakładce Magazyn (funkcja shop_stock_change) — każda zmiana musi mieć zapis ruchu.';
+  end if;
+  return new;
+end $$;
+drop trigger if exists shop_variants_stock_guard on shop_variants;
+create trigger shop_variants_stock_guard before update on shop_variants for each row execute function shop_stock_guard();
+
+-- p_kind: 'przyjecie' (+p_qty), 'wydanie' (-p_qty), 'korekta' (ustaw stan = p_qty, np. po inwentaryzacji). Zwraca nowy stan.
+create or replace function shop_stock_change(p_variant_id uuid, p_kind text, p_qty int, p_note text default null)
+returns int language plpgsql security definer set search_path = public as $$
+declare
+  v shop_variants;
+  mname text;
+  after int;
+begin
+  if not can_edit_shop() then
+    raise exception 'Brak uprawnień do magazynu sklepu.';
+  end if;
+  if p_qty is null or p_qty < 0 or (p_kind in ('przyjecie', 'wydanie') and p_qty = 0) then
+    raise exception 'Niepoprawna ilość.';
+  end if;
+  select * into v from shop_variants where id = p_variant_id for update;
+  if not found then
+    raise exception 'Nie ma takiego wariantu.';
+  end if;
+  after := case p_kind
+    when 'przyjecie' then v.stock + p_qty
+    when 'wydanie' then v.stock - p_qty
+    when 'korekta' then p_qty
+    else null end;
+  if after is null then
+    raise exception 'Nieznany rodzaj ruchu: %', p_kind;
+  end if;
+  if after < 0 then
+    raise exception 'Na stanie jest tylko % szt. — nie można wydać %.', v.stock, p_qty;
+  end if;
+  if after = v.stock then
+    return after; -- korekta do tej samej liczby: nic nie zapisujemy
+  end if;
+  select name into mname from shop_models where id = v.model_id;
+  perform set_config('shop.stock_rpc', '1', true);
+  update shop_variants set stock = after where id = v.id;
+  perform set_config('shop.stock_rpc', '', true);
+  insert into shop_stock_moves (variant_id, sku, model_name, kind, delta, stock_before, stock_after, note, by_email)
+  values (v.id, v.sku, mname, p_kind, after - v.stock, v.stock, after, nullif(trim(p_note), ''), auth.jwt() ->> 'email');
+  return after;
+end $$;
+revoke all on function shop_stock_change(uuid, text, int, text) from public;
+grant execute on function shop_stock_change(uuid, text, int, text) to authenticated;
+
+alter table shop_stock_moves enable row level security;
+drop policy if exists "shop read stock moves" on shop_stock_moves;
+create policy "shop read stock moves" on shop_stock_moves for select using (can_edit_shop());
+-- brak polityk insert/update/delete: ruchy zapisuje tylko shop_stock_change (security definer); historia jest nieedytowalna
+
+do $$
+begin
+  begin alter publication supabase_realtime add table shop_stock_moves; exception when duplicate_object then null; end;
+end $$;
+
 -- Dane startowe: katalog przeniesiony 1:1 z lib/catalog.ts sklepu (te same slugi i SKU — koszyki klientów zostają ważne).
 -- on conflict do nothing: ponowne uruchomienie pliku NIE nadpisuje zmian zrobionych w backoffice.
 insert into shop_categories (slug, name, tagline, hidden, sort) values

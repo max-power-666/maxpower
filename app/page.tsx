@@ -541,7 +541,7 @@ export default function Home() {
 
           {view === "shop_products" && <ShopProductsView session={session} members={members} isAdmin={role === "Admin"} />}
 
-          {view === "shop_stock" && <ShopStockView />}
+          {view === "shop_stock" && <ShopStockView members={members} />}
 
           {view === "backlog" && <BacklogView session={session} members={members} isAdmin={role === "Admin"} />}
 
