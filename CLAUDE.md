@@ -133,6 +133,11 @@ Macu jest wyłączony; bidder działa na produkcji, włącznik: `buyback_setting
   W trakcie / Obsłużona / Problem, czas obsługi, punkty 100/6 za paczkę tylko po
   "Obsłużona", podsumowanie punktacji Dziś/7/30 dni. Numer przesyłki służy tylko do
   znalezienia zamówienia przy rozpoczynaniu (w liście nie ma kolumny przesyłki; jest na karcie).
+  **Lista "Ostatnie paczki" pokazuje bez wyszukiwania tylko najświeższe 50 wpisów** (`.limit(50)`, bez pełnej
+  paginacji jak w Raw data — świadomie, to lista roboczo-przeglądowa, nie archiwum); wyszukiwarka nad listą
+  (30.09.2026, `escapeLike` jak w `InventoryRawView.tsx`, debounce 300 ms) szuka jednocześnie po numerze zamówienia
+  I numerze seryjnym (`order_public_id.ilike.%...%,serial_number.ilike.%...%` — PostgREST `.or()`) i wtedy limit
+  rośnie do 200, bo szukany wpis mógł dawno wypaść poza najświeższe 50.
 - Kolumny edytowane w wierszu: Numer seryjny, SKU, Pady (liczba padów w zestawie — konsole; int >= 0,
   0 jest poprawną wartością), Numery seryjne padów (`pad_serials text[]`, element i = pad i+1; osobne pole na każdy pad, tyle ile wpisano w Pady, max 20; Enter w polu — skaner — zapisuje i przechodzi do następnego; nie wymagane do "Obsłużona"), Uwagi. **Warunek:** status "Obsłużona" wymaga numeru seryjnego, SKU i padów —
   pilnuje tego UI (`changeStatus`, komunikat co brakuje) i trigger `buyback_order_intake_require_complete`

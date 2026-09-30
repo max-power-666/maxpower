@@ -9,6 +9,7 @@ import ProductCardDrawer from "./ProductCardDrawer";
 import PadSerialsCell, { MAX_PADS } from "./PadSerialsCell";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { INTAKE_STATUSES, INTERVALS, fmtDuration, rangeStart, type Interval } from "@/lib/workLog";
+import { escapeLike } from "@/lib/search";
 
 // Zakładka Trade-in: domyślnie obsługa paczek przez pracowników (IntakeView — rejestr pracy
 // wg Regulaminu premiowania, jak Serwis), plus podstrona "Raw data" z pełną, zsynchronizowaną
@@ -169,6 +170,14 @@ function IntakeView({
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
 
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(searchInput.trim()), 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
   useEffect(() => {
     load();
     const channel = supabase
@@ -179,23 +188,25 @@ function IntakeView({
       supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [interval]);
+  }, [interval, search]);
 
   async function load() {
     setLoading(true);
     setError("");
     try {
+      let listQuery = supabase.from("buyback_order_intake").select(INTAKE_COLUMNS).order("entered_at", { ascending: false });
+      // Bez wyszukiwania: tylko najświeższe 50 paczek. Z wyszukiwaniem: szerszy limit, bo szukany
+      // wpis mógł dawno wypaść poza najświeższe 50 (np. paczka sprzed tygodni po numerze seryjnym).
+      listQuery = search
+        ? listQuery.or(`order_public_id.ilike.%${escapeLike(search)}%,serial_number.ilike.%${escapeLike(search)}%`).limit(200)
+        : listQuery.limit(50);
       const [{ data: rangeData, error: rangeErr }, { data: listData, error: listErr }] = await Promise.all([
         supabase
           .from("buyback_order_intake")
           .select("entered_by_email, points")
           .eq("status", "obsluzona")
           .gte("finished_at", rangeStart(interval)),
-        supabase
-          .from("buyback_order_intake")
-          .select(INTAKE_COLUMNS)
-          .order("entered_at", { ascending: false })
-          .limit(50),
+        listQuery,
       ]);
       if (rangeErr) throw rangeErr;
       if (listErr) throw listErr;
@@ -499,7 +510,15 @@ function IntakeView({
         </button>
       </div>
 
-      <h2 className="text-xs font-semibold text-inksoft mb-2">OSTATNIE PACZKI</h2>
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="text-xs font-semibold text-inksoft">OSTATNIE PACZKI</h2>
+        <input
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          placeholder="Szukaj po numerze seryjnym lub numerze zamówienia"
+          className="w-80 border border-line bg-white px-3 py-1.5 rounded text-sm font-mono"
+        />
+      </div>
       <div className="border border-line bg-white overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -521,7 +540,7 @@ function IntakeView({
           </thead>
           <tbody>
             {!loading && entries.length === 0 && (
-              <tr><td colSpan={11 + (isAdminOrManager ? 1 : 0) + (isAdmin ? 1 : 0)} className="p-6 text-center text-inksoft text-sm">Brak paczek — rozpocznij pierwszą powyżej.</td></tr>
+              <tr><td colSpan={11 + (isAdminOrManager ? 1 : 0) + (isAdmin ? 1 : 0)} className="p-6 text-center text-inksoft text-sm">{search ? "Nic nie znaleziono dla tego numeru." : "Brak paczek — rozpocznij pierwszą powyżej."}</td></tr>
             )}
             {entries.map((e) => (
               <tr key={e.id} className="border-b border-line last:border-b-0 hover:bg-paper">
