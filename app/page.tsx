@@ -393,11 +393,11 @@ export default function Home() {
 
   return (
     <div className="min-h-screen flex">
-      <aside className="w-44 shrink-0 bg-panel border-r border-line p-4 flex flex-col">
+      <aside className="w-36 shrink-0 bg-panel border-r border-line p-3 flex flex-col">
         <div className="font-bold text-lg mb-6">Recoo ERP</div>
         <nav className="flex flex-col gap-1">
           {TABS.filter((t) => effectiveAccess(role ?? "", viewAccess).includes(t.key)).map((t) => (
-            <button key={t.key} onClick={() => setView(t.key)} className={`text-left px-3 py-2 rounded text-sm font-medium ${view === t.key ? "bg-white border border-line" : "text-inksoft"}`}>
+            <button key={t.key} onClick={() => setView(t.key)} className={`text-left px-2 py-2 rounded text-sm font-medium ${view === t.key ? "bg-white border border-line" : "text-inksoft"}`}>
               {t.label}
             </button>
           ))}
