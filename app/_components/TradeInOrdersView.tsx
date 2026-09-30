@@ -11,6 +11,7 @@ import { supabase } from "@/lib/supabaseClient";
 type Order = {
   order_public_id: string;
   creation_date: string;
+  modification_date: string | null;
   payment_date: string | null;
   status: string;
   market: string | null;
@@ -23,6 +24,8 @@ type Order = {
 };
 
 const PAGE_SIZES = [10, 20, 50];
+
+type SortField = "creation_date" | "modification_date";
 
 const smallPill = (active: boolean) =>
   `px-2.5 py-1 rounded-full text-xs font-semibold border whitespace-nowrap ${active ? "bg-ink text-paper border-ink" : "bg-white border-line text-inksoft"}`;
@@ -140,6 +143,8 @@ export default function TradeInOrdersView({ session, onOpenOrder }: { session: S
   const [limit, setLimit] = useState(20);
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<"wszystkie" | "wyslane">("wszystkie");
+  const [sortField, setSortField] = useState<SortField>("creation_date");
+  const [sortAsc, setSortAsc] = useState(false);
   const [totalCount, setTotalCount] = useState<number | null>(null);
   const [lastSynced, setLastSynced] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -158,7 +163,7 @@ export default function TradeInOrdersView({ session, onOpenOrder }: { session: S
       supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [limit, page, statusFilter]);
+  }, [limit, page, statusFilter, sortField, sortAsc]);
 
   async function loadMeta() {
     const { data } = await supabase.from("buyback_orders_sync_meta").select("last_synced_at").eq("id", 1).maybeSingle();
@@ -173,12 +178,12 @@ export default function TradeInOrdersView({ session, onOpenOrder }: { session: S
       let query = supabase
         .from("buyback_orders")
         .select(
-          "order_public_id, creation_date, payment_date, status, market, sku, customer_first_name, customer_last_name, original_price, original_price_currency, counter_offer_price",
+          "order_public_id, creation_date, modification_date, payment_date, status, market, sku, customer_first_name, customer_last_name, original_price, original_price_currency, counter_offer_price",
           { count: "exact" }
         );
       if (statusFilter === "wyslane") query = query.eq("status", "SENT");
       const [{ data, error: err, count }, meta] = await Promise.all([
-        query.order("creation_date", { ascending: false }).range(from, from + limit - 1),
+        query.order(sortField, { ascending: sortAsc }).range(from, from + limit - 1),
         supabase.from("buyback_orders_sync_meta").select("last_synced_at").eq("id", 1).maybeSingle(),
       ]);
       if (err) {
@@ -226,6 +231,24 @@ export default function TradeInOrdersView({ session, onOpenOrder }: { session: S
   }
 
   const totalPages = Math.max(1, Math.ceil((totalCount ?? 0) / limit));
+
+  function toggleSort(field: SortField) {
+    if (sortField === field) setSortAsc((a) => !a);
+    else {
+      setSortField(field);
+      setSortAsc(false); // najnowsze pierwsze — sensowniejszy domyślny kierunek niż rosnąco
+    }
+    setPage(1);
+  }
+
+  const sortTh = (field: SortField, label: string) => (
+    <th className="p-3">
+      <button onClick={() => toggleSort(field)} className="flex items-center gap-1 hover:text-ink">
+        {label}
+        <span className="text-[10px] w-2.5 inline-block">{sortField === field ? (sortAsc ? "▲" : "▼") : ""}</span>
+      </button>
+    </th>
+  );
 
   return (
     <div>
@@ -291,7 +314,8 @@ export default function TradeInOrdersView({ session, onOpenOrder }: { session: S
           <thead>
             <tr className="text-left text-xs text-inksoft border-b border-line">
               <th className="p-3">Zamówienie</th>
-              <th className="p-3">Utworzono</th>
+              {sortTh("creation_date", "Utworzono")}
+              {sortTh("modification_date", "Data modyfikacji")}
               <th className="p-3">Data płatności</th>
               <th className="p-3">Status</th>
               <th className="p-3">Rynek</th>
@@ -305,7 +329,7 @@ export default function TradeInOrdersView({ session, onOpenOrder }: { session: S
           </thead>
           <tbody>
             {!loading && orders.length === 0 && (
-              <tr><td colSpan={11} className="p-6 text-center text-inksoft text-sm">Brak zsynchronizowanych zamówień.</td></tr>
+              <tr><td colSpan={12} className="p-6 text-center text-inksoft text-sm">Brak zsynchronizowanych zamówień.</td></tr>
             )}
             {orders.map((o) => (
               <tr key={o.order_public_id} className="border-b border-line last:border-b-0 hover:bg-paper">
@@ -317,6 +341,7 @@ export default function TradeInOrdersView({ session, onOpenOrder }: { session: S
                   )}
                 </td>
                 <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDateTime(o.creation_date)}</td>
+                <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDateTime(o.modification_date)}</td>
                 <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDateTime(o.payment_date)}</td>
                 <td className="p-3">
                   <span className="text-xs font-semibold px-2 py-1 rounded-full bg-tealsoft text-teal">{o.status}</span>
