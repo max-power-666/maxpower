@@ -27,7 +27,7 @@ numerach seryjnych, wielokanałowa synchronizacja stanów, naprawy, auto-wycena)
   `ServiceView.tsx` (Serwis), `TestsView.tsx` (Testy), `ProductCardDrawer.tsx` (karta produktu), `TradeInHub.tsx` + `TradeInOrdersView.tsx` (Trade-in),
   `TradeInView.tsx` (Bidder), `SalesOrdersHub.tsx` (Zamówienia, karta zamówienia w `SalesOrderCard.tsx`), `ErliParcelPanel.tsx` (nadawanie Paczkomatów InPost 24/7 przez Erli, osadzony na karcie zamówienia Erli), `ShippingView.tsx` (Wysyłka DHL).
 - `app/api/*/route.ts` — endpointy serwerowe (sekrety tylko tu, nigdy w przeglądarce):
-  `fakturownia/sync`, `tradein/bidder`, `tradein/competitors`, `tradein/orders-sync`, `tradein/validate`, `orders/bm-sync`, `orders/refurbed-sync`, `orders/erli-sync`, `orders/allegro-sync`, `orders/allegro-auth`, `orders/allegro-callback`, `orders/octopia-sync`, `orders/amazon-sync`, `orders/validate`, `orders/bm-refresh`, `orders/erli-refresh`, `shipping/dhl-express/{check,create}`, `shipping/dhl-parcel/{check,create,label,cancel}`, `shipping/erli/{create,label,cancel}`, `shipping/sync-marketplace`, `shipping/render-zpl`, `shipping/fetch-remote-pdf`.
+  `fakturownia/sync`, `tradein/bidder`, `tradein/competitors`, `tradein/orders-sync`, `tradein/validate`, `orders/bm-sync`, `orders/refurbed-sync`, `orders/erli-sync`, `orders/allegro-sync`, `orders/allegro-auth`, `orders/allegro-callback`, `orders/octopia-sync`, `orders/amazon-sync`, `orders/validate`, `orders/bm-refresh`, `orders/erli-refresh`, `shipping/dhl-express/{check,create}`, `shipping/dhl-parcel/{check,create,label,cancel}`, `shipping/erli/{create,label,cancel}`, `shipping/sync-marketplace`, `shipping/render-zpl`, `shipping/fetch-remote-pdf`, `shipping/qz-sign`.
 - `lib/` — `supabaseClient.ts`, `buyback.ts` (logika biddera + `isAuthorized`),
   `displayName.ts` (skrócone imię: "Maksymilian J."), `workLog.ts` (interwały Dziś/7/30 dni,
   liczenie czasu i **etykiety typów czynności/statusów** — jedno źródło dla list i karty produktu),
@@ -387,8 +387,22 @@ jak i numer zamówienia (nie każda przesyłka ma zamówienie, np. nadana ręczn
 Marketu) na zwykłą drukarkę A4, bez okna drukowania przeglądarki. Jeden lokalny agent obsługuje oba przypadki:
 **QZ Tray** (qz.io, darmowy, open-source; paczka npm `qz-tray`, wrapper w `lib/printAgent.ts`) — Admin/pracownik
 musi go RĘCZNIE zainstalować na każdym komputerze, który ma drukować (instrukcja Windows: patrz sekcja niżej w
-tym pliku albo poproś asystenta o jej ponowne wysłanie). Bez podpisywania żądań (`qz.security.setCertificatePromise`)
-— dla wewnętrznego zespołu to nadmiarowa infrastruktura; QZ Tray i tak pyta raz o zgodę (checkbox "zapamiętaj").
+tym pliku albo poproś asystenta o jej ponowne wysłanie). **Żądania są podpisywane** (`qz.security.setCertificatePromise`/
+`setSignaturePromise`, `lib/printAgent.ts`) — pierwsza wersja (30.09.2026) była świadomie BEZ podpisu, w założeniu że
+QZ Tray zapyta raz o zgodę i zapamięta ("checkbox zapamiętaj"), ale to się nie potwierdziło na żywym teście: bez
+podpisu okno z prośbą o zgodę wracało przy **każdym** druku (zgłoszone przez właściciela), a dokumentacja QZ Tray
+wprost mówi, że trwałe "Allow" + "Remember this decision" wymaga podpisanych żądań — bez podpisu zaufanie jest
+tylko tymczasowe. Naprawione tego samego dnia: certyfikat self-signed (openssl, RSA 2048, ważny 10 lat) — publiczna
+część (`QZ_CERT` w `lib/printAgent.ts`, nie jest sekretem) zwracana przez `setCertificatePromise`; prywatny klucz
+tylko na serwerze (`QZ_TRAY_PRIVATE_KEY`, nowa zmienna środowiskowa), używany w `app/api/shipping/qz-sign`
+(nowy route, też Admin/Manager/Zamówienia) do podpisania stringa, który QZ Tray samo już zhashowało (SHA-256 z
+`{call, params, timestamp}`) — dokładnie odtworzone z kodu `qz-tray.js`: `createSign("SHA1")` (domyślny
+`signAlgorithm` w bibliotece — nie zmienialiśmy go po stronie klienta, więc musi się zgadzać po obu stronach),
+wynik base64. `setSignaturePromise` w `printAgent.ts` dogrywa **aktualny** token sesji z supabase-js przy każdym
+podpisie (nie raz przy starcie), żeby nie podpisywać przeterminowanym tokenem po dłuższej bezczynności. Certyfikat
+self-signed (nie podpisany przez QZ Industries) nadal pokaże w QZ Tray ostrzeżenie "nie da się zweryfikować" przy
+pierwszym połączeniu z danego komputera — to oczekiwane i normalne dla wewnętrznego użytku; kluczowa różnica to że
+teraz "Remember this decision" faktycznie trzyma na stałe, zamiast pytać przy każdym wydruku.
 **Etykieta = ZPL, nie PDF:** DHL Express nie pozwala doćiągnąć etykiety w innym formacie PO utworzeniu przesyłki
 (format wybiera się raz, przy tworzeniu — `outputImageProperties.encodingFormat` w `lib/dhlExpress.ts`, zmienione
 z `"pdf"` na `"zpl"`), więc etykieta DHL Express jest teraz ZAWSZE w ZPL. DHL Parcel (`lib/dhlParcel.ts`,
@@ -403,7 +417,11 @@ prośbę właściciela, "na wszelki wypadek": "Generuj PDF" (domyślne) wraca do
 ręczny Ctrl+P). **Dwie pigułki, nie suwak** — pierwsza wersja (suwak bez stałego opisu obok) myliła: nie było
 widać, który stan jest który, tylko sam tekst się zmieniał (zgłoszone przez właściciela po pierwszym teście na
 żywo — suwak w pozycji "wyłączone" pokazał PDF-y, co było poprawnym zachowaniem, tylko nieczytelnie pokazanym).
-**Nazwy drukarek** (dokładnie jak w Windowsie) w `shipping_settings.zebra_printer_name`/`a4_printer_name` —
+**Auto-druk po nadaniu (30.09.2026)** — gdy tryb "Drukowanie bezpośrednie" jest włączony, etykieta i delivery note
+drukują się same, od razu po udanym nadaniu (`create()` w `ShippingView.tsx` woła `handleLabel`/`handlePackingSlip`
+zaraz po `setDone(...)`), bez czekania na osobne kliknięcie — zgłoszone przez właściciela: wcześniej trzeba było
+kliknąć "Drukuj etykietę"/"Drukuj packing slip" ręcznie, tak jak w trybie PDF. Przyciski w panelu "Przesyłka
+nadana" zostają jako ręczny fallback (np. gdyby auto-druk się nie udał). **Nazwy drukarek** (dokładnie jak w Windowsie) w `shipping_settings.zebra_printer_name`/`a4_printer_name` —
 nowe nullable kolumny, Admin ustawia w panelu "Zmień dane nadawcy", z przyciskiem "Wykryj drukarki" (`listPrinters()`
 w `lib/printAgent.ts`, wymaga uruchomionego QZ Tray na komputerze, na którym klika Admin). **Delivery note przez
 serwerowy proxy** (`app/api/shipping/fetch-remote-pdf`) zamiast fetch wprost z przeglądarki — omija nieprzewidywalne
@@ -634,7 +652,9 @@ skrzynka firmowa...). Bez tego magic linki będą się od czasu do czasu blokowa
 
 `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`,
 `CRON_SECRET`, `FAKTUROWNIA_DOMAIN` (sama subdomena, np. `recoo`), `FAKTUROWNIA_API_TOKEN`,
-`BACKMARKET_AUTH`, `BACKMARKET_LANG`, `BACKMARKET_UA`, `BACKMARKET_BASE_URL`, `REFURBED_API_TOKEN` (z supplier.refurbed.com; bez niego sync refurbed jest pomijany; nieużywany wygasa po 2 miesiącach), `REFURBED_UA`, `ERLI_API_KEY` (panel Erli: Metoda integracji > Własna integracja po API; bez niego sync Erli jest pomijany), `ERLI_UA`, `ALLEGRO_CLIENT_ID`, `ALLEGRO_CLIENT_SECRET` (aplikacja z apps.developer.allegro.pl), `ALLEGRO_REDIRECT_URI` (opcjonalny, sztywny adres przekierowania), `DHL_PARCEL_USERNAME` (klucz APIv2 z panelu DHL24), `DHL_PARCEL_PASSWORD`, `DHL_PARCEL_SAP` (numer klienta SAP, 7 cyfr; tylko w env), `DHL_EXPRESS_API_KEY`, `DHL_EXPRESS_API_SECRET`, `DHL_EXPRESS_ACCOUNT` (numer konta nadawcy DHL Express — tylko w env, nie w repo), `DHL_EXPRESS_ENV` (`test` domyślnie / `production`), `DHL_EXPRESS_LABEL_TEMPLATE` (opcjonalnie, domyślnie `ECOM26_64_001`), `ALLEGRO_UA` (**wymagany**, bez wartości domyślnej: User-Agent z generatora w panelu aplikacji — Allegro blokuje klucz przy nieprawidłowym; bez niego sync Allegro jest pomijany)`, `OCTOPIA_CLIENT_ID`, `OCTOPIA_CLIENT_SECRET`, `OCTOPIA_SELLER_ID` (marketplace'y typu Cdiscount; bez nich sync Octopia jest pomijany), `AMAZON_CLIENT_ID`, `AMAZON_CLIENT_SECRET`, `AMAZON_REFRESH_TOKEN` (bezpośrednia integracja SP-API, patrz niżej), `AMAZON_MARKETPLACE_IDS` (opcjonalnie), `AMAZON_ENDPOINT`/`AMAZON_USER_AGENT` (opcjonalnie).
+`BACKMARKET_AUTH`, `BACKMARKET_LANG`, `BACKMARKET_UA`, `BACKMARKET_BASE_URL`, `REFURBED_API_TOKEN` (z supplier.refurbed.com; bez niego sync refurbed jest pomijany; nieużywany wygasa po 2 miesiącach), `REFURBED_UA`, `ERLI_API_KEY` (panel Erli: Metoda integracji > Własna integracja po API; bez niego sync Erli jest pomijany), `ERLI_UA`, `ALLEGRO_CLIENT_ID`, `ALLEGRO_CLIENT_SECRET` (aplikacja z apps.developer.allegro.pl), `ALLEGRO_REDIRECT_URI` (opcjonalny, sztywny adres przekierowania), `DHL_PARCEL_USERNAME` (klucz APIv2 z panelu DHL24), `DHL_PARCEL_PASSWORD`, `DHL_PARCEL_SAP` (numer klienta SAP, 7 cyfr; tylko w env), `DHL_EXPRESS_API_KEY`, `DHL_EXPRESS_API_SECRET`, `DHL_EXPRESS_ACCOUNT` (numer konta nadawcy DHL Express — tylko w env, nie w repo), `DHL_EXPRESS_ENV` (`test` domyślnie / `production`), `DHL_EXPRESS_LABEL_TEMPLATE` (opcjonalnie, domyślnie `ECOM26_64_001`), `ALLEGRO_UA` (**wymagany**, bez wartości domyślnej: User-Agent z generatora w panelu aplikacji — Allegro blokuje klucz przy nieprawidłowym; bez niego sync Allegro jest pomijany)`, `OCTOPIA_CLIENT_ID`, `OCTOPIA_CLIENT_SECRET`, `OCTOPIA_SELLER_ID` (marketplace'y typu Cdiscount; bez nich sync Octopia jest pomijany), `AMAZON_CLIENT_ID`, `AMAZON_CLIENT_SECRET`, `AMAZON_REFRESH_TOKEN` (bezpośrednia integracja SP-API, patrz niżej), `AMAZON_MARKETPLACE_IDS` (opcjonalnie), `AMAZON_ENDPOINT`/`AMAZON_USER_AGENT` (opcjonalnie), `QZ_TRAY_PRIVATE_KEY`
+(klucz prywatny PEM do podpisywania żądań drukowania bezpośredniego — patrz sekcja Wysyłka; wklej wielolinijkowo,
+kod sam usuwa literalne `\n`, gdyby jakiś krok po drodze spłaszczył PEM do jednej linii).
 Zmiana zmiennej na Vercelu wymaga nowego deployu. W Supabase (Authentication → URL
 Configuration) musi być aktualny adres produkcyjny, inaczej magic link nie zadziała.
 

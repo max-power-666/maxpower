@@ -398,6 +398,13 @@ export default function ShippingView({
         marketplaceSyncError: data.marketplaceSyncError ?? null,
         deliveryNoteUrl,
       });
+      // Drukowanie bezpośrednie: od razu po nadaniu, bez czekania na osobne kliknięcie "Drukuj etykietę"/"Drukuj
+      // packing slip" — na wyraźną prośbę właściciela. Przyciski w panelu "Przesyłka nadana" zostają jako ręczny
+      // fallback (np. gdy auto-druk się nie uda — obie funkcje same zgłaszają błąd przez setError, nie rzucają dalej).
+      if (directPrint && data.saved !== false) {
+        handleLabel(data.id, data.labelBase64 ?? null, data.labelFormat ?? null);
+        if (deliveryNoteUrl) handlePackingSlip(deliveryNoteUrl);
+      }
       requestId.current = crypto.randomUUID(); // kolejna przesyłka = nowy klucz
       setQuote(null);
       setChosen(null);
