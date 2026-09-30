@@ -591,6 +591,7 @@ function OrdersList({
               <th className="p-3">Status</th>
               <th className="p-3">Kraj</th>
               <th className="p-3">Metoda wysyłki</th>
+              <th className="p-3 text-right">Ilość</th>
               <th className="p-3">SKU</th>
               <th className="p-3">Numer seryjny</th>
               <th className="p-3">Pady</th>
@@ -599,7 +600,7 @@ function OrdersList({
           </thead>
           <tbody>
             {!loading && rows.length === 0 && (
-              <tr><td colSpan={11} className="p-6 text-center text-inksoft text-sm">{search ? "Nic nie znaleziono dla tego numeru." : "Brak zamówień — kliknij Odśwież, żeby pobrać je z Back Market."}</td></tr>
+              <tr><td colSpan={12} className="p-6 text-center text-inksoft text-sm">{search ? "Nic nie znaleziono dla tego numeru." : "Brak zamówień — kliknij Odśwież, żeby pobrać je z Back Market."}</td></tr>
             )}
             {rows.map((r) => {
               // Zamówienie bez pozycji (jeszcze nie zsynchronizowane) pokazujemy jednym wierszem z samym SKU.
@@ -634,6 +635,7 @@ function OrdersList({
                       </td>
                       <td rowSpan={items.length} className="p-3 text-xs font-mono whitespace-nowrap">{r.country_code || "—"}</td>
                       <td rowSpan={items.length} className="p-3 text-xs whitespace-nowrap">{r.shipping_method || "—"}</td>
+                      <td rowSpan={items.length} className="p-3 text-right font-mono">{r.sales_order_items.length > 0 ? r.sales_order_items.length : "—"}</td>
                     </>
                   )}
                   <td className="p-3 font-mono whitespace-nowrap">{it ? it.sku || "—" : r.sku || "—"}</td>
