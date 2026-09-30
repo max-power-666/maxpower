@@ -245,6 +245,7 @@ export function mapBmToSales(o: any) {
     marketplace: "backmarket",
     external_id: String(o.order_id),
     order_date: o.date_creation ?? null,
+    planned_shipping_date: o.expected_dispatch_date ?? null,
     status: bmDerivedStatus(o),
     sku: skus.length > 0 ? skus.join(", ") : null,
     tracking_number: o.tracking_number || null,
@@ -666,6 +667,7 @@ export function mapAmazonToSales(o: any) {
     marketplace: "amazon",
     external_id: String(o.AmazonOrderId),
     order_date: o.PurchaseDate ?? null,
+    planned_shipping_date: o.LatestShipDate ?? null,
     status: String(o.OrderStatus ?? "Pending"),
     tracking_number: null, // numer przesyłki nie jest częścią odpowiedzi zamówienia w tym API
     country_code: normCountry(o.ShippingAddress?.CountryCode),

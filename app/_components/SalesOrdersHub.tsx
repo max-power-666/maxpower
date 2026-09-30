@@ -322,6 +322,7 @@ type SalesRow = {
   marketplace: string;
   external_id: string;
   order_date: string | null;
+  planned_shipping_date: string | null;
   status: string;
   sku: string | null;
   tracking_number: string | null;
@@ -330,7 +331,7 @@ type SalesRow = {
   sales_order_items: SalesItem[];
 };
 const SALES_COLUMNS =
-  "marketplace, external_id, order_date, status, sku, tracking_number, country_code, shipping_method, sales_order_items(item_key, position, sku, serial_number, pads, pad_serials)";
+  "marketplace, external_id, order_date, planned_shipping_date, status, sku, tracking_number, country_code, shipping_method, sales_order_items(item_key, position, sku, serial_number, pads, pad_serials)";
 const rowKey = (r: { marketplace: string; external_id: string }) => `${r.marketplace}:${r.external_id}`;
 
 // Kolor plakietki kanału — żeby na liście od razu było widać, skąd jest zamówienie (inne barwy niż statusy).
@@ -586,6 +587,7 @@ function OrdersList({
               <th className="p-3">Marketplace</th>
               <th className="p-3">Nr zamówienia</th>
               <th className="p-3">Data zamówienia</th>
+              <th className="p-3">Planowana wysyłka</th>
               <th className="p-3">Status</th>
               <th className="p-3">Kraj</th>
               <th className="p-3">Metoda wysyłki</th>
@@ -597,7 +599,7 @@ function OrdersList({
           </thead>
           <tbody>
             {!loading && rows.length === 0 && (
-              <tr><td colSpan={10} className="p-6 text-center text-inksoft text-sm">{search ? "Nic nie znaleziono dla tego numeru." : "Brak zamówień — kliknij Odśwież, żeby pobrać je z Back Market."}</td></tr>
+              <tr><td colSpan={11} className="p-6 text-center text-inksoft text-sm">{search ? "Nic nie znaleziono dla tego numeru." : "Brak zamówień — kliknij Odśwież, żeby pobrać je z Back Market."}</td></tr>
             )}
             {rows.map((r) => {
               // Zamówienie bez pozycji (jeszcze nie zsynchronizowane) pokazujemy jednym wierszem z samym SKU.
@@ -614,15 +616,17 @@ function OrdersList({
                           {MARKETPLACES.find((m) => m.key === r.marketplace)?.label ?? r.marketplace}
                         </span>
                       </td>
-                      <td rowSpan={items.length} className="p-3 whitespace-nowrap">
+                      <td rowSpan={items.length} className="p-3 max-w-[9rem]">
                         <button
                           onClick={() => onOpen(r.marketplace, r.external_id)}
-                          className="font-mono font-semibold text-xs text-teal hover:underline"
+                          title={r.external_id}
+                          className="font-mono font-semibold text-xs text-teal hover:underline truncate block max-w-full"
                         >
                           {r.external_id}
                         </button>
                       </td>
                       <td rowSpan={items.length} className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDateTime(r.order_date)}</td>
+                      <td rowSpan={items.length} className="p-3 text-xs text-inksoft whitespace-nowrap">{r.planned_shipping_date ? fmtDateTime(r.planned_shipping_date) : "—"}</td>
                       <td rowSpan={items.length} className="p-3">
                         <span className={`text-xs font-semibold px-2 py-1 rounded-full whitespace-nowrap ${statusStyle(r.marketplace, r.status)}`}>
                           {salesStatusLabel(r.marketplace, r.status)}

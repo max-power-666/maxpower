@@ -166,6 +166,7 @@ create table if not exists sales_orders (
   tracking_number text,                      -- numer przesyłki z API (Back Market: tracking_number zamówienia)
   country_code text,                         -- kod kraju ODBIORCY (adres dostawy), 2 litery ISO 3166-1 gdzie kanał to udostępnia
   shipping_method text,                      -- "Standardowa"/"Ekspresowa" — na razie tylko Back Market (bmShippingMethodLabel), inne kanały: null
+  planned_shipping_date timestamptz,         -- termin wysyłki wg kanału — Back Market (expected_dispatch_date, znika po wysyłce) i Amazon (LatestShipDate, zostaje); inne kanały: null (brak takiego pola w ich API)
   synced_at timestamptz not null default now(),
   -- Nasz wewnętrzny status realizacji (niezależny od statusu kanału): nowe | w_realizacji | wyslane | anulowane
   our_status text not null default 'nowe' check (our_status in ('nowe', 'w_realizacji', 'wyslane', 'anulowane')),
@@ -177,6 +178,7 @@ alter table sales_orders add column if not exists tracking_number text;
 alter table sales_orders add column if not exists our_status text not null default 'nowe';
 alter table sales_orders add column if not exists country_code text;
 alter table sales_orders add column if not exists shipping_method text;
+alter table sales_orders add column if not exists planned_shipping_date timestamptz;
 -- Drop+add (nie "dodaj jeśli brak") celowo: żeby poszerzenie listy dozwolonych wartości (np. dodanie 'anulowane')
 -- też się zastosowało przy ponownym uruchomieniu na bazie, która ma już ten constraint z węższą listą.
 alter table sales_orders drop constraint if exists sales_orders_our_status_check;
@@ -273,6 +275,17 @@ update sales_orders s set country_code = c.cc
       from amazon_orders o
   ) c
  where s.marketplace = 'amazon' and s.external_id = c.external_id and c.cc is not null and s.country_code is distinct from c.cc;
+
+-- Planowana wysyłka dla zamówień pobranych zanim ta kolumna powstała — z już zapisanych surowych danych.
+update sales_orders s set planned_shipping_date = o.expected_dispatch_date
+  from bm_orders o
+ where s.marketplace = 'backmarket' and o.order_id::text = s.external_id
+   and s.planned_shipping_date is distinct from o.expected_dispatch_date;
+
+update sales_orders s set planned_shipping_date = (o.raw->>'LatestShipDate')::timestamptz
+  from amazon_orders o
+ where s.marketplace = 'amazon' and o.id = s.external_id
+   and s.planned_shipping_date is distinct from (o.raw->>'LatestShipDate')::timestamptz;
 
 create index if not exists sales_orders_date_idx on sales_orders (order_date desc);
 
