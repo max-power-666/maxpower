@@ -211,7 +211,7 @@ export default function ShopProductsView({
                   return (
                     <tr key={m.id} className="border-b border-line last:border-b-0 hover:bg-paper align-middle">
                       <td className="p-2">
-                        <div className="h-11 w-11 rounded overflow-hidden flex items-center justify-center" style={{ background: m.color }}>
+                        <div className="h-11 w-11 rounded overflow-hidden flex items-center justify-center border border-line" style={{ background: m.color }}>
                           {thumbs[m.id] ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img src={imageSrc(thumbs[m.id])} alt="" className="h-full w-full object-contain p-1" />

@@ -397,6 +397,9 @@ export default function ShopProductEditor({
                       style={{ background: c.hex }}
                     />
                   ))}
+                  <span className="self-center ml-1 text-xs text-inksoft">
+                    {SHOP_COLORS.find((c) => c.hex.toLowerCase() === draft.color.toLowerCase())?.name ?? draft.color}
+                  </span>
                 </div>
               </div>
               <div className="mt-3 flex flex-wrap gap-5 text-sm">

@@ -60,7 +60,7 @@ export type ShopLogEntry = {
   at: string;
 };
 
-/** Jasne tła kafelków — odcienie kolorystyki dodatkowej z księgi znaku (takie same jak w sklepie). */
+/** Tła kafelków: jasne odcienie kolorystyki dodatkowej z księgi znaku (takie same jak w sklepie) + biały. */
 export const SHOP_COLORS: { hex: string; name: string }[] = [
   { hex: "#E1F0FE", name: "niebieski" },
   { hex: "#E7EBFA", name: "fiolet" },
@@ -68,6 +68,7 @@ export const SHOP_COLORS: { hex: string; name: string }[] = [
   { hex: "#D9F8EF", name: "zieleń" },
   { hex: "#FDECF0", name: "róż" },
   { hex: "#F1F2F3", name: "szary" },
+  { hex: "#FFFFFF", name: "biały" }, // w sklepie dostaje cienką ramkę, żeby nie zlał się z białą stroną
 ];
 
 /** Adres zdjęcia do podglądu w ERP: pliki startowe leżą w repo sklepu ("/produkty/..."), nowe — w Storage (pełny URL). */
