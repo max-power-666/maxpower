@@ -399,10 +399,17 @@ tylko na serwerze (`QZ_TRAY_PRIVATE_KEY`, nowa zmienna środowiskowa), używany 
 `{call, params, timestamp}`) — dokładnie odtworzone z kodu `qz-tray.js`: `createSign("SHA1")` (domyślny
 `signAlgorithm` w bibliotece — nie zmienialiśmy go po stronie klienta, więc musi się zgadzać po obu stronach),
 wynik base64. `setSignaturePromise` w `printAgent.ts` dogrywa **aktualny** token sesji z supabase-js przy każdym
-podpisie (nie raz przy starcie), żeby nie podpisywać przeterminowanym tokenem po dłuższej bezczynności. Certyfikat
-self-signed (nie podpisany przez QZ Industries) nadal pokaże w QZ Tray ostrzeżenie "nie da się zweryfikować" przy
-pierwszym połączeniu z danego komputera — to oczekiwane i normalne dla wewnętrznego użytku; kluczowa różnica to że
-teraz "Remember this decision" faktycznie trzyma na stałe, zamiast pytać przy każdym wydruku.
+podpisie (nie raz przy starcie), żeby nie podpisywać przeterminowanym tokenem po dłuższej bezczynności.
+
+**Samo podpisywanie NIE wystarczyło** (przewidywanie z pierwszej wersji tego akapitu było błędne — poprawione po
+żywym teście właściciela tego samego dnia): certyfikat self-signed jest kryptograficznie poprawny (druk działa,
+podpis się weryfikuje), ale QZ Tray i tak traktuje go jako niezaufany, bo nie pochodzi z jego zaufanego roota —
+efekt: w oknie zgody da się zaznaczyć "Remember this decision" **tylko razem z "Block"**, nie z "Allow" ("Allow"
+trzeba klikać przy każdym druku — to świadome zabezpieczenie QZ Tray, nie błąd). Naprawione dopiero `override.crt`
+(patrz instrukcja instalacji niżej, krok 4) — plik z naszym certyfikatem w folderze instalacyjnym QZ Tray, który
+nadpisuje jego zaufany root NA DANYM KOMPUTERZE własnym certyfikatem; to darmowa alternatywa dla płatnego podpisu
+certyfikatu przez QZ Industries, udokumentowana wprost w ich wiki (`docs/signing#to-override-the-trusted-root-certificate`).
+Dopiero po tym kroku "Remember this decision" + "Allow" działa trwale.
 **Etykieta = ZPL, nie PDF:** DHL Express nie pozwala doćiągnąć etykiety w innym formacie PO utworzeniu przesyłki
 (format wybiera się raz, przy tworzeniu — `outputImageProperties.encodingFormat` w `lib/dhlExpress.ts`, zmienione
 z `"pdf"` na `"zpl"`), więc etykieta DHL Express jest teraz ZAWSZE w ZPL. DHL Parcel (`lib/dhlParcel.ts`,
@@ -447,12 +454,22 @@ testami jednostkowymi (`dhl.test.js`/`shipping.test.js`/`parcel.test.js` w scrat
 2. Uruchom instalator, zaakceptuj domyślne ustawienia (instalacja jako aplikacja w tle + start z Windowsem).
 3. Po instalacji QZ Tray pojawia się jako ikona w zasobniku systemowym (obok zegara) — musi tam być widoczna,
    żeby drukowanie bezpośrednie działało (uruchamia się automatycznie przy starcie Windows).
-4. W Magazyn ERP, w zakładce Wysyłka → "Zmień dane nadawcy (Admin)" → "Wykryj drukarki na tym komputerze" —
+4. **Skopiuj `override.crt`** (nasz certyfikat — poproś asystenta o ten plik) do `C:\Program Files\QZ Tray\override.crt`,
+   potem zrestartuj QZ Tray (prawy klik na ikonę w zasobniku → Exit, uruchom ponownie). **Ten krok jest konieczny** —
+   bez niego certyfikat self-signed jest kryptograficznie poprawny (druk działa), ale QZ Tray traktuje go jako
+   niezaufany i **blokuje trwałe zapamiętanie "Allow"** — w oknie zgody da się wtedy zapamiętać tylko "Block", "Allow"
+   trzeba klikać przy każdym druku (zgłoszone przez właściciela 30.09.2026, potwierdzone w dokumentacji QZ Tray:
+   `override.crt` w folderze instalacyjnym nadpisuje zaufany root QZ Tray na TYM komputerze własnym certyfikatem —
+   darmowa alternatywa dla płatnego podpisu certyfikatu przez QZ Industries).
+5. W Magazyn ERP, w zakładce Wysyłka → "Zmień dane nadawcy (Admin)" → "Wykryj drukarki na tym komputerze" —
    powinna pokazać się lista drukarek zainstalowanych w Windows na TYM komputerze; wybierz dokładną nazwę
    drukarki etykiet (Zebra) i drukarki A4.
-5. Przy pierwszym wydruku z tej przeglądarki QZ Tray może pokazać okienko z prośbą o zgodę na połączenie —
-   zaznacz "zapamiętaj" (żeby pytało tylko raz na ten komputer/przeglądarkę).
-6. Gotowe — przełącznik "Drukowanie bezpośrednie" w Wysyłce włącza druk bez okna dialogowego.
+6. Przy pierwszym wydruku z tej przeglądarki QZ Tray pokaże okienko z prośbą o zgodę na połączenie —
+   zaznacz "Remember this decision" razem z "Allow" (dopiero po kroku 4 to w ogóle możliwe do zaznaczenia).
+7. Gotowe — przełącznik "Drukowanie bezpośrednie" w Wysyłce włącza druk bez okna dialogowego.
+
+Uwaga: `override.crt` zastępuje domyślny zaufany root QZ Tray NA TYM KOMPUTERZE — nieszkodliwe, dopóki QZ Tray na
+danym stanowisku służy wyłącznie do drukowania z naszej aplikacji (nie z innej strony korzystającej z QZ Tray).
 
 Uwaga: nazwy drukarek trzeba ustawić OSOBNO na każdym stanowisku, jeśli różne komputery mają różne drukarki
 podłączone pod inną nazwą w Windows — `shipping_settings` to dziś jeden wspólny wiersz w bazie (jedna para nazw
