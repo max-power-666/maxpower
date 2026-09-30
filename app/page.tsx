@@ -495,9 +495,9 @@ export default function Home() {
             />
           )}
 
-          {view === "service" && <ServiceView session={session} members={members} isAdmin={role === "Admin"} />}
+          {view === "service" && <ServiceView session={session} members={members} isAdmin={role === "Admin"} isAdminOrManager={role === "Admin" || role === "Manager"} />}
 
-          {view === "tests" && <TestsView session={session} members={members} isAdmin={role === "Admin"} />}
+          {view === "tests" && <TestsView session={session} members={members} isAdmin={role === "Admin"} isAdminOrManager={role === "Admin" || role === "Manager"} />}
 
           {view === "tradein" && <TradeInView session={session} />}
 
@@ -511,7 +511,7 @@ export default function Home() {
 
           {view === "backlog" && <BacklogView session={session} members={members} isAdmin={role === "Admin"} />}
 
-          {view === "orders" && <TradeInHub session={session} members={members} isAdmin={role === "Admin"} />}
+          {view === "orders" && <TradeInHub session={session} members={members} isAdmin={role === "Admin"} isAdminOrManager={role === "Admin" || role === "Manager"} />}
         </div>
       </main>
 

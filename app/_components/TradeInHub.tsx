@@ -101,10 +101,12 @@ export default function TradeInHub({
   session,
   members,
   isAdmin,
+  isAdminOrManager,
 }: {
   session: Session;
   members: MemberLite[];
   isAdmin: boolean;
+  isAdminOrManager: boolean;
 }) {
   const [sub, setSub] = useState<"intake" | "raw">("intake");
   const [openOrderId, setOpenOrderId] = useState<string | null>(null);
@@ -121,6 +123,7 @@ export default function TradeInHub({
           session={session}
           members={members}
           isAdmin={isAdmin}
+          isAdminOrManager={isAdminOrManager}
           onOpenOrder={setOpenOrderId}
           onOpenProduct={setOpenSerial}
         />}
@@ -141,12 +144,14 @@ function IntakeView({
   session,
   members,
   isAdmin,
+  isAdminOrManager,
   onOpenOrder,
   onOpenProduct,
 }: {
   session: Session;
   members: MemberLite[];
   isAdmin: boolean;
+  isAdminOrManager: boolean;
   onOpenOrder: (id: string) => void;
   onOpenProduct: (serial: string) => void;
 }) {
@@ -509,14 +514,14 @@ function IntakeView({
               <th className="p-3">Dok.</th>
               <th className="p-3">Status</th>
               <th className="p-3">Uwagi</th>
-              <th className="p-3">Czas</th>
+              {isAdminOrManager && <th className="p-3">Czas</th>}
               <th className="p-3 text-right">Punkty</th>
               {isAdmin && <th className="p-3"></th>}
             </tr>
           </thead>
           <tbody>
             {!loading && entries.length === 0 && (
-              <tr><td colSpan={isAdmin ? 13 : 12} className="p-6 text-center text-inksoft text-sm">Brak paczek — rozpocznij pierwszą powyżej.</td></tr>
+              <tr><td colSpan={11 + (isAdminOrManager ? 1 : 0) + (isAdmin ? 1 : 0)} className="p-6 text-center text-inksoft text-sm">Brak paczek — rozpocznij pierwszą powyżej.</td></tr>
             )}
             {entries.map((e) => (
               <tr key={e.id} className="border-b border-line last:border-b-0 hover:bg-paper">
@@ -586,7 +591,7 @@ function IntakeView({
                   </select>
                 </td>
                 <td className="p-3"><InlineEditCell value={e.notes} onSave={(n) => saveField(e, "notes", "Uwagi", n)} /></td>
-                <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDuration(e.entered_at, e.finished_at)}</td>
+                {isAdminOrManager && <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDuration(e.entered_at, e.finished_at)}</td>}
                 <td className="p-3 text-right font-mono font-semibold">{e.status === "obsluzona" ? fmtPoints(e.points) : "—"}</td>
                 {isAdmin && (
                   <td className="p-3 text-right">

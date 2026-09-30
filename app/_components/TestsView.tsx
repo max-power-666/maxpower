@@ -47,10 +47,12 @@ export default function TestsView({
   session,
   members,
   isAdmin,
+  isAdminOrManager,
 }: {
   session: Session;
   members: MemberLite[];
   isAdmin: boolean;
+  isAdminOrManager: boolean;
 }) {
   const [interval, setInterval] = useState<Interval>("today");
   const [rangeRows, setRangeRows] = useState<{ employee_email: string | null; points: number }[]>([]);
@@ -239,14 +241,14 @@ export default function TestsView({
               <th className="p-3">Numer seryjny</th>
               <th className="p-3">Status</th>
               <th className="p-3">Uwagi</th>
-              <th className="p-3">Czas</th>
+              {isAdminOrManager && <th className="p-3">Czas</th>}
               <th className="p-3 text-right">Punkty</th>
               {isAdmin && <th className="p-3"></th>}
             </tr>
           </thead>
           <tbody>
             {!loading && recent.length === 0 && (
-              <tr><td colSpan={isAdmin ? 8 : 7} className="p-6 text-center text-inksoft text-sm">Brak testów — rozpocznij pierwszy powyżej.</td></tr>
+              <tr><td colSpan={6 + (isAdminOrManager ? 1 : 0) + (isAdmin ? 1 : 0)} className="p-6 text-center text-inksoft text-sm">Brak testów — rozpocznij pierwszy powyżej.</td></tr>
             )}
             {recent.map((r) => (
               <tr key={r.id} className="border-b border-line last:border-b-0 hover:bg-paper">
@@ -267,7 +269,7 @@ export default function TestsView({
                   </select>
                 </td>
                 <td className="p-3"><InlineEditCell value={r.notes} onSave={(n) => saveNotes(r, n)} /></td>
-                <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDuration(r.started_at, r.finished_at)}</td>
+                {isAdminOrManager && <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDuration(r.started_at, r.finished_at)}</td>}
                 <td className="p-3 text-right font-mono font-semibold">{r.status === "przetestowane" ? fmtPoints(r.points) : "—"}</td>
                 {isAdmin && (
                   <td className="p-3 text-right">

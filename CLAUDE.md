@@ -657,6 +657,12 @@ Zasady, które kształtują Serwis i Trade-in (pełny PDF ma właściciel):
   zaokrąglania** przed ustaleniem progu (§2 ust. 7, §4 ust. 8);
 - "Czas" naprawy/paczki jest **tylko informacyjny** — wydajność w regulaminie to punkty /
   godziny *przepracowane* z ewidencji czasu pracy (§4), nie suma czasów zadań.
+- **Kolumna "Czas" widoczna tylko dla Admina i Managera** (30.09.2026, na prośbę właściciela) w Serwisie, Testach
+  i Trade-in (podwidok Wprowadzanie) — zwykli pracownicy jej nie widzą. Prop `isAdminOrManager` (obok już
+  istniejącego `isAdmin`, który steruje osobno przyciskiem "Usuń") w `ServiceView.tsx`/`TestsView.tsx`/
+  `TradeInHub.tsx`, liczony w `page.tsx` jako `role === "Admin" || role === "Manager"`. Tylko UI (ten sam,
+  świadomy stan MVP co reszta uprawnień — patrz sekcja Uprawnienia) — dane i tak są w bazie, tylko kolumna
+  schowana z tabeli i `colSpan` pustego stanu dostosowany.
 
 Świadomie **nie zrobione**: kwota premii w zł, wydajność pkt/h, wskaźnik kwalifikacyjny 90%
 (§4-§7) — wymagają ewidencji godzin pracy, urlopów i nieobecności, której apka nie ma.
