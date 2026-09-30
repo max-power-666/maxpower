@@ -628,24 +628,32 @@ miesięczny (§2 ust. 6) — dziś każdy obszar ma osobną tabelę i podsumowan
 
 ## Motyw kolorystyczny (30.09.2026)
 
-Trzy przełączane motywy — **sama kolorystyka, układ ekranów bez zmian** (świadoma decyzja właściciela: pełny
-redesign na wzór panelu refurbed to osobny, dużo większy projekt, nie zrobiony). Przełącznik (`ThemeSwitcher.tsx`,
-`lib/theme.ts`) pokazuje się na ekranie logowania (pod przyciskiem) i w stopce paska bocznego (pod "Wyloguj") —
-w obu miejscach, bo wybór w `localStorage` (`erp-theme`, nie w bazie — jak `magazyn-view`) przetrwa między
-niezalogowanym a zalogowanym stanem, więc ma sens zmieniać go z obu miejsc. Warianty: **Obecny** (domyślny,
-dotychczasowe wartości), **Nowy** (jasny, inspirowany insight-panelem refurbed — biel/jasny fiolet zamiast
-ziemistej zieleni, `teal`→indygo `#4F46E5` jako główny akcent), **Tryb nocny** (przygaszony, świadomie BEZ czystej
-czerni/bieli — `paper`/`ink` to stonowane grafitowo-zielone odcienie, nie kontrastowe skrajności, żeby nie męczyć
-oczu, zgodnie z wprost wyrażoną prośbą).
+Dwa motywy, przełączane jednym **switchem** (słońce/księżyc, nie pigułki — zmienione tego samego dnia na wyraźną
+prośbę) — **sama kolorystyka, układ ekranów bez zmian** (świadoma decyzja właściciela: pełny redesign na wzór
+panelu refurbed to osobny, dużo większy projekt, nie zrobiony). Trzecia opcja "Obecny" (dotychczasowe, ziemiste
+kolory) została **usunięta tego samego dnia** na wyraźną prośbę — "Nowy" jest teraz motywem domyślnym/bazowym.
+`ThemeSwitcher.tsx`/`lib/theme.ts` pokazuje się na ekranie logowania (pod przyciskiem) i w stopce paska bocznego
+(pod "Wyloguj") — w obu miejscach, bo wybór w `localStorage` (`erp-theme`, nie w bazie — jak `magazyn-view`)
+przetrwa między niezalogowanym a zalogowanym stanem. Warianty: **Nowy** (jasny, inspirowany insight-panelem
+refurbed — biel/jasny fiolet, `teal`→indygo `#4F46E5` jako główny akcent), **Tryb nocny** (przygaszony, świadomie
+BEZ czystej czerni/bieli — stonowane grafitowo-zielone odcienie, nie kontrastowe skrajności, żeby nie męczyć oczu).
+
+**Automatyczny wybór wg pory dnia** (30.09.2026, na wyraźną prośbę): dopóki nikt nie kliknął switcha ręcznie, motyw
+sam jest ciemny w godzinach **21:00–5:00** (czas lokalny przeglądarki), poza tym jasny — `autoTheme()` w
+`lib/theme.ts`. `ThemeSwitcher` sprawdza zegar co 60 s (`setInterval`) i podmienia atrybut na żywo, gdyby ktoś
+zostawił kartę otwartą na noc — nie tylko przy odświeżeniu. **Ręczne kliknięcie switcha zapisuje jawny wybór w
+`localStorage`** i od tej chwili ma pierwszeństwo przed zegarem na stałe (aż do kolejnego ręcznego przełączenia) —
+nie ma osobnego trzeciego stanu "auto" widocznego w UI, "auto" to po prostu "nikt jeszcze nie kliknął".
 
 **Mechanizm:** wszystkie nazwane kolory z `tailwind.config.ts` (`paper`, `panel`, `ink`, `inksoft`, `line`, `amber`,
 `ambersoft`, `teal`, `tealsoft`, `rust`, `rustsoft`) wskazują na zmienne CSS (`app/globals.css`), zdefiniowane raz
-pod `:root` (motyw domyślny) i nadpisane pod `:root[data-theme="new"]`/`:root[data-theme="dark"]`. Przełącznik
-(`applyTheme` w `lib/theme.ts`) tylko ustawia atrybut `data-theme` na `<html>` — **żaden plik komponentu nie został
-dotknięty** (klasy typu `bg-paper`/`text-inksoft` zostają identyczne, ~770 użyć w całym `app/`), zmienia się tylko
-wartość zmiennej, którą przeglądarka już renderuje. `app/layout.tsx` ma dodatkowo synchroniczny inline `<script>`
-(`THEME_INIT_SCRIPT`) czytający `localStorage` PRZED hydracją Reacta — bez tego przy twardym odświeżeniu strona
-mignęłaby na ułamek sekundy motywem domyślnym, zanim JS zdążyłby przełączyć atrybut.
+pod `:root` (motyw "Nowy"/domyślny) i nadpisane pod `:root[data-theme="dark"]`. Przełącznik (`applyTheme` w
+`lib/theme.ts`) tylko ustawia atrybut `data-theme` na `<html>` — **żaden plik komponentu nie został dotknięty**
+(klasy typu `bg-paper`/`text-inksoft` zostają identyczne, ~770 użyć w całym `app/`), zmienia się tylko wartość
+zmiennej, którą przeglądarka już renderuje. `app/layout.tsx` ma dodatkowo synchroniczny inline `<script>`
+(`THEME_INIT_SCRIPT`) czytający `localStorage`/zegar PRZED hydracją Reacta (logika godzin 1:1 z `autoTheme()`,
+celowo zduplikowana — inline script musi być samodzielny, bez importów) — bez tego przy twardym odświeżeniu
+strona mignęłaby na ułamek sekundy złym motywem, zanim JS zdążyłby przełączyć atrybut.
 
 **`white` jest specjalnie nadpisane w `tailwind.config.ts`** (`white: "var(--color-card)"`) — w tym kodzie
 `bg-white` nigdzie nie oznacza dosłownej bieli, tylko "powierzchnia karty/tabeli/inputu" (potwierdzone: `text-white`

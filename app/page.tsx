@@ -407,7 +407,7 @@ export default function Home() {
           <div>{role}</div>
           <button onClick={() => supabase.auth.signOut()} className="mt-2 underline">Wyloguj</button>
           <div className="mt-4">
-            <ThemeSwitcher compact />
+            <ThemeSwitcher />
           </div>
         </div>
       </aside>

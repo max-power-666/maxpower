@@ -2,27 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Motyw kolorystyczny — patrz lib/theme.ts (ThemeSwitcher przełącza atrybut data-theme na <html>). Trzy warianty,
-   ten sam układ ekranów: "Obecny" (domyślny, wartości sprzed wprowadzenia motywów), "Nowy" (jasny, inspirowany
-   panelem refurbed — biel + fiolet/indygo), "dark" = Tryb nocny (przygaszony, bez czystej czerni/bieli, żeby nie
-   męczyć oczu). --color-card to POWIERZCHNIA KART/TABEL (w kodzie używana jako bg-white — patrz tailwind.config.ts,
-   dlaczego "white" jest tu nadpisane), nie dosłowna biel. */
+/* Motyw kolorystyczny — patrz lib/theme.ts (ThemeSwitcher przełącza atrybut data-theme na <html>). Dwa warianty,
+   ten sam układ ekranów: domyślny/"new" = Nowy (jasny, inspirowany panelem refurbed — biel + fiolet/indygo),
+   "dark" = Tryb nocny (przygaszony, bez czystej czerni/bieli, żeby nie męczyć oczu). Automatyczny wybór wg pory
+   dnia (21:00–5:00 = ciemny), dopóki ktoś nie przełączy switcha ręcznie — patrz autoTheme() w lib/theme.ts.
+   --color-card to POWIERZCHNIA KART/TABEL (w kodzie używana jako bg-white — patrz tailwind.config.ts, dlaczego
+   "white" jest tu nadpisane), nie dosłowna biel. */
 :root {
-  --color-paper: #EEF0E7;
-  --color-panel: #E4E7DB;
-  --color-card: #FFFFFF;
-  --color-ink: #1A231F;
-  --color-inksoft: #57614F;
-  --color-line: #C7CCB9;
-  --color-amber: #C97B25;
-  --color-ambersoft: #F2DEC0;
-  --color-teal: #2C6E68;
-  --color-tealsoft: #D6E6E0;
-  --color-rust: #AD4536;
-  --color-rustsoft: #EFD7CF;
-}
-
-:root[data-theme="new"] {
   --color-paper: #F6F7FB;
   --color-panel: #EEF0FC;
   --color-card: #FFFFFF;
