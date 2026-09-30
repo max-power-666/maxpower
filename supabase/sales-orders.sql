@@ -165,7 +165,7 @@ create table if not exists sales_orders (
   sku text,                                  -- SKU-i wszystkich pozycji po przecinku (podsumowanie; szczegóły w sales_order_items)
   tracking_number text,                      -- numer przesyłki z API (Back Market: tracking_number zamówienia)
   country_code text,                         -- kod kraju ODBIORCY (adres dostawy), 2 litery ISO 3166-1 gdzie kanał to udostępnia
-  shipping_method text,                      -- "Standardowa"/"Ekspresowa" — na razie tylko Back Market (bmShippingMethodLabel), inne kanały: null
+  shipping_method text,                      -- "Standard"/"Express" — na razie tylko Back Market (bmShippingMethodLabel), inne kanały: null
   planned_shipping_date timestamptz,         -- termin wysyłki wg kanału — Back Market (expected_dispatch_date, znika po wysyłce) i Amazon (LatestShipDate, zostaje); inne kanały: null (brak takiego pola w ich API)
   synced_at timestamptz not null default now(),
   -- Nasz wewnętrzny status realizacji (niezależny od statusu kanału): nowe | w_realizacji | wyslane | anulowane
@@ -193,15 +193,15 @@ update sales_orders s set tracking_number = o.tracking_number
 -- przewoźnika po synchronizacji) — ta sama reguła co bmShippingMethodLabel w lib/salesOrders.ts.
 update sales_orders s set shipping_method = case
     when o.shipper_display is null or btrim(o.shipper_display) = '' then null
-    when o.shipper_display ~* 'express' then 'Ekspresowa'
-    else 'Standardowa'
+    when o.shipper_display ~* 'express' then 'Express'
+    else 'Standard'
   end
   from bm_orders o
  where s.marketplace = 'backmarket' and o.order_id::text = s.external_id
    and s.shipping_method is distinct from (case
      when o.shipper_display is null or btrim(o.shipper_display) = '' then null
-     when o.shipper_display ~* 'express' then 'Ekspresowa'
-     else 'Standardowa'
+     when o.shipper_display ~* 'express' then 'Express'
+     else 'Standard'
    end);
 
 -- Uzupełnienie kraju odbiorcy dla zamówień pobranych zanim ta kolumna powstała — z już zapisanych surowych danych

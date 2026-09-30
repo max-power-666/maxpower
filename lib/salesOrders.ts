@@ -229,11 +229,11 @@ export function bmDerivedStatus(o: any): string {
 // zanim jeszcze cokolwiek wysłaliśmy, więc to nie echo tego, co MY zgłaszamy, tylko coś ustalone wcześniej).
 // delivery_mode to coś zupełnie innego (HOME_DELIVERY/COLLECTION_POINT — sposób ODBIORU, nie tempo wysyłki).
 // Rozpoznajemy po słowie "express" w nazwie zamiast trzymać sztywną listę przewoźników (API dopuszcza różne: DHL,
-// Colissimo, UPS...), żeby nowy przewoźnik bez "express" w nazwie sam wpadł do "Standardowa", a nie do "—".
+// Colissimo, UPS...), żeby nowy przewoźnik bez "express" w nazwie sam wpadł do "Standard", a nie do "—".
 export function bmShippingMethodLabel(shipperDisplay: unknown): string | null {
   const s = typeof shipperDisplay === "string" ? shipperDisplay.trim() : "";
   if (!s) return null;
-  return /express/i.test(s) ? "Ekspresowa" : "Standardowa";
+  return /express/i.test(s) ? "Express" : "Standard";
 }
 
 // To samo zamówienie -> wiersz wspólnej tabeli sales_orders. W orderlines[].listing API zwraca SKU.
