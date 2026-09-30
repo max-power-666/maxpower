@@ -410,11 +410,19 @@ serwerowy proxy** (`app/api/shipping/fetch-remote-pdf`) zamiast fetch wprost z p
 CORS na S3 Back Marketu; prosta ochrona przed SSRF (tylko https, blokada hostów prywatnych/lokalnych), route i tak
 dostępny tylko dla zalogowanego, uprawnionego zespołu. Etykiety bez ZPL (dziś: Erli) w trybie bezpośrednim lecą jako
 PDF wprost na drukarkę Zebra przez jej sterownik Windows (`printPdf` w `lib/printAgent.ts`, ta sama funkcja co dla
-A4 — nazwa drukarki decyduje, nie funkcja). `next.config.mjs`: alias webpack `lna: false` — qz-tray opcjonalnie
-`require('lna')` (biblioteka Local Network Access dla nowszych Chrome, nieinstalowana — qz-tray sam łapie brak w
-try/catch), bez aliasu webpack tylko ostrzegał przy każdym buildzie. Nie testowane z prawdziwą drukarką/QZ Tray
-(brak dostępu do sprzętu w środowisku asystenta) — zweryfikowane budowaniem projektu i testami jednostkowymi
-(`dhl.test.js`/`shipping.test.js`/`parcel.test.js` w scratchpadzie).
+A4 — nazwa drukarki decyduje, nie funkcja). **`next.config.mjs` bez żadnego aliasu webpack dla `qz-tray`** — próbowano
+`resolve.alias: { lna: false }`, żeby wyciszyć ostrzeżenie buildu o brakującym opcjonalnym pakiecie `lna` (biblioteka
+Local Network Access dla nowszych Chrome, celowo nieinstalowana), ale to była **realna regresja, nie tylko kosmetyka**:
+`false` w aliasie webpacka podmienia moduł na pusty obiekt `{}` zamiast dać `require()` rzucić wyjątek — a kod qz-tray
+(`loadLna()`) jest napisany dokładnie pod rzucający wyjątek (`try { return require('lna'); } catch { warn(...) }`,
+komentarz wprost: "Use require if available so that bundlers can detect the dependency"). Z aliasem `_qz.tools.lna`
+wychodziło z tej funkcji jako `{}` (prawda logiczna) zamiast `undefined`, więc późniejsze wywołanie
+`_qz.tools.lna.detectLna(...)` wybuchało `"n.detectLna is not a function"` — QZ Tray nie łączył się wcale (błąd
+zgłoszony przez właściciela na żywym teście 30.09.2026). Cofnięte: `next build` bez aliasu kończy się sukcesem
+(potwierdzone lokalnie — samo ostrzeżenie "Module not found: Can't resolve 'lna'" nie przerywa builda), a moduł
+faktycznie rzuca wyjątek przy `require()`, tak jak qz-tray oczekuje. Nie testowane z prawdziwą drukarką/QZ Tray
+(brak dostępu do sprzętu w środowisku asystenta) — zweryfikowane budowaniem projektu (`next build`, sukces) i
+testami jednostkowymi (`dhl.test.js`/`shipping.test.js`/`parcel.test.js` w scratchpadzie).
 
 **Instrukcja instalacji QZ Tray (Windows, dla każdego stanowiska, które ma drukować bezpośrednio):**
 1. Pobierz instalator ze strony **qz.io/download** (oficjalna strona QZ Tray — nie z innego źródła).
