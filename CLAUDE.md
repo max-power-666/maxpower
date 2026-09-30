@@ -234,7 +234,25 @@ panelu Erli jako "Opłacone"/"Gotowe do realizacji" (`sellerStatus: readyToProce
 mniejsza pula zamówień (tylko opłacone), więc mimo tego samego sortowania po `updated` i tak dochodzi do zamówień, których główny
 skan już dawno minął. Własny kursor pod syntetycznym kluczem `erli_paid` w tej samej tabeli `sales_orders_sync_meta` (nie prawdziwy
 marketplace, tylko wewnętrzna księgowość drugiego skanu); dzieli budżet czasu funkcji z głównym skanem (`erliSweep` w `lib/erli.ts`
-przyjmuje teraz opcjonalny `filter`), pojedyncza porażka tego skanu nie psuje głównego wyniku (`paidSweepError` w odpowiedzi). Numer
+przyjmuje teraz opcjonalny `filter`), pojedyncza porażka tego skanu nie psuje głównego wyniku (`paidSweepError` w odpowiedzi).
+**Trzeci skan (od 30.09.2026): zamówienia COD są ślepą plamką dla drugiego skanu** — płatność gotówką kurierowi nigdy nie
+osiąga u Erli `paymentStatus="completed"`, więc `paidSweep` ich nie widzi, a `updated`, jak wyżej, nie rusza się przy zmianie
+statusu dostawy — COD-y raz zsynchronizowane ze statusem "purchased"/"purchased_cod" mogły więc **zostać tak trwale, bez
+końca**, nawet gdy realnie dawno dostarczone/zwrócone. Zgłoszone przez właściciela 30.09.2026 (kilkanaście zamówień COD
+sprzed tygodni, wszystkie z realnym postępem u przewoźnika, wciąż widoczne w "Nowe"); dwa wcześniejsze jednorazowe
+backfille SQL (`one-off-erli-seller-status-backfill.sql`, `one-off-erli-deliverytracking-backfill.sql`, poza plikami
+schematu) naprawiały stan na dany moment, ale nowe COD-y wpadały w ten sam dołek dalej. Naprawione W KODZIE, nie kolejnym
+jednorazowym SQL-em: `orders/erli-sync/route.ts` po głównym i drugim skanie czyta z NASZEJ bazy (nie z kursora/filtra
+Erli) do 100 zamówień `sales_orders` (marketplace erli, status purchased/purchased_cod), dociąga je od Erli jednym
+zapytaniem po `{field: "id", operator: "in", value: [...]}` (`OrderFilter` wspiera operator "in", potwierdzone w
+swaggerze — przykład w dokumentacji to dokładnie filtr po liście ID) i zapisuje przez ten sam `saveOrders`/mappery co
+reszta — więc jeśli Erli w międzyczasie ruszyło `sellerStatus`/`deliveryTracking`, `erliDerivedStatus` poprawnie
+przeliczy status przy tym zapisie. Ten skan pyta o stan z NASZEJ bazy, więc zbiór naturalnie maleje w miarę jak
+zamówienia się rozwiązują (stają się `sent`/`cancelled`/`returned` i wypadają z zapytania) — bez arbitralnego okna
+dni jak przy refurbed. Wynik w odpowiedzi jako `stuckSweep: {checked, updated}`/`stuckSweepError`, pojedyncza porażka
+nie psuje reszty. Nie testowane na żywym API (brak klucza w środowisku asystenta) — zweryfikowane na atrapie `fetch`
+(`erli.test.js`, asercja że `{field:"id",operator:"in",value:[...]}` trafia do body żądania dokładnie tak, jak wg
+swaggera). Numer
 zamówienia = `Order.id`, data = `created`, status = `status` (pending/purchased/cancelled/returned z API, plus nasze
 znaczniki `purchased_cod`/`sent`, etykiety w `ERLI_ORDER_STATES`), SKU = `items[].sku`, a gdy brak — `items[].externalId`;
 pozycja z ilością > 1 rozbijana na sztuki jak w Back Market.

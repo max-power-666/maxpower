@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { isAuthorized } from "@/lib/buyback";
-import { erliSweep, type ErliClient, type ErliOrderFilter } from "@/lib/erli";
+import { erliSweep, erliSearchOrders, type ErliClient, type ErliOrderFilter } from "@/lib/erli";
 import { mapErliItems, mapErliOrder, mapErliToSales, uniqueBy } from "@/lib/salesOrders";
 
 // Synchronizuje zamówienia SPRZEDAŻY z Erli (POST /orders/_search, dokumentacja: https://erli.pl/svc/shop-api/doc/)
@@ -29,6 +29,18 @@ const PAID_MARKETPLACE_KEY = "erli_paid"; // syntetyczny klucz w sales_orders_sy
 const PAID_FILTER: ErliOrderFilter = { field: "paymentStatus", operator: "=", value: "completed" };
 const BUDGET_MS = 150_000;
 const PAID_SWEEP_DEADLINE_MS = 260_000; // łącznie z pierwszym skanem, licząc od startu funkcji (limit 300 s)
+// Zamówienia za pobraniem (COD) mogą NIGDY nie osiągnąć paymentStatus="completed" (płatność gotówką kurierowi,
+// nie online) — drugi skan (paidSweep) ich więc nigdy nie złapie, a `updated` na zamówieniu, jak udokumentowano
+// wyżej, nie rusza się przy zmianie statusu dostawy. Trzeci mechanizm zamiast polegać na kursorze/filtrze Erli,
+// sprawdza NASZE dane: dociąga po ID (OrderFilter wspiera operator "in", potwierdzone w swaggerze) każde zamówienie
+// Erli, które u nas wciąż wisi w statusie purchased/purchased_cod — jeśli Erli w międzyczasie ruszyło sellerStatus/
+// deliveryTracking, upsert (te same mappery co reszta) nadpisze status poprawną wartością. Zgłoszone przez
+// właściciela 30.09.2026: kilkanaście zamówień COD sprzed tygodni, realnie dawno dostarczonych/zwróconych, wciąż
+// pokazujących "Za pobraniem" w zakładce "Nowe" — dwa wcześniejsze jednorazowe backfille SQL (patrz scratchpad)
+// naprawiły stan na dany moment, ale COD-y bez tego mechanizmu wpadają w ten sam dołek na nowo, bez końca.
+const STUCK_STATUSES = ["purchased", "purchased_cod"];
+const STUCK_BATCH_LIMIT = 100; // OrderFilter "in" nie ma udokumentowanego limitu rozmiaru tablicy — ostrożny batch
+const STUCK_SWEEP_DEADLINE_MS = 285_000;
 
 // Zapis pobranych zamówień. Upsert pozycji zawiera tylko pola z API, więc numery seryjne i pady wpisane
 // przez zespół zostają nietknięte (patrz bm-sync).
@@ -107,6 +119,36 @@ export async function GET(request: Request) {
     }
   }
 
+  // Trzeci skan: dogania zamówienia COD utknięte w purchased/purchased_cod (patrz komentarz na górze pliku) —
+  // batch po ID z naszej własnej bazy, nie z kursora/filtra Erli. Pojedyncza porażka nie psuje reszty wyniku.
+  let stuckSweep: { checked: number; updated: number } | null = null;
+  let stuckSweepError: string | null = null;
+  const stuckBudget = STUCK_SWEEP_DEADLINE_MS - (Date.now() - startedAtMs);
+  if (stuckBudget > 5_000) {
+    try {
+      const { data: stuckRows, error: stuckErr } = await admin
+        .from("sales_orders")
+        .select("external_id, status")
+        .eq("marketplace", MARKETPLACE)
+        .in("status", STUCK_STATUSES)
+        .order("order_date", { ascending: true })
+        .limit(STUCK_BATCH_LIMIT);
+      if (stuckErr) throw new Error(`Błąd odczytu z Supabase: ${stuckErr.message}`);
+      const ids = (stuckRows ?? []).map((r) => r.external_id);
+      if (ids.length > 0) {
+        const oldStatus = new Map((stuckRows ?? []).map((r) => [r.external_id, r.status]));
+        const orders = await erliSearchOrders(client, { filter: { field: "id", operator: "in", value: ids } });
+        await saveOrders(admin, orders);
+        const changed = orders.filter((o) => oldStatus.get(String(o.id)) !== mapErliToSales(o).status).length;
+        stuckSweep = { checked: orders.length, updated: changed };
+      } else {
+        stuckSweep = { checked: 0, updated: 0 };
+      }
+    } catch (e: any) {
+      stuckSweepError = e.message || "Błąd trzeciego skanu (zamówienia COD utknięte w statusie).";
+    }
+  }
+
   return NextResponse.json({
     ok: true,
     mode: firstRun ? "full" : "incremental",
@@ -114,6 +156,8 @@ export async function GET(request: Request) {
     processed: result.processed,
     paidSweep,
     paidSweepError,
+    stuckSweep,
+    stuckSweepError,
     nextPage: null,
     apiCount: null,
   });
