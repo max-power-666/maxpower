@@ -378,7 +378,10 @@ jest ukryty, dopóki wszystko działa — pokazuje się tylko, gdy któryś prze
 brakuje danych nadawcy** (30.09.2026, na prośbę właściciela — w normalnym stanie zajmował miejsce bez informacji wartej uwagi); linijka z adresem
 nadawcy w tym miejscu usunięta na stałe (dane nadawcy i tak są dostępne pod "Zmień dane nadawcy (Admin)" niżej). **Lista "Nadane przesyłki" ma
 paginację (`.range()`, 20/stronę) i wyszukiwarkę po numerze przesyłki** (`ilike` na `tracking_number`, z debounce 300 ms — wcześniej `.limit(50)`
-bez offsetu pokazywał tylko najświeższe 50 przesyłek bez możliwości przejścia dalej).
+bez offsetu pokazywał tylko najświeższe 50 przesyłek bez możliwości przejścia dalej). **Numer zamówienia w kolumnie
+"Zamówienie" jest linkiem do karty zamówienia** (`SalesOrderCard.tsx`, ten sam komponent co w Zamówieniach —
+`ShippingView` dostał do tego prop `members`, przekazywany z `page.tsx`) — tylko gdy wiersz ma zarówno marketplace,
+jak i numer zamówienia (nie każda przesyłka ma zamówienie, np. nadana ręcznie bez `order`).
 
 **Drukowanie bezpośrednie (30.09.2026)** — etykieta na etykieciarkę Zebra i delivery note (packing slip Back
 Marketu) na zwykłą drukarkę A4, bez okna drukowania przeglądarki. Jeden lokalny agent obsługuje oba przypadki:
@@ -394,9 +397,12 @@ działającego procesu — a ZPL (ZBLP) dociąga NA ŻĄDANIE dopiero przy klikn
 od tworzenia przesyłki, więc bez zmiany schematu; nie zapisywane w bazie — świeże przy każdym druku). **Podgląd
 PDF w trybie "Generuj PDF"** dla etykiety w ZPL (czyli zawsze dla DHL Express) idzie przez darmowe publiczne API
 **Labelary** (`app/api/shipping/render-zpl`, `api.labelary.com/v1/printers/8dpmm/labels/4x6/0/`, `Accept:
-application/pdf`) zamiast prosić DHL o PDF wprost. **Przełącznik "Drukowanie bezpośrednie ↔ Generuj PDF"**
+application/pdf`) zamiast prosić DHL o PDF wprost. **Wybór trybu druku ("Generuj PDF" / "Drukowanie bezpośrednie")**
 w `ShippingView.tsx` (localStorage `shipping-direct-print`, per przeglądarkę/stanowisko, nie w bazie) — na wyraźną
-prośbę właściciela, "na wszelki wypadek": wyłączony wraca do dzisiejszego zachowania (otwórz PDF, ręczny Ctrl+P).
+prośbę właściciela, "na wszelki wypadek": "Generuj PDF" (domyślne) wraca do dzisiejszego zachowania (otwórz PDF,
+ręczny Ctrl+P). **Dwie pigułki, nie suwak** — pierwsza wersja (suwak bez stałego opisu obok) myliła: nie było
+widać, który stan jest który, tylko sam tekst się zmieniał (zgłoszone przez właściciela po pierwszym teście na
+żywo — suwak w pozycji "wyłączone" pokazał PDF-y, co było poprawnym zachowaniem, tylko nieczytelnie pokazanym).
 **Nazwy drukarek** (dokładnie jak w Windowsie) w `shipping_settings.zebra_printer_name`/`a4_printer_name` —
 nowe nullable kolumny, Admin ustawia w panelu "Zmień dane nadawcy", z przyciskiem "Wykryj drukarki" (`listPrinters()`
 w `lib/printAgent.ts`, wymaga uruchomionego QZ Tray na komputerze, na którym klika Admin). **Delivery note przez

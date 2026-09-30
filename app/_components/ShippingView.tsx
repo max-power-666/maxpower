@@ -8,6 +8,8 @@ import { base64ToBlobUrl, defaultShippingDate, type ShipPrefill } from "@/lib/sh
 import { MARKETPLACES } from "@/lib/salesOrders";
 import { escapeLike } from "@/lib/search";
 import { printRawToZebra, printPdf, listPrinters, PrintAgentError } from "@/lib/printAgent";
+import type { MemberLite } from "@/lib/displayName";
+import SalesOrderCard from "./SalesOrderCard";
 
 // Zakładka Wysyłka: nadawanie przesyłek DHL Express (MyDHL API) — formularz z wyceną, szablony paczek, ustawienia nadawcy i lista nadanych
 // przesyłek z etykietami (PDF 10x15 na Zebrę). Dostęp: Admin i Manager. Klucze i numer konta są tylko na serwerze
@@ -89,14 +91,17 @@ const SHIP_PAGE_SIZE = 20;
 export default function ShippingView({
   session,
   isAdmin,
+  members,
   prefill,
   onPrefillUsed,
 }: {
   session: Session;
   isAdmin: boolean;
+  members: MemberLite[];
   prefill: ShipPrefill | null;
   onPrefillUsed: () => void;
 }) {
+  const [openOrder, setOpenOrder] = useState<{ marketplace: string; externalId: string } | null>(null);
   const auth = { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" };
   const [express, setExpress] = useState<{ configured: boolean; env: string | null } | null>(null);
   const [parcel, setParcel] = useState<{ configured: boolean; sandbox: boolean; version: string | null } | null>(null);
@@ -573,13 +578,13 @@ export default function ShippingView({
               onClick={() => setDirectPrint(false)}
               className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${!directPrint ? "bg-ink text-paper border-ink" : "bg-white border-line text-inksoft"}`}
             >
-              Generuj PDF (ręczny wydruk)
+              Generuj PDF
             </button>
             <button
               onClick={() => setDirectPrint(true)}
               className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${directPrint ? "bg-ink text-paper border-ink" : "bg-white border-line text-inksoft"}`}
             >
-              Drukowanie bezpośrednie (QZ Tray)
+              Drukowanie bezpośrednie
             </button>
             {printBusy && <span className="text-xs text-inksoft">drukowanie…</span>}
           </div>
@@ -814,7 +819,13 @@ Cena to wycena wg cennika konta (DHL Parcel: kwota NETTO w PLN, już z doliczon�
                       <td className="p-3 text-xs whitespace-nowrap">{s.product_name || s.product_code}</td>
                       <td className="p-3 text-right font-mono text-xs whitespace-nowrap">{charge ? fmtMoney({ price: charge.price, currency: charge.priceCurrency }) : "—"}</td>
                       <td className="p-3 text-xs font-mono">
-                        {s.order_external_id || "—"}
+                        {s.order_external_id && s.marketplace ? (
+                          <button onClick={() => setOpenOrder({ marketplace: s.marketplace!, externalId: s.order_external_id! })} className="text-teal hover:underline">
+                            {s.order_external_id}
+                          </button>
+                        ) : (
+                          s.order_external_id || "—"
+                        )}
                         {s.order_external_id && s.marketplace_sync_error && (
                           <div className="mt-1">
                             <span className="text-rust font-sans font-semibold no-underline" title={s.marketplace_sync_error}>problem ze zgłoszeniem do marketplace'u</span>
@@ -845,6 +856,10 @@ Cena to wycena wg cennika konta (DHL Parcel: kwota NETTO w PLN, już z doliczon�
           <TemplatesPanel templates={templates} isAdmin={isAdmin} session={session} settings={settings} onChanged={loadTemplates} onError={setError} />
           {isAdmin && <SenderPanel settings={settings} onSaved={loadSettings} onError={setError} />}
         </>
+      )}
+
+      {openOrder && (
+        <SalesOrderCard marketplace={openOrder.marketplace} externalId={openOrder.externalId} session={session} members={members} onClose={() => setOpenOrder(null)} />
       )}
     </div>
   );

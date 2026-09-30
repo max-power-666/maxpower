@@ -494,7 +494,7 @@ export default function Home() {
           {view === "tradein" && <TradeInView session={session} />}
 
           {view === "shipping" && (
-            <ShippingView session={session} isAdmin={role === "Admin"} prefill={shipPrefill} onPrefillUsed={() => setShipPrefill(null)} />
+            <ShippingView session={session} isAdmin={role === "Admin"} members={members} prefill={shipPrefill} onPrefillUsed={() => setShipPrefill(null)} />
           )}
 
           {view === "rcp" && <RcpView />}
