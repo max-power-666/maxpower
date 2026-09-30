@@ -116,6 +116,11 @@ Macu jest wyłączony; bidder działa na produkcji, włącznik: `buyback_setting
   potem przyrostowo przez `modificationDate` — łapie nowe i zmiany statusu). Zapis tylko serwer. Lista jest
   stronicowana po stronie serwera (`.range()`, 10/20/50, przyciski Poprzednia/Następna — 30.09.2026, wcześniej
   `.limit()` bez offsetu pokazywał zawsze tylko pierwszą stronę z 17 tys.+ zamówień, wzorzec jak w `InventoryRawView.tsx`).
+  Pigułki filtra **Wszystkie / Wysłane** nad listą (30.09.2026, `smallPill` jak w `SalesOrdersHub.tsx`) — "Wysłane"
+  to `.eq("status", "SENT")` (surowy status BuyBack API, `buyback_orders.status`; wartości potwierdzone na żywych
+  danych: `TO_SEND`/`SENT`/`RECEIVED`/`PAID`/`MONEY_TRANSFERED`/`VALIDATED`/`CANCELED`/`SUSPENDED`/
+  `COUNTER_PROPOSAL` — na razie bez własnego mappera etykiet, status pokazuje się na liście surowy). Zmiana filtra
+  resetuje stronę na 1, jak zmiana rozmiaru strony.
   Nad listą kafelki **Zamówienia dzisiaj / wczoraj** (`TradeInDaySummary`, po dacie utworzenia, podział na rynek
   DE/ES/FR/IT zamiast marketplace'u — analogiczny wzorzec do `DaySummary` w `SalesOrdersHub.tsx`, ale bez filtrowania
   statusów, bo to skup, nie sprzedaż).

@@ -24,6 +24,9 @@ type Order = {
 
 const PAGE_SIZES = [10, 20, 50];
 
+const smallPill = (active: boolean) =>
+  `px-2.5 py-1 rounded-full text-xs font-semibold border whitespace-nowrap ${active ? "bg-ink text-paper border-ink" : "bg-white border-line text-inksoft"}`;
+
 function fmtNumber(n: number | null) {
   if (n === null || n === undefined) return "—";
   return n.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -136,6 +139,7 @@ export default function TradeInOrdersView({ session, onOpenOrder }: { session: S
   const [orders, setOrders] = useState<Order[]>([]);
   const [limit, setLimit] = useState(20);
   const [page, setPage] = useState(1);
+  const [statusFilter, setStatusFilter] = useState<"wszystkie" | "wyslane">("wszystkie");
   const [totalCount, setTotalCount] = useState<number | null>(null);
   const [lastSynced, setLastSynced] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -154,7 +158,7 @@ export default function TradeInOrdersView({ session, onOpenOrder }: { session: S
       supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [limit, page]);
+  }, [limit, page, statusFilter]);
 
   async function loadMeta() {
     const { data } = await supabase.from("buyback_orders_sync_meta").select("last_synced_at").eq("id", 1).maybeSingle();
@@ -166,15 +170,15 @@ export default function TradeInOrdersView({ session, onOpenOrder }: { session: S
     setError("");
     try {
       const from = (page - 1) * limit;
+      let query = supabase
+        .from("buyback_orders")
+        .select(
+          "order_public_id, creation_date, payment_date, status, market, sku, customer_first_name, customer_last_name, original_price, original_price_currency, counter_offer_price",
+          { count: "exact" }
+        );
+      if (statusFilter === "wyslane") query = query.eq("status", "SENT");
       const [{ data, error: err, count }, meta] = await Promise.all([
-        supabase
-          .from("buyback_orders")
-          .select(
-            "order_public_id, creation_date, payment_date, status, market, sku, customer_first_name, customer_last_name, original_price, original_price_currency, counter_offer_price",
-            { count: "exact" }
-          )
-          .order("creation_date", { ascending: false })
-          .range(from, from + limit - 1),
+        query.order("creation_date", { ascending: false }).range(from, from + limit - 1),
         supabase.from("buyback_orders_sync_meta").select("last_synced_at").eq("id", 1).maybeSingle(),
       ]);
       if (err) {
@@ -226,6 +230,11 @@ export default function TradeInOrdersView({ session, onOpenOrder }: { session: S
   return (
     <div>
       <TradeInDaySummary />
+
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <button onClick={() => { setStatusFilter("wszystkie"); setPage(1); }} className={smallPill(statusFilter === "wszystkie")}>Wszystkie</button>
+        <button onClick={() => { setStatusFilter("wyslane"); setPage(1); }} className={smallPill(statusFilter === "wyslane")}>Wysłane</button>
+      </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div className="flex items-center gap-3">
