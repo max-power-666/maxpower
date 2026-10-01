@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireRole } from "@/lib/serverAuth";
 import { dhlParcelConfigFromEnv, dhlParcelIsSandbox, dhlParcelPrice, dhlParcelVersion, PARCEL_PRODUCTS } from "@/lib/dhlParcel";
-import { parseShipmentBody } from "@/lib/shipmentInput";
+import { parseShipmentBody, parseExtraPackages } from "@/lib/shipmentInput";
 import { admin, loadShipper } from "@/lib/parcelServer";
 
 // DHL Parcel (DHL24 WebAPI2) — konfiguracja i WYCENA. Tylko Admin, Manager i Zamówienia.
@@ -34,17 +34,20 @@ export async function POST(request: Request) {
   const b = await request.json().catch(() => null);
   const parsed = parseShipmentBody({ ...b, clientRequestId: b?.clientRequestId ?? "00000000-0000-0000-0000-000000000000" });
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
+  const extra = parseExtraPackages(b?.extraPackages);
+  if (!extra.ok) return NextResponse.json({ error: extra.error }, { status: 400 });
   const shipper = await loadShipper(db);
   if (!shipper) return NextResponse.json({ error: "Brak danych nadawcy (tabela shipping_settings) — uruchom supabase/shipping.sql." }, { status: 500 });
 
   const { receiver, pack } = parsed.value;
+  const packages = [pack, ...extra.value];
   const quotes = await Promise.all(
     PARCEL_PRODUCTS.map((p) =>
       dhlParcelPrice(cfg, {
         product: p.code,
         shipper,
         receiver: { country: receiver.countryCode, name: receiver.company || receiver.name, postalCode: receiver.postalCode, city: receiver.city, street: receiver.street, houseNumber: receiver.houseNumber, apartmentNumber: receiver.apartment },
-        package: pack,
+        packages,
       }).then((q) => ({ ...q, name: p.name }))
     )
   );

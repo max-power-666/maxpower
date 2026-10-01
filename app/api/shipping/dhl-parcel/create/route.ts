@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireRole } from "@/lib/serverAuth";
 import { dhlParcelConfigFromEnv, dhlParcelCreate, dhlParcelIsSandbox, DhlParcelError, PARCEL_PRODUCTS } from "@/lib/dhlParcel";
-import { parseShipmentBody } from "@/lib/shipmentInput";
+import { parseShipmentBody, parseExtraPackages } from "@/lib/shipmentInput";
 import { admin, loadShipper, parcelTrackingUrl } from "@/lib/parcelServer";
 import { notifyMarketplace } from "@/lib/shipmentMarketplaceSync";
 
@@ -23,7 +23,10 @@ export async function POST(request: Request) {
   if (b?.confirm !== true) return NextResponse.json({ error: "Brak potwierdzenia nadania przesyłki." }, { status: 400 });
   const parsed = parseShipmentBody(b);
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
+  const extra = parseExtraPackages(b?.extraPackages);
+  if (!extra.ok) return NextResponse.json({ error: extra.error }, { status: 400 });
   const { receiver, pack, plannedDate, reference, order, requestId } = parsed.value;
+  const packages = [pack, ...extra.value];
   const productDef = PARCEL_PRODUCTS.find((p) => p.code === b?.productCode);
   const product = productDef?.code ?? null;
   if (!product) return NextResponse.json({ error: `Wybierz produkt: ${PARCEL_PRODUCTS.map((p) => `${p.code} (${p.name})`).join(", ")}.` }, { status: 400 });
@@ -53,7 +56,7 @@ export async function POST(request: Request) {
         contactPhone: receiver.phone,
         contactEmail: receiver.email,
       },
-      package: pack,
+      packages,
       content: pack.description,
       reference,
     });
@@ -80,7 +83,9 @@ export async function POST(request: Request) {
       tracking_url: trackingUrl,
       planned_shipping_date: plannedDate,
       receiver: { ...receiver },
-      package: { ...pack },
+      // Tablica (nie pojedynczy obiekt jak przy DHL Express) — zapis księgowy wszystkich sztuk tej przesyłki
+      // wieloelementowej; nic poza tym route'em nie czyta tej kolumny z powrotem, więc kształt jest tu dowolny.
+      package: packages,
       charges: null, // getPrice pokazał cenę przed nadaniem; DHL24 nie zwraca opłaty przy tworzeniu przesyłki
       label_format: created.labelBase64 ? "pdf" : null,
       label_data: created.labelBase64,

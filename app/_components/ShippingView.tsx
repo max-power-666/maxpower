@@ -117,6 +117,9 @@ export default function ShippingView({
   const [prefillNote, setPrefillNote] = useState(""); // ostrzeżenie: marketplace nie przekazał (jeszcze) pełnych danych odbiorcy
 
   const [form, setForm] = useState(EMPTY_FORM);
+  // Druga, trzecia... paczka tej samej przesyłki (tylko DHL Parcel — DHL24 wspiera wiele pozycji w JEDNEJ
+  // przesyłce, patrz lib/dhlParcel.ts). Pierwsza paczka zostaje w `form` jak dotąd.
+  const [extraPackages, setExtraPackages] = useState<{ weight: string; length: string; width: string; height: string }[]>([]);
   const [order, setOrder] = useState<{ marketplace: string; externalId: string } | null>(null);
   const [plannedDate, setPlannedDate] = useState(defaultShippingDate());
   const [quoting, setQuoting] = useState(false);
@@ -167,6 +170,7 @@ export default function ShippingView({
   useEffect(() => {
     if (!prefill) return;
     setForm({ ...EMPTY_FORM, name: prefill.name, company: prefill.company, street: prefill.street, houseNumber: prefill.houseNumber, apartment: prefill.apartment, postalCode: prefill.postalCode, city: prefill.city, countryCode: prefill.countryCode, phone: prefill.phone, email: prefill.email, reference: prefill.externalId });
+    setExtraPackages([]);
     setOrder({ marketplace: prefill.marketplace, externalId: prefill.externalId });
     setQuote(null);
     setChosen(null);
@@ -227,6 +231,29 @@ export default function ShippingView({
     setChosen(null);
   }
 
+  function addExtraPackage() {
+    setExtraPackages((p) => [...p, { weight: "", length: "", width: "", height: "" }]);
+    setQuote(null);
+    setChosen(null);
+  }
+  function removeExtraPackage(i: number) {
+    setExtraPackages((p) => p.filter((_, idx) => idx !== i));
+    setQuote(null);
+    setChosen(null);
+  }
+  function setExtraField(i: number, k: "weight" | "length" | "width" | "height", v: string) {
+    setExtraPackages((p) => p.map((row, idx) => (idx === i ? { ...row, [k]: v } : row)));
+    setQuote(null);
+    setChosen(null);
+  }
+  const extraPackagesPayload = () =>
+    extraPackages.map((p) => ({
+      weight: Number(p.weight.replace(",", ".")),
+      length: Number(p.length.replace(",", ".")),
+      width: Number(p.width.replace(",", ".")),
+      height: Number(p.height.replace(",", ".")),
+    }));
+
   function applyTemplate(id: string) {
     const t = templates.find((x) => String(x.id) === id);
     setQuote(null);
@@ -279,6 +306,7 @@ export default function ShippingView({
         body: JSON.stringify({
           receiver: receiverPayload(),
           package: p,
+          extraPackages: carrier === "parcel" ? extraPackagesPayload() : undefined,
           plannedDate,
           // pola płaskie dla wyceny DHL Express (route sprawdza połączenie po tej trasie)
           destinationCountryCode: form.countryCode,
@@ -359,6 +387,7 @@ export default function ShippingView({
           plannedDate,
           receiver: receiverPayload(),
           package: packagePayload(),
+          extraPackages: isParcel ? extraPackagesPayload() : undefined,
           reference: form.reference,
           order,
         }),
@@ -529,6 +558,7 @@ export default function ShippingView({
 
   function reset() {
     setForm(EMPTY_FORM);
+    setExtraPackages([]);
     setOrder(null);
     setQuote(null);
     setChosen(null);
@@ -539,7 +569,8 @@ export default function ShippingView({
   }
 
   const formReady =
-    form.name.trim() && form.street.trim() && form.houseNumber.trim() && form.postalCode.trim() && form.city.trim() && form.phone.trim() && Number(form.weight.replace(",", ".")) > 0 && form.length && form.width && form.height;
+    form.name.trim() && form.street.trim() && form.houseNumber.trim() && form.postalCode.trim() && form.city.trim() && form.phone.trim() && Number(form.weight.replace(",", ".")) > 0 && form.length && form.width && form.height &&
+    extraPackages.every((p) => Number(p.weight.replace(",", ".")) > 0 && p.length && p.width && p.height);
   const shipTotalPages = Math.max(1, Math.ceil(shipTotal / SHIP_PAGE_SIZE));
 
   return (
@@ -683,6 +714,23 @@ export default function ShippingView({
               <div><label className={label}>Data nadania</label><input type="date" value={plannedDate} onChange={(e) => { setPlannedDate(e.target.value); setQuote(null); setChosen(null); }} className={inputCls} /></div>
               <div className="col-span-2 md:col-span-6"><label className={label}>Opis zawartości</label><input value={form.description} onChange={(e) => setField("description", e.target.value)} placeholder={settings.default_description} className={inputCls} /></div>
             </div>
+
+            {carrier === "parcel" && (
+              <div className="mb-3">
+                {extraPackages.map((p, i) => (
+                  <div key={i} className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-2 items-end">
+                    <div className="md:col-span-1 text-xs font-semibold text-inksoft">Paczka {i + 2}</div>
+                    <div><label className={label}>Waga (kg) *</label><input value={p.weight} onChange={(e) => setExtraField(i, "weight", e.target.value)} inputMode="decimal" className={inputCls} /></div>
+                    <div><label className={label}>Długość (cm) *</label><input value={p.length} onChange={(e) => setExtraField(i, "length", e.target.value)} inputMode="decimal" className={inputCls} /></div>
+                    <div><label className={label}>Szerokość (cm) *</label><input value={p.width} onChange={(e) => setExtraField(i, "width", e.target.value)} inputMode="decimal" className={inputCls} /></div>
+                    <div><label className={label}>Wysokość (cm) *</label><input value={p.height} onChange={(e) => setExtraField(i, "height", e.target.value)} inputMode="decimal" className={inputCls} /></div>
+                    <button onClick={() => removeExtraPackage(i)} className="text-xs font-semibold text-rust hover:underline">Usuń paczkę</button>
+                  </div>
+                ))}
+                <button onClick={addExtraPackage} className="text-xs font-semibold text-teal hover:underline">+ Dodaj kolejną paczkę do tej przesyłki</button>
+              </div>
+            )}
+
             <button onClick={getQuote} disabled={quoting || !formReady || !(carrier === "parcel" ? parcel?.configured : express?.configured)} className={btnPrimary}>{quoting ? "Pytanie DHL…" : `Wyceń (${CARRIER_LABEL[carrier]})`}</button>
           </div>
 

@@ -12,9 +12,12 @@ export const DHL_PARCEL_BASE_URL = "https://dhl24.com.pl/webapi2";
 
 // Produkty międzynarodowe, jedna lista dla wyceny (check/route.ts) i nadania (create/route.ts) — inaczej łatwo o
 // rozjazd, jak wcześniej (Connect Plus istniał w API, ale nie było go w żadnej z tych list, więc nie dało się go
-// wybrać). Kody wg dokumentacji DHL24 (struktura ServiceDefinition, pole "product"). Connect Plus obsługuje w
-// DHL24 wiele elementów w jednej przesyłce (do 15) — nasza integracja wysyła zawsze jedną paczkę, co dla Connect
-// Plus działa (przesyłka jednoelementowa), ale nie wykorzystuje tej przewagi produktu.
+// wybrać). Kody wg dokumentacji DHL24 (struktura ServiceDefinition, pole "product"). **Przesyłki wieloelementowe
+// (30.09.2026):** `pieceList` (createShipments/getPrice) przyjmuje KILKA pozycji w JEDNEJ przesyłce (jeden
+// shipmentId/waybill) — potwierdzone wprost w przykładzie z dokumentacji DHL24 (paleta + koperta w jednym
+// pieceList). Żaden produkt nie jest tu sztucznie ograniczony do jednej paczki: dokumentacja mówi wprost, że
+// niedozwoloną kombinację produkt/usługi API samo odrzuci czytelnym błędem przy nadaniu — nie zgadujemy więc
+// limitu po stronie klienta (ani nie wymuszamy np. Connect Plus dla >1 paczki).
 export const PARCEL_PRODUCTS = [
   { code: "EK", name: "DHL Connect" },
   { code: "PI", name: "DHL International" },
@@ -138,7 +141,7 @@ export type ParcelQuote = { product: string; ok: boolean; price: number | null; 
 // (ok: false), żeby w tabeli było widać, że produkt jest niedostępny i dlaczego, zamiast przerywać całą wycenę.
 export async function dhlParcelPrice(
   cfg: DhlParcelConfig,
-  q: { product: string; shipper: ParcelAddress; receiver: ParcelAddress & { country: string }; package: ParcelPackage }
+  q: { product: string; shipper: ParcelAddress; receiver: ParcelAddress & { country: string }; packages: ParcelPackage[] }
 ): Promise<ParcelQuote> {
   const addr = (a: ParcelAddress) =>
     el("name", a.name) + el("postalCode", a.postalCode) + el("city", a.city) + el("street", a.street) + el("houseNumber", a.houseNumber) + el("apartmentNumber", a.apartmentNumber);
@@ -151,7 +154,7 @@ export async function dhlParcelPrice(
         el("shipper", [el("country", "PL"), addr(q.shipper)]),
         el("receiver", [el("country", q.receiver.country), el("addressType", "C"), addr(q.receiver)]),
         el("service", [el("product", q.product)]),
-        el("pieceList", [pieceXml(q.package)]),
+        el("pieceList", q.packages.map(pieceXml)),
       ])
     );
     const price = Number(r?.price);
@@ -170,7 +173,7 @@ export type CreateParcelInput = {
   shipmentDate: string; // YYYY-MM-DD
   shipper: ParcelAddress;
   receiver: ParcelAddress & { country: string };
-  package: ParcelPackage;
+  packages: ParcelPackage[]; // wieloelementowa przesyłka = kilka pozycji w JEDNEJ przesyłce (jeden shipmentId)
   content: string;
   reference?: string;
 };
@@ -182,7 +185,7 @@ export function buildCreateShipmentsXml(cfg: Pick<DhlParcelConfig, "sap">, i: Cr
     el("item", [
       el("shipper", [base(i.shipper), contact(i.shipper)]),
       el("receiver", [el("country", i.receiver.country), el("addressType", "C"), base(i.receiver), contact(i.receiver)]),
-      el("pieceList", [pieceXml(i.package)]),
+      el("pieceList", i.packages.map(pieceXml)),
       el("payment", [el("paymentMethod", "BANK_TRANSFER"), el("payerType", "SHIPPER"), el("accountNumber", cfg.sap)]),
       el("service", [el("product", i.product)]),
       el("shipmentDate", i.shipmentDate),

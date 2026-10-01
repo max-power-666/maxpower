@@ -10,6 +10,32 @@ const num = (v: unknown, min: number, max: number): number | null => {
   return Number.isFinite(n) && n >= min && n <= max ? n : null;
 };
 
+export type ParsedPackage = { weight: number; length: number; width: number; height: number };
+
+// Dodatkowe paczki (druga, trzecia...) dla wieloelementowej przesyłki DHL Parcel — DHL24 wspiera to wprost w API
+// (pieceList z wieloma pozycjami w JEDNEJ przesyłce, potwierdzone w dokumentacji createShipments), a nieobsługiwaną
+// kombinację produkt/liczba paczek sam odrzuci czytelnym błędem przy nadaniu, więc nie zgadujemy tu żadnego limitu
+// ani nie ograniczamy wyboru produktu. Pierwsza paczka to nadal "package" z parseShipmentBody (waga/wymiary +
+// wspólny opis zawartości dla całej przesyłki, jeden na wszystkie sztuki) — ta lista to TYLKO kolejne sztuki.
+// DHL Express tego nie używa (multi-piece nie dotyczy tej integracji).
+export function parseExtraPackages(raw: unknown): { ok: true; value: ParsedPackage[] } | { ok: false; error: string } {
+  if (raw === undefined || raw === null) return { ok: true, value: [] };
+  if (!Array.isArray(raw)) return { ok: false, error: "Nieprawidłowy format dodatkowych paczek." };
+  const out: ParsedPackage[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    const p = raw[i] ?? {};
+    const weight = num(p.weight, 0.1, 70);
+    const length = num(p.length, 1, 300);
+    const width = num(p.width, 1, 300);
+    const height = num(p.height, 1, 300);
+    if (weight === null || length === null || width === null || height === null) {
+      return { ok: false, error: `Paczka ${i + 2}: uzupełnij wagę (0,1–70 kg) i wymiary.` };
+    }
+    out.push({ weight, length, width, height });
+  }
+  return { ok: true, value: out };
+}
+
 export type ParsedShipment = {
   receiver: { company?: string; name: string; street: string; houseNumber: string; apartment?: string; postalCode: string; city: string; countryCode: string; phone: string; email?: string };
   pack: { weight: number; length: number; width: number; height: number; description: string; template: string | null };

@@ -600,9 +600,24 @@ użytkownika = "klucz APIv2" + hasło) w każdej metodzie oprócz `getVersion`; 
 nie powtórzyć błędu sprzed wprowadzenia Connect Plus (produkt istniał w API DHL24 od dawna, ale nie było go w żadnej
 z tych list osobno trzymanych w obu route'ach, więc nie dało się go wybrać). Kody wg dokumentacji DHL24 (struktura
 `ServiceDefinition`, pole `product`; jest tam też `CM` — Connect Plus Pallet, niezaimplementowane — osobna usługa na
-paletach). Connect Plus w DHL24 obsługuje przesyłki wieloelementowe (do 15 sztuk), ale nasza integracja zawsze
-wysyła jedną paczkę — to i tak działa (przesyłka jednoelementowa jest prawidłowym przypadkiem tego produktu), tylko
-nie wykorzystuje jego przewagi nad Connect/International;
+paletach). **Przesyłki wieloelementowe (30.09.2026, na prośbę właściciela — zamówienie wymagające 2 paczek):**
+`pieceList` w `getPrice`/`createShipments` przyjmuje TABLICĘ pozycji w JEDNEJ przesyłce (jeden `shipmentId`/
+waybill) — potwierdzone wprost w oficjalnym przykładzie dokumentacji DHL24 dla `createShipments` (paleta + koperta
+w jednym `pieceList` tej samej przesyłki), nie zgadywane. `dhlParcelPrice`/`CreateParcelInput` w `lib/dhlParcel.ts`
+przyjmują teraz `packages: ParcelPackage[]` (wcześniej pojedynczy `package`) — `pieceList` buduje się z `packages.
+map(pieceXml)`. **Żaden produkt nie jest sztucznie ograniczony do jednej paczki** — dokumentacja `ServiceDefinition`
+mówi wprost, że WebAPI samo odrzuci niedozwoloną kombinację produkt/usługi czytelnym błędem przy nadaniu, więc nie
+zgadujemy limitu po stronie klienta ani nie wymuszamy Connect Plus dla >1 paczki (choć to on jest do tego pomyślany,
+do 15 sztuk). W formularzu (`ShippingView.tsx`, tylko gdy `carrier === "parcel"`) przycisk "+ Dodaj kolejną paczkę
+do tej przesyłki" dokłada wiersz waga/wymiary (`extraPackages`, osobny stan od głównego `form`) — opis zawartości
+(`content`) zostaje WSPÓLNY dla całej przesyłki (jedno pole na poziomie `shipments.item`, nie per paczka — zgodnie
+z dokumentacją DHL24). Walidacja dodatkowych paczek: `parseExtraPackages` w `lib/shipmentInput.ts` (nowa funkcja,
+osobna od `parseShipmentBody` — ten się nie zmienił, więc DHL Express, który multi-piece nie dotyczy, jest
+nietknięty), żądanie niesie je jako `extraPackages` (tablica, opcjonalna) obok istniejącego pojedynczego `package`
+(pierwsza paczka). `shipments.package` dla DHL Parcel to teraz TABLICA wszystkich sztuk (nie pojedynczy obiekt jak
+przy DHL Express) — nic poza tym route'em nie czyta tej kolumny z powrotem (sam zapis księgowy), więc różny kształt
+między przewoźnikami jest bezpieczny. Nie testowane na żywym API (brak dostępu) — zweryfikowane na atrapie `fetch`
+(`parcel.test.js`: dwie pozycje w `pieceList` jednego zgłoszenia, `shipmentId` zostaje jeden).
 wycena `getPrice` (`price` to cena BAZOWA w PLN, **`fuelSurcharge` to PROCENT, nie kwota w PLN** — mimo że w WSDL oba
 pola to `xsd:float`, nic tego nie odróżnia; do 28.09.2026 kod traktował ją jak złotówki i wcale nie doliczał do
 pokazywanej ceny, więc cena na liście wychodziła zaniżona o ~20-25% — poprawione w `ShippingView.tsx`: cena na
