@@ -5,7 +5,6 @@ import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import TradeInOrdersView from "./TradeInOrdersView";
 import InlineEditCell from "./InlineEditCell";
-import ProductCardDrawer from "./ProductCardDrawer";
 import PadSerialsCell, { MAX_PADS } from "./PadSerialsCell";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { INTAKE_STATUSES, INTERVALS, fmtDuration, rangeStart, type Interval } from "@/lib/workLog";
@@ -126,7 +125,6 @@ export default function TradeInHub({
 }) {
   const [sub, setSub] = useState<"intake" | "raw">("intake");
   const [openOrderId, setOpenOrderId] = useState<string | null>(null);
-  const [openSerial, setOpenSerial] = useState<string | null>(null);
 
   return (
     <div>
@@ -141,15 +139,12 @@ export default function TradeInHub({
           isAdmin={isAdmin}
           isAdminOrManager={isAdminOrManager}
           onOpenOrder={setOpenOrderId}
-          onOpenProduct={setOpenSerial}
         />}
       {sub === "raw" && <TradeInOrdersView session={session} onOpenOrder={setOpenOrderId} />}
 
       {openOrderId && (
         <OrderCardDrawer orderPublicId={openOrderId} session={session} members={members} onClose={() => setOpenOrderId(null)} />
       )}
-
-      {openSerial && <ProductCardDrawer serial={openSerial} members={members} onClose={() => setOpenSerial(null)} />}
     </div>
   );
 }
@@ -162,14 +157,12 @@ function IntakeView({
   isAdmin,
   isAdminOrManager,
   onOpenOrder,
-  onOpenProduct,
 }: {
   session: Session;
   members: MemberLite[];
   isAdmin: boolean;
   isAdminOrManager: boolean;
   onOpenOrder: (id: string) => void;
-  onOpenProduct: (serial: string) => void;
 }) {
   const [interval, setInterval] = useState<Interval>("today");
   const [rangeRows, setRangeRows] = useState<{ entered_by_email: string | null; points: number }[]>([]);
@@ -580,23 +573,12 @@ function IntakeView({
                   )}
                 </td>
                 <td className="p-3">
-                  <div className="flex items-center gap-1">
-                    <InlineEditCell
-                      value={e.serial_number}
-                      placeholder="Dodaj numer"
-                      className="w-44 font-mono"
-                      onSave={(v) => saveField(e, "serial_number", "Numer seryjny", v)}
-                    />
-                    {e.serial_number && (
-                      <button
-                        onClick={() => onOpenProduct(e.serial_number!)}
-                        title="Karta produktu"
-                        className="text-teal text-sm px-1 hover:underline"
-                      >
-                        ↗
-                      </button>
-                    )}
-                  </div>
+                  <InlineEditCell
+                    value={e.serial_number}
+                    placeholder="Dodaj numer"
+                    className="w-44 font-mono"
+                    onSave={(v) => saveField(e, "serial_number", "Numer seryjny", v)}
+                  />
                 </td>
                 <td className="p-3 font-mono whitespace-nowrap text-inksoft">{e.buyback_orders?.sku || "—"}</td>
                 <td className="p-3">

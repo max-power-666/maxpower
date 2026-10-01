@@ -677,8 +677,9 @@ może mieć dwóch aktywnych wpisów naraz (indeks częściowy na `serial_number
 "przerwany" nie blokuje ponownego podejścia. Punkty są niezależne od wyniku testu (sprawny /
 wadliwy) — do potwierdzenia z właścicielem.
 
-**Karta produktu** (`ProductCardDrawer.tsx`). Klik w numer seryjny w Testach, Serwisie, Trade-in (strzałka ↗
-przy polu) albo w Magazynie → Raw data otwiera panel. Nie ma własnej tabeli: składa się na żywo z
+**Karta produktu** (`ProductCardDrawer.tsx`). Klik w numer seryjny w Testach i Serwisie (strzałka ↗
+przy polu) albo w Magazynie → Raw data otwiera panel. **W Trade-in (Wprowadzanie) ten odnośnik usunięty
+30.09.2026** na prośbę właściciela — niepotrzebny obok kolumny Numer seryjny. Nie ma własnej tabeli: składa się na żywo z
 `fakturownia_stock_cache` (magazyn), `buyback_orders` (zamówienie z opisu sztuki lub z obsługi paczki),
 `test_log`, `service_log` (po `device_ref`) i `history` z `buyback_order_intake`. **Log** to te zdarzenia
 w kolejności czasu ("Test rozpoczęty przez…", "Serwis (…) zakończony: Naprawiony", zmiany w Trade-in).
