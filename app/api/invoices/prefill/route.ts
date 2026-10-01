@@ -4,11 +4,12 @@ import { requireRole } from "@/lib/serverAuth";
 import { buildInvoiceBuyerPrefill } from "@/lib/invoices";
 
 // Wstępne wypełnienie formularza "Wystaw fakturę" (zakładka Faktury) — czyta surowe dane zamówienia z tabeli
-// kanału (bm_orders/refurbed_orders/allegro_orders/octopia_orders) i oddaje gotowe pola nabywcy, żeby
-// InvoicesView.tsx nie musiało powtarzać tej logiki po stronie przeglądarki. Back Market/refurbed/Allegro czytają
-// dane FAKTUROWE (billing_address/invoice_address/invoice.address), nie adres dostawy — patrz komentarz w
-// buildInvoiceBuyerPrefill (lib/invoices.ts) dla pełnego uzasadnienia różnicy. Dla kanałów bez obsługi (Erli,
-// Amazon) oddaje puste pola — pracownik wypełnia ręcznie.
+// kanału (bm_orders/refurbed_orders/allegro_orders/octopia_orders/erli_orders) i oddaje gotowe pola nabywcy, żeby
+// InvoicesView.tsx nie musiało powtarzać tej logiki po stronie przeglądarki. Back Market/refurbed/Allegro/Octopia/
+// Erli czytają dane FAKTUROWE (billing_address/invoice_address/invoice.address/user.invoiceAddress), nie adres
+// dostawy, gdzie takie osobne pole istnieje — patrz komentarz w buildInvoiceBuyerPrefill (lib/invoices.ts) dla
+// pełnego uzasadnienia różnicy. Amazon (bez obsługi — PII niedostępne przez SP-API) oddaje puste pola, pracownik
+// wypełnia ręcznie.
 
 const admin = () => createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 
@@ -37,8 +38,11 @@ export async function GET(request: Request) {
   } else if (marketplace === "allegro") {
     const { data } = await db.from("allegro_orders").select("raw").eq("id", externalId).maybeSingle();
     raw = data?.raw ?? null;
+  } else if (marketplace === "erli") {
+    const { data } = await db.from("erli_orders").select("raw").eq("id", externalId).maybeSingle();
+    raw = data?.raw ?? null;
   }
-  // Erli/Amazon: raw zostaje null celowo — buildInvoiceBuyerPrefill i tak odda puste pola.
+  // Amazon: raw zostaje null celowo — buildInvoiceBuyerPrefill i tak odda puste pola (PII niedostępne przez SP-API).
 
   const buyer = buildInvoiceBuyerPrefill(marketplace, raw, customerEmail);
 

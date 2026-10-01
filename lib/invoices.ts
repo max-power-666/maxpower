@@ -46,10 +46,20 @@ const EMPTY_BUYER: InvoiceBuyerPrefill = {
 //   adres niż `buyer.address` (potwierdzone na żywym zamówieniu: adres faktury w innym mieście niż adres
 //   dostawy). Gdy `invoice.required` jest false (większość zamówień), spadamy na `buyer.address`/`buyer.companyName`
 //   (zwykle pusty — prywatny kupujący bez faktury).
-// - **Octopia**: żadnego osobnego pola faktury/VAT nie znaleziono (sprawdzone na żywych danych) — zostaje na
-//   `rawBuyerAddress` (adres dostawy) jak przy wysyłce, bez NIP.
-// - **Erli, Amazon**: bez obsługi adresu (patrz komentarz w `rawBuyerAddress`, lib/shipping.ts) — formularz
-//   startuje pusty, pracownik wypełnia ręcznie.
+// - **Octopia**: `billingAddress` NA POZIOMIE ZAMÓWIENIA (NIE `lines[].shippingAddress`, pierwszy błąd tej funkcji
+//   sprzed tej poprawki — sprawdzono źle zagnieżdżony poziom) — zawsze obecne (880/880 sprawdzonych zamówień), ma
+//   `companyName`, ale bez osobnego numeru VAT/NIP (nie znaleziono takiego pola mimo dokładnego przeszukania —
+//   `businessOrder` na poziomie zamówienia też istnieje, ale w całej sprawdzonej próbce zawsze `false`, nawet przy
+//   wypełnionym `companyName`, więc nieprzydatne jako sygnał).
+// - **Erli**: `user.invoiceAddress` istnieje TYLKO gdy kupujący poprosił o fakturę w Erli (sprawdzone: 81/834
+//   zamówień) — pole `type` to `"company"` (wtedy `companyName` + **`nip`**, dosłownie tak się nazywa) albo
+//   `"person"` (zwykłe imię/nazwisko, bez NIP). Gdy brak `invoiceAddress` (zdecydowana większość), spadamy na
+//   `user.deliveryAddress` (adres dostawy — tam `companyName` bywa ustawione niezależnie, jako nieformalna nazwa
+//   "u kogo", bez żadnego NIP-u, ten sam wzorzec co Back Market/Octopia).
+// - **Amazon**: sprawdzone jeszcze raz pod kątem tego zgłoszenia — `IsBusinessOrder` istnieje, ale `BuyerInfo`
+//   jest ZAWSZE pustym obiektem w naszych danych (nawet dla jedynego znalezionego zamówienia biznesowego), zgodnie
+//   z już znanym ograniczeniem roli SP-API "Inventory and Order Tracking" bez dostępu do PII (patrz sekcja
+//   Wysyłka) — żadnych nowych, dostępnych bez Restricted Data Token pól nie ma. Formularz zostaje pusty.
 export function buildInvoiceBuyerPrefill(marketplace: string, raw: any, customerEmail?: string | null): InvoiceBuyerPrefill {
   if (marketplace === "backmarket") {
     const a = raw?.billing_address || raw?.shipping_address;
@@ -106,6 +116,50 @@ export function buildInvoiceBuyerPrefill(marketplace: string, raw: any, customer
         postalCode: clean(b.address.postCode),
         city: clean(b.address.city),
         countryCode: clean(b.address.countryCode).toUpperCase(),
+        taxNo: "",
+      };
+    }
+  } else if (marketplace === "octopia") {
+    const a = raw?.billingAddress;
+    if (a) {
+      return {
+        name: [clean(a.firstName), clean(a.lastName)].filter(Boolean).join(" "),
+        company: clean(a.companyName),
+        ...splitStreet(clean(a.addressLine1)),
+        apartment: [clean(a.addressLine2), clean(a.addressLine3)].filter(Boolean).join(" "),
+        postalCode: clean(a.postalCode),
+        city: clean(a.city),
+        countryCode: clean(a.countryCode).toUpperCase(),
+        taxNo: "",
+      };
+    }
+  } else if (marketplace === "erli") {
+    const ia = raw?.user?.invoiceAddress;
+    if (ia) {
+      const isCompany = ia.type === "company";
+      return {
+        name: isCompany ? "" : [clean(ia.firstName), clean(ia.lastName)].filter(Boolean).join(" "),
+        company: isCompany ? clean(ia.companyName) : "",
+        street: clean(ia.street),
+        houseNumber: clean(ia.buildingNumber),
+        apartment: clean(ia.flatNumber),
+        postalCode: clean(ia.zip),
+        city: clean(ia.city),
+        countryCode: clean(ia.country).toUpperCase(),
+        taxNo: isCompany ? clean(ia.nip) : "",
+      };
+    }
+    const da = raw?.user?.deliveryAddress;
+    if (da) {
+      return {
+        name: [clean(da.firstName), clean(da.lastName)].filter(Boolean).join(" "),
+        company: clean(da.companyName),
+        street: clean(da.street),
+        houseNumber: clean(da.buildingNumber),
+        apartment: clean(da.flatNumber),
+        postalCode: clean(da.zip),
+        city: clean(da.city),
+        countryCode: clean(da.country).toUpperCase(),
         taxNo: "",
       };
     }
