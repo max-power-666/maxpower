@@ -54,26 +54,33 @@ const TABS: { key: ViewKey; label: string; space?: Space }[] = [
   { key: "shop_stock", label: "Magazyn", space: "shop" },
 ];
 
-// Kto widzi jaką zakładkę — DOMYŚLNY zestaw wg roli, Admin ma dostęp do wszystkiego,
-// Przegląd jest wspólną stroną startową dla każdej roli. Admin może to nadpisać per
-// osoba w Zespole (checkboxy przy każdej zakładce, `members.view_access` — patrz
-// `effectiveAccess`); ta mapa jest tylko domyślnym punktem startowym dla nowej roli
+// Kto widzi jaką zakładkę — DOMYŚLNY zestaw wg roli, Admin ma dostęp do wszystkiego.
+// Przegląd jest domyślnie TYLKO dla Admina i Managera (02.10.2026, na prośbę właściciela)
+// — dla innych ról zakładką startową jest ich własna, główna zakładka (pierwszy element
+// listy niżej — np. Testy -> Testy, Trade-in -> Trade-in, Serwis -> Serwis). Admin może to
+// nadpisać per osoba w Zespole (checkboxy przy każdej zakładce, `members.view_access` —
+// patrz `effectiveAccess`); ta mapa jest tylko domyślnym punktem startowym dla nowej roli
 // i dla osób, których nikt jeszcze nie dotknął ręcznie (view_access = NULL). Na razie
 // to tylko filtruje nawigację w tej przeglądarce — to nie jest twarde zabezpieczenie
 // (RLS pozwala każdemu authenticated na wszystko, patrz supabase/schema.sql).
 // "orders" (zakładka Trade-in — podgląd zamówień BuyBack) na razie tylko dla Admina,
 // dopóki nie ustalimy docelowej roli dla osoby przetwarzającej zamówienia.
+// "overview" (Przegląd) od 02.10.2026 jest domyślnie TYLKO dla Admina i Managera (na wyraźną prośbę
+// właściciela) — inne role go nie mają w domyślnym zestawie, więc ich zakładką startową (pierwszy
+// element listy, patrz "wróć do pierwszej dostępnej zakładki" niżej) jest ich własna, główna zakładka.
+// Admin wciąż może przywrócić komuś dostęp do Przeglądu ręcznie, w Zespole (view_access) — to nie jest
+// twardo zablokowane, tylko inny domyślny zestaw wg roli, jak każda inna zakładka.
 const ROLE_ACCESS: Record<string, ViewKey[]> = {
   Admin: ["overview", "inventory", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "nbp", "rcp", "returns", "shop_products", "shop_stock"],
   Manager: ["overview", "inventory", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "nbp", "rcp", "returns", "shop_products", "shop_stock"], // wszystko; Zespół tylko do odczytu, usuwa tylko Admin
-  Magazyn: ["overview", "inventory", "backlog", "rcp", "returns"],
-  Zamówienia: ["overview", "sales", "shipping", "invoices", "backlog", "rcp", "returns"],
-  Serwis: ["overview", "service", "backlog", "rcp", "returns"],
-  Testy: ["overview", "tests", "backlog", "rcp", "returns"],
-  Bidder: ["overview", "tradein", "backlog", "rcp", "returns"],
-  "Trade-in": ["overview", "orders", "backlog", "rcp", "returns"],
+  Magazyn: ["inventory", "backlog", "rcp", "returns"],
+  Zamówienia: ["sales", "shipping", "invoices", "backlog", "rcp", "returns"],
+  Serwis: ["service", "backlog", "rcp", "returns"],
+  Testy: ["tests", "backlog", "rcp", "returns"],
+  Bidder: ["tradein", "backlog", "rcp", "returns"],
+  "Trade-in": ["orders", "backlog", "rcp", "returns"],
   // Obsługa sklepu: katalog i stany. Edycję w bazie pilnuje can_edit_shop() (supabase/shop.sql) — Admin/Manager/Sklep.
-  Sklep: ["overview", "shop_products", "shop_stock", "backlog", "rcp"],
+  Sklep: ["shop_products", "shop_stock", "backlog", "rcp"],
 };
 
 const spaceOf = (k: ViewKey): Space => TABS.find((t) => t.key === k)?.space ?? "erp";
@@ -86,7 +93,7 @@ const EMPLOYMENT_TYPES = ["Umowa o pracę", "Umowa zlecenie"];
 
 // Dostęp do zakładek dla danego członka zespołu: view_access (jeśli ustawiony przez Admina w Zespole) nadpisuje
 // domyślny zestaw z ROLE_ACCESS dla jego roli. NULL = jeszcze nikt tego nie dotykał, używamy domyślnego wg roli.
-function effectiveAccess(role: string, viewAccess: string[] | null | undefined, fallback: ViewKey[] = ["overview", "inventory"]): ViewKey[] {
+function effectiveAccess(role: string, viewAccess: string[] | null | undefined, fallback: ViewKey[] = ["inventory"]): ViewKey[] {
   return (viewAccess as ViewKey[] | null | undefined) ?? ROLE_ACCESS[role] ?? fallback;
 }
 
@@ -256,11 +263,13 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, role]);
 
-  // jeśli rola nie ma już dostępu do aktualnie otwartej zakładki (np. zmieniła się rola), wróć do Przeglądu
+  // Jeśli rola nie ma już dostępu do aktualnie otwartej zakładki (np. zmieniła się rola), wróć do PIERWSZEJ
+  // dostępnej zakładki — nie zawsze do Przeglądu, bo od 02.10.2026 to domyślnie tylko Admin/Manager (dla innych
+  // rół pierwszy element ich listy w ROLE_ACCESS to ich własna, główna zakładka — np. Testy -> Testy).
   useEffect(() => {
     if (!role) return;
     const allowed = effectiveAccess(role, viewAccess);
-    if (!allowed.includes(view)) setView("overview");
+    if (!allowed.includes(view)) setView((allowed[0] as ViewKey) ?? "overview");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [role, viewAccess]);
 
@@ -841,13 +850,15 @@ function MemberEditDrawer({
   onChangeEmploymentType: (userId: string, employmentType: string | null) => void;
   onClose: () => void;
 }) {
-  // "Przegląd" jest wspólną stroną startową dla każdej roli — zawsze wymuszony, nie da się go odznaczyć
-  // (inaczej dałoby się kogoś całkiem zablokować z aplikacji).
+  // Przegląd nie jest już twardo wymuszony (od 02.10.2026 to zwykła zakładka jak każda inna — domyślnie
+  // tylko Admin/Manager, ale Admin może ją komuś przywrócić tu, tak jak każdą inną). Jedyna pozostała
+  // ochrona: nie da się odznaczyć OSTATNIEJ zaznaczonej zakładki — inaczej dana osoba zostałaby bez
+  // żadnej zakładki do kliknięcia po zalogowaniu.
   function toggleAccess(key: ViewKey) {
-    if (key === "overview") return;
     const current = effectiveAccess(member.role, member.view_access);
     const next = current.includes(key) ? current.filter((k) => k !== key) : [...current, key];
-    onChangeAccess(member.user_id, (next.includes("overview") ? next : ["overview", ...next]) as ViewKey[]);
+    if (next.length === 0) return;
+    onChangeAccess(member.user_id, next as ViewKey[]);
   }
 
   return (
@@ -884,11 +895,11 @@ function MemberEditDrawer({
             {TABS.map((t) => {
               const checked = effectiveAccess(member.role, member.view_access).includes(t.key);
               return (
-                <label key={t.key} className={`flex items-center gap-2 text-sm ${canEdit && t.key !== "overview" ? "cursor-pointer" : ""} ${checked ? "text-ink" : "text-inksoft"}`}>
+                <label key={t.key} className={`flex items-center gap-2 text-sm ${canEdit ? "cursor-pointer" : ""} ${checked ? "text-ink" : "text-inksoft"}`}>
                   <input
                     type="checkbox"
                     checked={checked}
-                    disabled={!canEdit || t.key === "overview"}
+                    disabled={!canEdit}
                     onChange={() => toggleAccess(t.key)}
                   />
                   {t.space === "shop" ? `Sklep: ${t.label}` : t.label}

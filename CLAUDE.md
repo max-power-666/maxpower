@@ -47,13 +47,16 @@ imię i nazwisko — `members.name`). Nowa osoba po pierwszym logowaniu dostaje 
 w `members` i ekran "poproś administratora o rolę" (`NoRoleScreen`); sama roli nie wybiera.
 Rola odświeża się sama po nadaniu/zmianie przez Admina (realtime na `members` — wymaga bloku publikacji z `schema.sql`;
 do tego odczyt przy powrocie do karty i co 15 s na ekranie "brak roli"). Błąd odczytu roli to NIE brak roli — pokazujemy "Spróbuj ponownie".
-Przegląd jest wspólną stroną startową. Mapa dostępu: `ROLE_ACCESS` w `app/page.tsx`.
+Przegląd jest domyślną stroną startową TYLKO dla Admina i Managera (02.10.2026, na prośbę właściciela — wcześniej
+wspólna dla wszystkich ról). Dla pozostałych ról zakładką startową jest ich własna, główna zakładka (pierwszy
+element listy w `ROLE_ACCESS` — Testy startują w Testach, Trade-in w Trade-in, Serwis w Serwisie, itd.). Mapa
+dostępu: `ROLE_ACCESS` w `app/page.tsx`.
 Manager widzi wszystkie zakładki (Zespół tylko do odczytu), ale niczego nie usuwa i nie zmienia ról ani imion (to tylko Admin, także w bazie).
 Rola jest zwykłym tekstem w `members.role` — dodanie roli nie wymaga SQL.
 
 | Zakładka | Klucz widoku | Kto widzi |
 |---|---|---|
-| Przegląd | `overview` | wszyscy |
+| Przegląd | `overview` | Admin, Manager (od 02.10.2026 — wcześniej wszyscy, patrz niżej) |
 | Magazyn | `inventory` | Admin, Manager, Magazyn |
 | Zamówienia | `sales` | Admin, Manager, Zamówienia |
 | Backlog | `backlog` | wszyscy (każda rola) |
@@ -76,8 +79,12 @@ w `app/page.tsx`) — Admin może go nadpisać dla KAŻDEJ osoby z osobna, zapis
 (`text[]`, `null` = jeszcze nikt nie dotykał, więc liczy się domyślny zestaw dla roli). `effectiveAccess(role,
 viewAccess)` w `app/page.tsx` liczy efektywny dostęp (nadpisanie, jeśli jest, inaczej `ROLE_ACCESS[role]`) i jest
 jedynym miejscem, które o tym decyduje — użyte zarówno przy filtrowaniu nawigacji/gate'owaniu widoku dla
-zalogowanej osoby, jak i przy renderowaniu checkboxów. "Przegląd" jest zawsze wymuszony (checkbox zablokowany,
-zaznaczony) — nie da się nikogo całkiem zablokować z aplikacji. Przycisk "Resetuj do domyślnych (rola)" czyści
+zalogowanej osoby, jak i przy renderowaniu checkboxów. **"Przegląd" NIE jest już twardo wymuszony (02.10.2026)** —
+wcześniej checkbox był zablokowany na stałe zaznaczony (żeby nie dało się kogoś całkiem zablokować z aplikacji);
+teraz to zwykła zakładka jak każda inna, domyślnie tylko dla Admina/Managera, ale Admin MOŻE ją komuś przywrócić
+ręcznie w tym samym oknie, tak jak każdą inną zakładkę. Jedyna pozostała ochrona (`toggleAccess`): nie da się
+odznaczyć OSTATNIEJ zaznaczonej zakładki danej osoby — próba nic nie robi, zamiast zostawić kogoś bez żadnej
+dostępnej zakładki po zalogowaniu. Przycisk "Resetuj do domyślnych (rola)" czyści
 nadpisanie (`view_access = null`) — zmiana samej roli NIE resetuje automatycznie nadpisania (świadomie, żeby
 poprawka literówki w roli nie kasowała starannie dobranego dostępu; do zresetowania służy ten przycisk). Nadal
 tylko UI (RLS pozwala każdemu `authenticated` na wszystko) — twarde uprawnienia per rola są w planie rozwoju,
