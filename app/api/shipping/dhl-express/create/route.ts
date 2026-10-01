@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { requireRole } from "@/lib/serverAuth";
 import { DhlExpressError, dhlCreateShipment, dhlExpressConfigFromEnv, type CreateShipmentInput } from "@/lib/dhlExpress";
-import { parseShipmentBody } from "@/lib/shipmentInput";
+import { parseShipmentBody, parseQuotedCharges } from "@/lib/shipmentInput";
 import { parcelTrackingUrl } from "@/lib/parcelServer";
 import { notifyMarketplace } from "@/lib/shipmentMarketplaceSync";
 
@@ -66,6 +66,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: e.message || "Nie udało się nadać przesyłki." }, { status });
   }
 
+  // DHL Express przy tworzeniu przesyłki zwraca puste shipmentCharges (sprawdzone na żywych danych) — jedyne
+  // miejsce, gdzie cena jest w ogóle znana, to wycena tuż przed kliknięciem "Nadaj przesyłkę" (przeglądarka).
+  const charges = created.charges?.length ? created.charges : parseQuotedCharges(b?.billing, b?.local);
+
   // E-mail autora bierzemy z konta, nie z treści żądania (nie da się podpisać przesyłki cudzym adresem).
   const byEmail = (await db.auth.admin.getUserById(uid)).data.user?.email ?? null;
   const { data: row, error: insErr } = await db
@@ -85,7 +89,7 @@ export async function POST(request: Request) {
       planned_shipping_date: plannedDate,
       receiver: { ...receiver },
       package: { ...pack },
-      charges: created.charges,
+      charges,
       label_format: created.labelFormat,
       label_data: created.labelBase64,
     })
@@ -124,7 +128,7 @@ export async function POST(request: Request) {
     environment: cfg.env,
     trackingNumber: created.trackingNumber,
     trackingUrl: created.trackingUrl,
-    charges: created.charges,
+    charges,
     warnings: created.warnings,
     marketplaceSynced: sync.synced,
     marketplaceSyncError: sync.error,

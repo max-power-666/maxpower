@@ -4,7 +4,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { COUNTRY_NAMES, DHL_EU_COUNTRIES, isEconomySelect, type DhlMoney, type DhlProduct } from "@/lib/dhlExpress";
-import { base64ToBlobUrl, defaultShippingDate, type ShipPrefill } from "@/lib/shipping";
+import { base64ToBlobUrl, defaultShippingDate, dhlCharge, type ShipPrefill } from "@/lib/shipping";
 import { MARKETPLACES } from "@/lib/salesOrders";
 import { escapeLike } from "@/lib/search";
 import { printRawToZebra, printPdf, listPrinters, PrintAgentError } from "@/lib/printAgent";
@@ -18,10 +18,6 @@ import SalesOrderCard from "./SalesOrderCard";
 
 const fmtMoney = (m: DhlMoney | null | undefined) =>
   m ? `${m.price.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${m.currency}` : "—";
-// shipments.charges ma kształt DHL (tablica) tylko dla dhl_express/dhl_parcel — dla erli_paczkomat to co innego
-// (id paczki Erli, potrzebny do anulowania), więc nigdy nie zakładamy tablicy bez sprawdzenia.
-const dhlCharge = (charges: unknown): { currencyType: string; priceCurrency: string; price: number } | null =>
-  Array.isArray(charges) ? charges.find((c: any) => c?.currencyType === "BILLC") ?? charges[0] ?? null : null;
 const inputCls = "w-full border border-line bg-white px-2 py-2 rounded text-sm";
 const btnPrimary = "bg-ink text-paper px-4 py-2 rounded text-sm font-semibold disabled:opacity-50";
 const btnGhost = "bg-white border border-line px-3 py-2 rounded text-sm font-semibold disabled:opacity-50";
@@ -390,6 +386,8 @@ export default function ShippingView({
           extraPackages: isParcel ? extraPackagesPayload() : undefined,
           reference: form.reference,
           order,
+          billing: product.billing,
+          local: product.local,
         }),
       });
       const data = await res.json();

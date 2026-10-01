@@ -36,6 +36,27 @@ export function parseExtraPackages(raw: unknown): { ok: true; value: ParsedPacka
   return { ok: true, value: out };
 }
 
+export type QuotedCharge = { currencyType: string; priceCurrency: string; price: number };
+
+// Cena z WYCENY (krok tuż przed kliknięciem "Nadaj przesyłkę") — jedyne miejsce, gdzie ta cena w ogóle jest znana
+// (01.10.2026, zgłoszenie właściciela: koszt wysyłki nigdzie się nie zapisywał). Sprawdzone na żywych danych:
+// DHL Express zwraca puste `shipmentCharges` przy tworzeniu przesyłki, a DHL Parcel (DHL24) w ogóle nie ma pola
+// z ceną w odpowiedzi createShipments — więc trzeba przekazać cenę z przeglądarki (tam, gdzie wycena już się
+// odbyła) i zapisać JĄ, zamiast ufać (pustej) odpowiedzi przewoźnika. `billing`/`local` to DhlMoney ({price,
+// currency}) — ten sam, ujednolicony kształt dla obu przewoźników po stronie ShippingView.tsx (QuoteRow).
+export function parseQuotedCharges(billing: unknown, local: unknown): QuotedCharge[] {
+  const out: QuotedCharge[] = [];
+  const b = billing as { price?: unknown; currency?: unknown } | null;
+  const l = local as { price?: unknown; currency?: unknown } | null;
+  if (b && Number.isFinite(Number(b.price)) && typeof b.currency === "string") {
+    out.push({ currencyType: "BILLC", priceCurrency: b.currency, price: Number(b.price) });
+  }
+  if (l && Number.isFinite(Number(l.price)) && typeof l.currency === "string") {
+    out.push({ currencyType: "PULCL", priceCurrency: l.currency, price: Number(l.price) });
+  }
+  return out;
+}
+
 export type ParsedShipment = {
   receiver: { company?: string; name: string; street: string; houseNumber: string; apartment?: string; postalCode: string; city: string; countryCode: string; phone: string; email?: string };
   pack: { weight: number; length: number; width: number; height: number; description: string; template: string | null };

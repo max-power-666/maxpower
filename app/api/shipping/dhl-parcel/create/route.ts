@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireRole } from "@/lib/serverAuth";
 import { dhlParcelConfigFromEnv, dhlParcelCreate, dhlParcelIsSandbox, DhlParcelError, PARCEL_PRODUCTS } from "@/lib/dhlParcel";
-import { parseShipmentBody, parseExtraPackages } from "@/lib/shipmentInput";
+import { parseShipmentBody, parseExtraPackages, parseQuotedCharges } from "@/lib/shipmentInput";
 import { admin, loadShipper, parcelTrackingUrl } from "@/lib/parcelServer";
 import { notifyMarketplace } from "@/lib/shipmentMarketplaceSync";
 
@@ -86,7 +86,9 @@ export async function POST(request: Request) {
       // Tablica (nie pojedynczy obiekt jak przy DHL Express) — zapis księgowy wszystkich sztuk tej przesyłki
       // wieloelementowej; nic poza tym route'em nie czyta tej kolumny z powrotem, więc kształt jest tu dowolny.
       package: packages,
-      charges: null, // getPrice pokazał cenę przed nadaniem; DHL24 nie zwraca opłaty przy tworzeniu przesyłki
+      // DHL24 nie zwraca opłaty przy tworzeniu przesyłki — cena z wyceny (getPrice, tuż przed kliknięciem
+      // "Nadaj przesyłkę") to jedyne miejsce, gdzie w ogóle jest znana (01.10.2026, zgłoszenie właściciela).
+      charges: parseQuotedCharges(b?.billing, b?.local),
       label_format: created.labelBase64 ? "pdf" : null,
       label_data: created.labelBase64,
     })

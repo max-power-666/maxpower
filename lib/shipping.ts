@@ -116,6 +116,13 @@ export function buildShipPrefill(marketplace: string, externalId: string, raw: a
   return { marketplace, externalId, ...p };
 }
 
+// shipments.charges ma kształt DHL (tablica) tylko dla dhl_express/dhl_parcel — dla erli_paczkomat to co innego
+// (id paczki Erli, potrzebny do anulowania), więc nigdy nie zakładamy tablicy bez sprawdzenia. Współdzielone
+// między ShippingView.tsx (lista "Nadane przesyłki") i SalesOrderCard.tsx (pole "Koszt wysyłki", 01.10.2026).
+export function dhlCharge(charges: unknown): { currencyType: string; priceCurrency: string; price: number } | null {
+  return Array.isArray(charges) ? charges.find((c: any) => c?.currencyType === "BILLC") ?? charges[0] ?? null : null;
+}
+
 // Domyślna data nadania: dziś, jeśli dzień roboczy i przed południem (czas lokalny), w przeciwnym razie najbliższy dzień roboczy.
 export function defaultShippingDate(now: Date = new Date()): string {
   const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());

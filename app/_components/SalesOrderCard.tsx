@@ -6,7 +6,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { BM_ORDERLINE_STATES, MARKETPLACES, salesStatusLabel } from "@/lib/salesOrders";
 import { MAX_PADS } from "./PadSerialsCell";
-import { buildShipPrefill, type ShipPrefill } from "@/lib/shipping";
+import { buildShipPrefill, dhlCharge, type ShipPrefill } from "@/lib/shipping";
 import ErliParcelPanel from "./ErliParcelPanel";
 
 // Karta zamówienia sprzedaży (panel boczny po kliknięciu numeru zamówienia): dane z API marketplace'u,
@@ -35,6 +35,8 @@ type WorkerData = {
   order_date: string | null;
   status: string;
   sku: string | null;
+  country_code: string | null;
+  shipping_cost: number | null;
   history: SalesHistoryEntry[];
 };
 
@@ -337,6 +339,7 @@ export default function SalesOrderCard({
   const [oc, setOc] = useState<OctopiaOrder | null>(null);
   const [ap, setAp] = useState<ApiloOrder | null>(null);
   const [az, setAz] = useState<AmazonOrder | null>(null);
+  const [shipmentCharges, setShipmentCharges] = useState<unknown>(null);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
 
@@ -345,6 +348,7 @@ export default function SalesOrderCard({
   const [saving, setSaving] = useState(false);
   const [accepting, setAccepting] = useState(false);
   const [refreshingErli, setRefreshingErli] = useState(false);
+  const [savingShippingCost, setSavingShippingCost] = useState(false);
 
   useEffect(() => {
     load();
@@ -352,7 +356,7 @@ export default function SalesOrderCard({
   }, [marketplace, externalId]);
 
   async function load() {
-    const [{ data: w, error: wErr }, itemsRes, bmRes, rfRes, erRes, alRes, ocRes, apRes, azRes] = await Promise.all([
+    const [{ data: w, error: wErr }, itemsRes, bmRes, rfRes, erRes, alRes, ocRes, apRes, azRes, shipRes] = await Promise.all([
       supabase.from("sales_orders").select("*").eq("marketplace", marketplace).eq("external_id", externalId).maybeSingle(),
       supabase
         .from("sales_order_items")
@@ -381,6 +385,17 @@ export default function SalesOrderCard({
       marketplace === "amazon"
         ? supabase.from("amazon_orders").select("*").eq("id", externalId).maybeSingle()
         : Promise.resolve({ data: null, error: null }),
+      // Koszt wysyłki (01.10.2026): najnowsza przesyłka DHL tego zamówienia — jeśli ma zapisaną cenę z wyceny
+      // (patrz app/api/shipping/{dhl-express,dhl-parcel}/create), pokazujemy ją zamiast prosić o ręczne wpisanie.
+      supabase
+        .from("shipments")
+        .select("charges")
+        .eq("marketplace", marketplace)
+        .eq("order_external_id", externalId)
+        .in("carrier", ["dhl_express", "dhl_parcel"])
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
     ]);
     const firstError = wErr || itemsRes.error || bmRes.error || rfRes.error || erRes.error || alRes.error || ocRes.error || apRes.error || azRes.error;
     if (firstError) setError(firstError.message);
@@ -391,6 +406,7 @@ export default function SalesOrderCard({
     setEr((erRes.data as ErliOrder) ?? null);
     setAl((alRes.data as AllegroOrder) ?? null);
     setOc((ocRes.data as OctopiaOrder) ?? null);
+    setShipmentCharges(shipRes.data?.charges ?? null);
     setAp((apRes.data as ApiloOrder) ?? null);
     setAz((azRes.data as AmazonOrder) ?? null);
     setLoaded(true);
@@ -451,6 +467,35 @@ export default function SalesOrderCard({
       setError(e.message || "Nie udało się odświeżyć zamówienia.");
     } finally {
       setRefreshingErli(false);
+    }
+  }
+
+  // Koszt wysyłki — RĘCZNY fallback, tylko gdy nie dało się go wziąć automatycznie z ceny DHL (shipmentCharges
+  // powyżej). Zwykła edycja, jak uwagi gdzie indziej w aplikacji — zapis wprost + wpis do logu (ten sam wzorzec
+  // co acceptOrder/refreshErliOrder: RPC z sesji przeglądarki, by_email z session.user.email).
+  async function saveShippingCost(raw: string | null) {
+    const value = raw && raw.trim() ? Number(raw.trim().replace(",", ".")) : null;
+    if (raw && raw.trim() && !Number.isFinite(value)) return setError("Koszt wysyłki musi być liczbą.");
+    setSavingShippingCost(true);
+    setError("");
+    try {
+      const { error: updErr } = await supabase.from("sales_orders").update({ shipping_cost: value }).eq("marketplace", marketplace).eq("external_id", externalId);
+      if (updErr) throw updErr;
+      await supabase.rpc("sales_order_add_log", {
+        p_marketplace: marketplace,
+        p_external_id: externalId,
+        p_entry: {
+          action: "edited",
+          by_email: session.user.email ?? null,
+          at: new Date().toISOString(),
+          changes: [{ field: "Koszt wysyłki", from: worker?.shipping_cost != null ? String(worker.shipping_cost) : null, to: value !== null ? String(value) : null }],
+        },
+      });
+      await load();
+    } catch (e: any) {
+      setError(e.message || "Nie udało się zapisać kosztu wysyłki.");
+    } finally {
+      setSavingShippingCost(false);
     }
   }
 
@@ -541,6 +586,11 @@ export default function SalesOrderCard({
           ? buildShipPrefill("octopia", externalId, oc.raw, null)
           : null;
 
+  // Koszt wysyłki (01.10.2026, na prośbę właściciela) — tylko dla zamówień ZAGRANICZNYCH (kraj odbiorcy inny
+  // niż Polska); auto-wartość z już nadanej przesyłki DHL, gdy jest, inaczej ręczne pole (patrz saveShippingCost).
+  const isForeign = !!worker?.country_code && worker.country_code !== "PL";
+  const autoShippingCharge = dhlCharge(shipmentCharges);
+
   return (
     <div className="fixed inset-0 bg-black/30 flex justify-end z-50" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="w-full max-w-lg bg-paper h-full overflow-y-auto p-6 border-l border-line">
@@ -609,6 +659,29 @@ export default function SalesOrderCard({
               <h3 className="text-xs font-semibold text-inksoft">DANE WPROWADZONE PRZEZ PRACOWNIKA</h3>
               {!editing && items.length > 0 && <button onClick={startEdit} className="text-xs font-semibold text-teal hover:underline">Edytuj</button>}
             </div>
+            {isForeign && (
+              <div className="border border-line bg-white mb-3">
+                {autoShippingCharge ? (
+                  <Row label="Koszt wysyłki (z DHL)" value={fmtMoney(autoShippingCharge.price, autoShippingCharge.priceCurrency)} mono />
+                ) : (
+                  <div className="flex items-center justify-between gap-4 px-3 py-2 text-sm">
+                    <span className="text-inksoft">Koszt wysyłki</span>
+                    <input
+                      defaultValue={worker?.shipping_cost != null ? String(worker.shipping_cost) : ""}
+                      onBlur={(e) => {
+                        const next = e.target.value.trim();
+                        const current = worker?.shipping_cost != null ? String(worker.shipping_cost) : "";
+                        if (next !== current) saveShippingCost(next || null);
+                      }}
+                      disabled={savingShippingCost}
+                      placeholder="kwota w PLN"
+                      inputMode="decimal"
+                      className="w-32 text-right font-mono font-semibold border border-transparent hover:border-line focus:border-line bg-transparent focus:bg-white px-2 py-1 rounded text-sm"
+                    />
+                  </div>
+                )}
+              </div>
+            )}
             {items.length === 0 && (
               <div className="border border-line bg-white mb-6 p-3 text-sm text-inksoft">
                 Brak pozycji dla tego zamówienia — pojawią się po synchronizacji (Odśwież).

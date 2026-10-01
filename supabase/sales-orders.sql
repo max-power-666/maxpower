@@ -179,6 +179,17 @@ alter table sales_orders add column if not exists our_status text not null defau
 alter table sales_orders add column if not exists country_code text;
 alter table sales_orders add column if not exists shipping_method text;
 alter table sales_orders add column if not exists planned_shipping_date timestamptz;
+-- Koszt wysyłki (01.10.2026, na prośbę właściciela) — RĘCZNY fallback, tylko gdy nie dało się go wziąć
+-- automatycznie z już zapisanej ceny DHL (shipments.charges, patrz SalesOrderCard.tsx "Koszt wysyłki" —
+-- woła dhlCharge z lib/shipping.ts). Potrzebny, bo do 01.10.2026 ta cena w ogóle się nie zapisywała: DHL
+-- Express zwraca puste shipmentCharges przy tworzeniu przesyłki, a DHL Parcel (DHL24) w ogóle nie ma tego
+-- pola w odpowiedzi createShipments — jedyny moment, w którym cena jest znana, to wycena tuż PRZED
+-- kliknięciem "Nadaj przesyłkę" (poprawione w app/api/shipping/{dhl-express,dhl-parcel}/create — teraz
+-- zapisują cenę z wyceny zamiast ufać pustej odpowiedzi przewoźnika). Dla przesyłek nadanych PRZED tą
+-- poprawką (i dla zamówień wysłanych całkiem poza naszą integracją DHL) auto-wartości nie będzie, stąd
+-- wciąż potrzebne ręczne pole — zwykły tekst/liczba w PLN, NIE chronione triggerem API (pracownik wpisuje
+-- je sam, to nie pole z marketplace'u).
+alter table sales_orders add column if not exists shipping_cost numeric;
 -- Drop+add (nie "dodaj jeśli brak") celowo: żeby poszerzenie listy dozwolonych wartości (np. dodanie 'anulowane')
 -- też się zastosowało przy ponownym uruchomieniu na bazie, która ma już ten constraint z węższą listą.
 alter table sales_orders drop constraint if exists sales_orders_our_status_check;
