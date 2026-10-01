@@ -15,10 +15,11 @@ import { buybackStatusLabel, buybackStatusStyle } from "@/lib/buybackOrders";
 // wg Regulaminu premiowania, jak Serwis), plus podstrona "Raw data" z pełną, zsynchronizowaną
 // listą zamówień BuyBack (TradeInOrdersView).
 //
-// Jedna paczka = jeden rekord z cyklem życia w statusie. Punkty (100/6 za paczkę) liczą się do
-// podsumowania dla "Obsłużona", "Kontroferta", "Ok. Dok." i "Problem" (30.09.2026, na prośbę właściciela —
-// wcześniej tylko "Obsłużona", zgodnie z §2 ust. 4 regulaminu; rozszerzenie to świadoma decyzja biznesowa,
-// nie literalne odczytanie regulaminu). "Czas" jest tylko informacyjny.
+// Jedna paczka = jeden rekord z cyklem życia w statusie. Punkty (17 pkt flat za paczkę, Regulamin
+// zaktualizowany 01.10.2026 — wcześniej ułamek 100/6 ≈16,67; stare paczki zachowują swoją migawkę)
+// liczą się do podsumowania dla "Obsłużona", "Kontroferta", "Ok. Dok." i "Problem" (30.09.2026, na
+// prośbę właściciela — wcześniej tylko "Obsłużona", zgodnie z §2 ust. 4 regulaminu; rozszerzenie to
+// świadoma decyzja biznesowa, nie literalne odczytanie regulaminu). "Czas" jest tylko informacyjny.
 
 const pill = (active: boolean) =>
   `px-3 py-1.5 rounded-full text-sm font-semibold border ${active ? "bg-ink text-paper border-ink" : "bg-white border-line"}`;

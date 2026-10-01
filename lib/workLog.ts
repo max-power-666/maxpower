@@ -33,12 +33,18 @@ export function fmtDuration(startIso: string, endIso: string | null): string {
 // Etykiety typów czynności i statusów — jedno źródło prawdy dla list (Serwis, Testy, Trade-in)
 // i karty produktu, żeby log nigdy nie rozjechał się z tym, co widać w tabelach.
 
+// Punkty wg Regulaminu premiowania z 12.10.2026 (tabela §2 ust. 6, zaktualizowana 01.10.2026):
+// czyszczenie konsoli obniżone z 45 do 40 pkt, doszły "Kontroler Xbox Series S/X" (25 pkt) i
+// "Trudne konsole" (60 pkt, czynności serwisowe wymagające zaawansowanych napraw, czas
+// normatywny 60 min). Stare wpisy w service_log zachowują swoją migawkę punktów sprzed zmiany.
 export const SERVICE_TASKS = [
   { key: "joycon_pair", label: "Joy-Con, para (Nintendo Switch)", points: 15 },
   { key: "ps4_controller", label: "Kontroler PS4", points: 25 },
   { key: "xbox_controller", label: "Kontroler Xbox One / Xbox One X", points: 35 },
+  { key: "xbox_series_controller", label: "Kontroler Xbox Series S/X", points: 25 },
   { key: "ps5_controller", label: "Kontroler PS5 (DualSense)", points: 12 },
-  { key: "console_cleaning", label: "Czyszczenie konsoli", points: 45 },
+  { key: "console_cleaning", label: "Czyszczenie konsoli", points: 40 },
+  { key: "difficult_console", label: "Trudne konsole", points: 60 },
 ] as const;
 
 export const SERVICE_STATUSES = [

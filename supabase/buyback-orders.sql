@@ -113,6 +113,10 @@ alter table buyback_order_intake add column if not exists status text not null d
 alter table buyback_order_intake add column if not exists finished_at timestamptz;
 alter table buyback_order_intake add column if not exists points numeric not null default (100.0 / 6.0);
 alter table buyback_order_intake add column if not exists pads int;
+-- Regulamin zaktualizowany 01.10.2026: "Trade-In - paczka" to teraz 17 pkt flat (tabela §2 ust. 6),
+-- nie ułamek 100/6 (≈16,67) jak w poprzedniej wersji regulaminu. Zmieniamy tylko default dla
+-- NOWYCH wpisów — stare paczki zachowują swoją migawkę 100/6, migawka nie zmienia się wstecz.
+alter table buyback_order_intake alter column points set default 17;
 -- ON DELETE SET NULL (30.09.2026) — patrz wyjaśnienie w schema.sql (members.user_id); entered_by_email jest już
 -- zapisany osobno, więc "kto to zrobił" zostaje widoczne mimo zerwania linku do konta.
 alter table buyback_order_intake drop constraint if exists buyback_order_intake_entered_by_user_id_fkey;

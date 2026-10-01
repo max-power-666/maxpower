@@ -16,13 +16,17 @@ create table if not exists test_log (
   notes text,                                -- uwagi, edytowane w wierszu listy
   started_at timestamptz not null default now(),
   finished_at timestamptz,
-  -- Migawka punktów za urządzenie: 100/6,5 = 200/13 (Regulamin §2 tabela). Celowo bez
-  -- zaokrąglania (§2 ust. 7, §4 ust. 8) — zaokrąglamy dopiero przy wyświetlaniu. Gdyby stawka
-  -- się zmieniła, zmieniamy default; stare wiersze zachowują swoją wartość.
+  -- Migawka punktów za urządzenie. Gdyby stawka się zmieniła, zmieniamy default; stare wiersze
+  -- zachowują swoją wartość.
   points numeric not null default (200.0 / 13.0)
 );
 
 alter table test_log add column if not exists notes text;
+-- Regulamin zaktualizowany 01.10.2026: "Tester - urządzenie" to teraz 15 pkt flat (tabela §2 ust.
+-- 6), nie ułamek 100/6,5 = 200/13 (≈15,38) jak w poprzedniej wersji regulaminu. Zmieniamy tylko
+-- default dla NOWYCH wpisów — stare testy zachowują swoją migawkę 200/13, zgodnie z zasadą, że
+-- migawka punktów nie zmienia się wstecz.
+alter table test_log alter column points set default 15;
 -- Rodzaj testu (01.10.2026) — skąd/czemu urządzenie trafiło do testu (po dostawie, po serwisie,
 -- ponowny test z magazynu, OLX, Allegro, Vinted); zwykły tekst jak role/typy w innych modułach —
 -- dodanie kolejnej wartości nie wymaga SQL, tylko TEST_KINDS w lib/workLog.ts. Default zapewnia,

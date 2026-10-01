@@ -787,16 +787,27 @@ slugi i SKU), `on conflict do nothing`, więc ponowne uruchomienie nie nadpisuje
 efekt "produkt wychodzi ponad kolorowy panel". SKU: `PREFIKS-OPCJA-STAN` (`skuFor` w `lib/shop.ts`, ta sama zasada co w sklepie).
 Zweryfikowane w PGlite (idempotentność, log z autorem, RLS: Manager nie usunie modelu, Magazyn nie edytuje, anon nie widzi szkiców).
 
-## Regulamin premiowania (12.10.2026) — co z niego wynika dla kodu
+## Regulamin premiowania (12.10.2026, wersja zaktualizowana przez właściciela 01.10.2026) — co z niego wynika dla kodu
 
 Zasady, które kształtują Serwis i Trade-in (pełny PDF ma właściciel):
 - punkty tylko po **prawidłowym zakończeniu** procesu (§2 ust. 4) → liczymy dopiero dla
   statusu końcowego "naprawiony" / "obsłużona";
-- jedna paczka/urządzenie zaliczone **raz**, zakaz przypisywania sobie cudzej pracy i
-  wielokrotnego rejestrowania (§2 ust. 3, §9) → unikalność paczki, pracownik z sesji,
-  usuwanie wpisów tylko przez Admina z zapisem w `deleted_records`;
-- Trade-in i testerzy: dokładne ułamki (100/6 pkt za paczkę, 100/6,5 za urządzenie), **bez
-  zaokrąglania** przed ustaleniem progu (§2 ust. 7, §4 ust. 8);
+- jedna paczka/urządzenie zaliczone **raz** (w ramach TEGO SAMEGO przebiegu), zakaz przypisywania
+  sobie cudzej pracy i wielokrotnego rejestrowania tej samej czynności (§2 ust. 3, §9) →
+  unikalność aktywnego/trwającego wpisu, pracownik z sesji, usuwanie wpisów tylko przez Admina z
+  zapisem w `deleted_records`. **Nie dotyczy to kolejnego, osobnego testu/paczki w innym
+  momencie** (np. Testy: urządzenie retestowane po serwisie — patrz sekcja Testy wyżej, zmiana
+  01.10.2026) — to osobna, prawdziwie wykonana praca, nie "wielokrotne rejestrowanie tego samego";
+- **Punkty flat, nie ułamki** (tabela §2 ust. 6, zaktualizowana 01.10.2026 — wcześniej 100/6 pkt za
+  paczkę Trade-In, 100/6,5 za urządzenie testera): **Trade-In - paczka 17 pkt**, **Obsługa zwrotu
+  17 pkt** (regulamin już to przewiduje, ale zakładka Zwroty to wciąż tylko pusty szkielet —
+  `ReturnsView.tsx` — więc 17 pkt za zwrot NIE jest jeszcze nigdzie naliczane w kodzie; do zrobienia
+  razem z punktem 11 planu rozwoju), **Tester - urządzenie 15 pkt**. Serwis (bez zmian w zasadzie,
+  tylko w tabeli — patrz `SERVICE_TASKS` w `lib/workLog.ts`): Joy-Con para 15, PS4 25, Xbox One 35,
+  **Xbox Series S/X 25 (nowy typ)**, PS5 12, czyszczenie konsoli **40 (obniżone z 45)**, **Trudne
+  konsole 60 (nowy typ)**. Zmieniamy tylko `default`/stałą dla NOWYCH wpisów — stare wpisy
+  zachowują swoją migawkę punktów sprzed aktualizacji (ten sam wzorzec co przy każdej wcześniejszej
+  zmianie stawek w tym projekcie, patrz komentarze w `tests.sql`/`buyback-orders.sql`);
 - "Czas" naprawy/paczki jest **tylko informacyjny** — wydajność w regulaminie to punkty /
   godziny *przepracowane* z ewidencji czasu pracy (§4), nie suma czasów zadań.
 - **Kolumna "Czas" widoczna tylko dla Admina i Managera** (30.09.2026, na prośbę właściciela) w Serwisie, Testach
@@ -806,10 +817,13 @@ Zasady, które kształtują Serwis i Trade-in (pełny PDF ma właściciel):
   świadomy stan MVP co reszta uprawnień — patrz sekcja Uprawnienia) — dane i tak są w bazie, tylko kolumna
   schowana z tabeli i `colSpan` pustego stanu dostosowany.
 
-Świadomie **nie zrobione**: kwota premii w zł, wydajność pkt/h, wskaźnik kwalifikacyjny 90%
-(§4-§7) — wymagają ewidencji godzin pracy, urlopów i nieobecności, której apka nie ma.
-Punkty z różnych obszarów mają się sumować w jeden wynik
-miesięczny (§2 ust. 6) — dziś każdy obszar ma osobną tabelę i podsumowanie.
+Świadomie **nie zrobione**: kwota premii w zł wg wzoru §5 (200 zł przy 45 pkt/h do 1500 zł przy 100
+pkt/h i więcej), norma wydajności 45 pkt/h (§4), wskaźnik kwalifikacyjny **80%** (§6 — w wersji
+regulaminu sprzed 01.10.2026 było 90%, poprawione w aktualizacji), proporcjonalne rozliczenie
+niepełnego miesiąca (§7) — wszystko to wymaga ewidencji godzin pracy, urlopów i nieobecności
+neutralnych, której apka nie ma (zakładka RCP to wciąż tylko pusty szkielet, plan rozwoju punkt 8).
+Punkty z różnych obszarów mają się sumować w jeden wynik miesięczny (§2 ust. 6) — dziś każdy obszar
+ma osobną tabelę i podsumowanie.
 
 ## Motyw kolorystyczny (30.09.2026)
 

@@ -8,8 +8,9 @@ import InlineEditCell from "./InlineEditCell";
 import ProductCardDrawer from "./ProductCardDrawer";
 import { INTERVALS, TEST_STATUSES as STATUSES, TEST_KINDS, TEST_RESULTS, fmtDuration, rangeStart, type Interval } from "@/lib/workLog";
 
-// Rejestr testów urządzeń wg Regulaminu premiowania (§2, 12.10.2026): 100/6,5 pkt = 200/13 pkt
-// za prawidłowo przetestowane urządzenie, bez zaokrąglania (wartość ustawia default w bazie).
+// Rejestr testów urządzeń wg Regulaminu premiowania (§2, 12.10.2026, zaktualizowany 01.10.2026):
+// 15 pkt flat za prawidłowo przetestowane urządzenie (wartość ustawia default w bazie). Stare
+// wpisy sprzed aktualizacji regulaminu mają migawkę 200/13 (≈15,38) — nie przeliczane wstecz.
 // Jeden wiersz = jeden test z cyklem życia w statusie. Punkty do podsumowania liczą się tylko dla
 // "przetestowane" (§2 ust. 4). "Czas" jest tylko informacyjny — regulamin liczy wydajność jako
 // punkty / godziny przepracowane (§4). Nie liczy premii w zł (wymaga ewidencji czasu pracy).
