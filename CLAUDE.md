@@ -724,11 +724,17 @@ Nie wymagane do żadnego statusu — czysto informacyjne, nie wpływa na punkty 
 
 **Testy** (`TestsView.tsx`, `test_log`). Rejestr testów urządzeń: pole numer seryjny +
 "Rozpocznij test". Jeden wiersz = jeden test: status (w_trakcie / przetestowane / przerwany),
-czas, punkty 200/13 (= 100/6,5) po "przetestowane", bez zaokrąglania. To samo urządzenie nie
-może mieć dwóch aktywnych wpisów naraz (indeks częściowy na `serial_number`); test
-"przerwany" nie blokuje ponownego podejścia. Punkty są niezależne od wyniku testu —
-potwierdzone właśnie dzięki kolumnie "Wynik" niżej (01.10.2026): to osobne pole, nie
-podstatus, i w ogóle nie wchodzi do logiki punktów/aktywnego wpisu.
+czas, punkty 200/13 (= 100/6,5) po "przetestowane", bez zaokrąglania. Punkty są niezależne od
+wyniku testu — potwierdzone właśnie dzięki kolumnie "Wynik" niżej (01.10.2026): to osobne pole,
+nie podstatus, i w ogóle nie wchodzi do logiki punktów/aktywnego wpisu.
+**Urządzenia mogą trafiać na testy wielokrotnie** (01.10.2026, zgłoszone przez właściciela — indeks
+częściowy na `serial_number` blokuje tylko DWA TRWAJĄCE testy naraz, `status = 'w_trakcie'`, nie kolejny
+test po "przetestowane"). **Do 01.10.2026 indeks blokował też ponowny test po "przetestowane"** — błędne
+założenie z Regulaminu §2 ust. 3/§9 ust. 2 ("wielokrotne rejestrowanie to manipulowanie wynikiem"), mylące
+zduplikowane zaliczenie TEGO SAMEGO przebiegu z osobnym, kolejnym testem w innym momencie — a kolejne testy
+to realny scenariusz biznesowy wprost nazwany w `TEST_KINDS` niżej (po serwisie, ponowny test z magazynu,
+przed wystawieniem na OLX/Allegro/Vinted) — każdy taki test to osobna, prawdziwie wykonana praca i osobne
+punkty. Test "przerwany" nigdy nie blokował ponownego podejścia, to się nie zmieniło.
 **Kolumna "Rodzaj testu"** (01.10.2026, `test_log.test_kind`, `TEST_KINDS` w `lib/workLog.ts`) — skąd/czemu
 urządzenie trafiło do testu: Po dostawie / Po serwisie / Ponowny test z magazynu / OLX / Allegro / Vinted.
 Wybierane w formularzu "Rozpocznij test" (select, domyślnie pierwsza wartość — zawsze coś wybrane, bez pustej

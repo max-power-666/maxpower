@@ -142,7 +142,7 @@ export default function TestsView({
       });
       if (err) {
         if (err.code === "23505" || err.message.includes("duplicate key")) {
-          throw new Error(`Urządzenie ${value} ma już wpis (w trakcie albo przetestowane) — sprawdź listę poniżej.`);
+          throw new Error(`Urządzenie ${value} ma już trwający test (w trakcie) — sprawdź listę poniżej.`);
         }
         throw err;
       }

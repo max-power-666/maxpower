@@ -39,11 +39,20 @@ alter table test_log alter column employee_user_id drop not null;
 alter table test_log drop constraint if exists test_log_employee_user_id_fkey;
 alter table test_log add constraint test_log_employee_user_id_fkey foreign key (employee_user_id) references auth.users(id) on delete set null;
 
--- To samo urządzenie nie może mieć dwóch aktywnych wpisów naraz: trwającego albo już
--- zaliczonego (Regulamin §2 ust. 3 i §9 ust. 2: wielokrotne rejestrowanie tego samego
--- urządzenia to manipulowanie wynikiem). Test "przerwany" nie blokuje ponownego podejścia.
+-- To samo urządzenie nie może mieć DWÓCH TRWAJĄCYCH testów naraz (duplikat przez pomyłkę/skan
+-- dwóch osób na raz) — ale PO zakończeniu testu ("przetestowane") urządzenie MOŻE trafić na
+-- kolejny test ponownie: zgłoszone przez właściciela 01.10.2026 (ten sam dzień co "Rodzaj testu"
+-- wyżej) jako realny scenariusz biznesowy wprost nazwany w TEST_KINDS — po serwisie, ponowny test
+-- z magazynu, przed wystawieniem na OLX/Allegro/Vinted, to wszystko testy urządzenia, które już
+-- wcześniej miało status "przetestowane". Pierwotna wersja (do 01.10.2026) blokowała też ponowny
+-- test po "przetestowane" — błędne założenie z Regulaminu §2 ust. 3/§9 ust. 2 ("wielokrotne
+-- rejestrowanie to manipulowanie wynikiem"), które miało sens dla ZDUBLOWANEGO zaliczenia TEGO
+-- SAMEGO przebiegu testu, nie dla kolejnego, osobnego testu w innym momencie — każdy taki test to
+-- osobna, prawdziwie wykonana praca i osobne punkty. Test "przerwany" nigdy nie blokował ponownego
+-- podejścia, to się nie zmienia.
+drop index if exists test_log_serial_active_uq;
 create unique index if not exists test_log_serial_active_uq
-  on test_log (serial_number) where status in ('w_trakcie', 'przetestowane');
+  on test_log (serial_number) where status = 'w_trakcie';
 
 create index if not exists test_log_employee_idx on test_log (employee_user_id, started_at desc);
 create index if not exists test_log_started_idx on test_log (started_at desc);
