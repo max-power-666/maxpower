@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { requireRole } from "@/lib/serverAuth";
-import { createFakturowniaInvoice, fakturowniaConfigFromEnv, type InvoiceBuyerPrefill, type InvoicePosition } from "@/lib/invoices";
+import { createFakturowniaInvoice, fakturowniaConfigFromEnv, formatErpInvoiceNumber, type InvoiceBuyerPrefill, type InvoicePosition } from "@/lib/invoices";
 
 // Wystawia fakturę VAT w Fakturowni dla zamówienia, które ma już numer przesyłki i numer seryjny/IMEI na KAŻDEJ
 // pozycji (patrz widok invoices_ready_orders w supabase/invoices.sql). Jawny przycisk "Wystaw fakturę" na liście
@@ -85,8 +85,17 @@ export async function POST(request: Request) {
   const sellDate = order.order_date ? String(order.order_date).slice(0, 10) : todayIso();
   const issueDate = todayIso();
 
+  // Numer wewnętrzny ERP/{nr}/{MM}/{YYYY}, zeruje się co miesiąc (next_invoice_number w supabase/invoices.sql,
+  // atomowy licznik per okres "YYYY-MM") — żeby na liście faktur w Fakturowni było widać, co przyszło z naszej
+  // appki. Liczony wg daty WYSTAWIENIA, nie sprzedaży.
+  const [issueYear, issueMonth] = issueDate.split("-").map(Number);
+  const period = `${issueYear}-${String(issueMonth).padStart(2, "0")}`;
+  const { data: seq, error: seqErr } = await db.rpc("next_invoice_number", { p_period: period });
+  if (seqErr) return NextResponse.json({ error: `Błąd numeracji faktury: ${seqErr.message}` }, { status: 500 });
+  const erpNumber = formatErpInvoiceNumber(Number(seq), issueMonth, issueYear);
+
   try {
-    const invoice = await createFakturowniaInvoice(cfg, buyer, positions, { sellDate, issueDate, orderNumber: externalId });
+    const invoice = await createFakturowniaInvoice(cfg, buyer, positions, { sellDate, issueDate, orderNumber: externalId, erpNumber });
     const byEmail = (await db.auth.admin.getUserById(uid)).data.user?.email ?? null;
 
     const { data: saved, error: saveErr } = await db

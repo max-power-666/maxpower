@@ -12,6 +12,14 @@ const clean = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 // nabywcy na razie). Stała, nie rozsiana po kodzie, żeby zmiana w przyszłości (np. na OSS) była w jednym miejscu.
 export const INVOICE_VAT_RATE = 23;
 
+// Numer wewnętrzny ERP (01.10.2026, na prośbę właściciela): ERP/{nr}/{MM}/{YYYY} — żeby na liście faktur w
+// Fakturowni od razu było widać, co przyszło z naszej appki, a co jest wystawione ręcznie w panelu Fakturowni.
+// Zeruje się co miesiąc (świadoma decyzja właściciela) — numer kolejny przychodzi z next_invoice_number w bazie
+// (atomowy licznik per miesiąc, supabase/invoices.sql), tu tylko formatowanie napisu.
+export function formatErpInvoiceNumber(n: number, month: number, year: number): string {
+  return `ERP/${n}/${String(month).padStart(2, "0")}/${year}`;
+}
+
 export type InvoiceBuyerPrefill = {
   name: string;
   company: string;
@@ -212,13 +220,14 @@ export async function createFakturowniaInvoice(
   cfg: FakturowniaConfig,
   buyer: InvoiceBuyerPrefill,
   positions: InvoicePosition[],
-  opts: { sellDate: string; issueDate: string; orderNumber: string }
+  opts: { sellDate: string; issueDate: string; orderNumber: string; erpNumber: string }
 ): Promise<{ id: number; number: string; issueDate: string; sellDate: string; totalGross: number; currency: string }> {
   const currency = positions.find((p) => p.currency)?.currency || "PLN";
   const body = {
     api_token: cfg.token,
     invoice: {
       kind: "vat",
+      number: opts.erpNumber,
       issue_date: opts.issueDate,
       sell_date: opts.sellDate,
       payment_to: opts.issueDate,

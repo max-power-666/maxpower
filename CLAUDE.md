@@ -778,6 +778,19 @@ brutto / Status dokumentu) — na wyraźną prośbę właściciela.
   `fakturownia/sync` w Magazynie — jedno konto, nie dodano nowych zmiennych środowiskowych). **Nabywca zawsze inline**
   (`buyer_name`/`buyer_tax_no`/...), NIGDY `client_id` — świadomie nie zakładamy osobnej kartoteki klienta w Fakturowni
   dla każdego kupującego z marketplace'u, to zaśmieciłoby listę kontrahentów setkami jednorazowych wpisów.
+- **Numer wewnętrzny `ERP/{nr}/{MM}/{YYYY}`** (01.10.2026, na prośbę właściciela — żeby na liście faktur w
+  Fakturowni od razu było widać, co przyszło z naszej appki, a co jest wystawione ręcznie w panelu Fakturowni).
+  Wysyłany jako `invoice.number` wprost w żądaniu (dokumentacja: "Auto-generated if null" — czyli jawne podanie
+  numeru nadpisuje auto-numerację Fakturowni dla tej jednej faktury, resztę kontrahenta to nie dotyczy). **Zeruje
+  się co miesiąc** (świadoma decyzja właściciela, potwierdzona przez AskUserQuestion — alternatywa "narasta bez
+  końca" odrzucona) — liczone wg daty WYSTAWIENIA (nie sprzedaży). Licznik: `invoice_number_counter` (klucz
+  `period` = `"YYYY-MM"`) + funkcja `next_invoice_number(p_period)` w `invoices.sql` — atomowy upsert (`on conflict
+  ... do update set last_number = last_number + 1 returning`), bezpieczny przy równoczesnych wystawieniach mimo że
+  w praktyce to rzadkie (ręczny przycisk, jedna osoba na raz). Tabela licznika **bez żadnej polityki RLS** (jak
+  `oauth_tokens` — niedostępna dla zalogowanych w ogóle, tylko `service_role`) — numeracja faktur nie powinna być
+  osiągalna z przeglądarki żadną drogą. `formatErpInvoiceNumber(n, month, year)` w `lib/invoices.ts` tylko
+  formatuje napis (miesiąc dopełniony zerem do dwóch cyfr); samą liczbę kolejną zawsze bierzemy z bazy, nigdy nie
+  liczymy jej po stronie aplikacji (race condition przy dwóch równoczesnych kliknięciach).
 - **Log zmian**: po sukcesie front-end (`InvoicesView.tsx`) dopisuje wpis do `sales_orders.history` przez RPC
   `sales_order_add_log` z sesji przeglądarki — ten sam wzorzec co przycisk "Zaakceptuj zamówienie" w `SalesOrderCard.tsx`
   (nie serwer — `by_email` bierze się z `session.user.email`, prościej niż dociąganie e-maila po stronie route'u).

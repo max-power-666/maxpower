@@ -60,6 +60,29 @@ where s.tracking_number is not null
 -- to samo; grant jawny na wszelki wypadek (PostgREST eksponuje widoki tak jak tabele).
 grant select on invoices_ready_orders to authenticated;
 
+-- Numer wewnętrzny ERP (01.10.2026, na prośbę właściciela): ERP/{nr}/{MM}/{YYYY}, żeby na liście faktur w
+-- Fakturowni było od razu widać, co przyszło z naszej appki, a co jest wystawione ręcznie w panelu Fakturowni.
+-- Numer zeruje się co miesiąc (świadoma decyzja właściciela — pierwsza faktura w listopadzie to znowu ERP/1/...).
+-- Licznik osobno per miesiąc (period = 'YYYY-MM'), bez żadnej polityki RLS (jak oauth_tokens — niedostępne dla
+-- zalogowanych, tylko service_role) — numeracja faktur nie powinna być osiągalna z przeglądarki w żaden sposób.
+-- next_invoice_number robi atomowy upsert (jedno zapytanie, blokada wiersza w Postgresie) — bezpieczne przy
+-- dwóch równoczesnych wystawieniach, mimo że w praktyce to rzadkie (ręczny przycisk, jedna osoba na raz).
+create table if not exists invoice_number_counter (
+  period text primary key,
+  last_number int not null default 0
+);
+alter table invoice_number_counter enable row level security;
+
+create or replace function next_invoice_number(p_period text) returns int
+language plpgsql as $$
+declare n int;
+begin
+  insert into invoice_number_counter (period, last_number) values (p_period, 1)
+  on conflict (period) do update set last_number = invoice_number_counter.last_number + 1
+  returning last_number into n;
+  return n;
+end $$;
+
 do $$
 begin
   begin alter publication supabase_realtime add table invoices; exception when duplicate_object then null; end;
