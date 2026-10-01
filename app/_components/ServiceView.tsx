@@ -135,6 +135,10 @@ export default function ServiceView({
 
   async function submit() {
     setFormError("");
+    if (!deviceRef.trim()) {
+      setFormError("Podaj numer seryjny / IMEI, żeby rozpocząć naprawę.");
+      return;
+    }
     setSubmitting(true);
     try {
       const task = SERVICE_TASKS.find((t) => t.key === taskType)!;
@@ -143,7 +147,7 @@ export default function ServiceView({
         employee_email: session.user.email,
         task_type: task.key,
         points: task.points,
-        device_ref: deviceRef.trim() || null,
+        device_ref: deviceRef.trim(),
         status: "w_naprawie",
       });
       if (err) throw err;
@@ -167,6 +171,11 @@ export default function ServiceView({
   async function saveNotes(row: LogRow, notes: string | null) {
     const { error: err } = await supabase.from("service_log").update({ notes }).eq("id", row.id);
     if (err) setError(`Nie udało się zapisać uwag: ${err.message}`);
+  }
+
+  async function saveDeviceRef(row: LogRow, deviceRef: string | null) {
+    const { error: err } = await supabase.from("service_log").update({ device_ref: deviceRef }).eq("id", row.id);
+    if (err) setError(`Nie udało się zapisać numeru seryjnego: ${err.message}`);
   }
 
   async function savePartSerials(row: LogRow, partSerials: string[]) {
@@ -234,7 +243,7 @@ export default function ServiceView({
             </select>
           </div>
           <div>
-            <label className="text-xs font-semibold text-inksoft block mb-1">Numer seryjny / identyfikator</label>
+            <label className="text-xs font-semibold text-inksoft block mb-1">Numer seryjny / IMEI *</label>
             <input
               value={deviceRef}
               onChange={(e) => setDeviceRef(e.target.value)}
@@ -243,7 +252,7 @@ export default function ServiceView({
           </div>
         </div>
         {formError && <p className="text-rust text-xs mb-2">{formError}</p>}
-        <button onClick={submit} disabled={submitting} className={btnPrimary}>
+        <button onClick={submit} disabled={submitting || !deviceRef.trim()} className={btnPrimary}>
           {submitting ? "Zapisywanie…" : "Rozpocznij naprawę"}
         </button>
       </div>
@@ -275,11 +284,17 @@ export default function ServiceView({
                 <td className="p-3">{displayNameForEmail(r.employee_email, members)}</td>
                 <td className="p-3">{TASK_LABEL[r.task_type] || r.task_type}</td>
                 <td className="p-3">
-                  {r.device_ref ? (
-                    <button onClick={() => setOpenSerial(r.device_ref)} className="font-mono font-semibold text-teal hover:underline">{r.device_ref}</button>
-                  ) : (
-                    "—"
-                  )}
+                  <div className="flex items-center gap-1">
+                    <InlineEditCell
+                      value={r.device_ref}
+                      placeholder="Numer seryjny / IMEI"
+                      className="w-36 font-mono"
+                      onSave={(next) => saveDeviceRef(r, next)}
+                    />
+                    {r.device_ref && (
+                      <button onClick={() => setOpenSerial(r.device_ref)} title="Otwórz kartę produktu" className="text-teal shrink-0">↗</button>
+                    )}
+                  </div>
                 </td>
                 <td className="p-3">
                   <PartsCell values={r.part_serials} onSave={(next) => savePartSerials(r, next)} />

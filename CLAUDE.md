@@ -707,6 +707,13 @@ Joy-Con para 15 pkt, kontroler PS4 25, Xbox One 35, PS5 12, czyszczenie konsoli 
 Jeden wiersz = jedna naprawa: `started_at`, status (w_naprawie / naprawiony / uszkodzony),
 `finished_at`. Pracownik = zawsze zalogowana osoba (nie do wyboru). Wpisy może usuwać
 tylko Admin (przycisk "Usuń", tak samo w Testach i Trade-in). Podsumowanie punktacji u góry (Dziś/7/30 dni) liczy tylko "naprawiony".
+**Numer seryjny / IMEI jest wymagany, żeby ROZPOCZĄĆ naprawę** (01.10.2026, na prośbę właściciela) — pole w formularzu
+ma gwiazdkę, przycisk "Rozpocznij naprawę" jest zablokowany, dopóki pole jest puste, a pilnuje tego też trigger
+`service_log_require_device_ref` w bazie (serwer nie ufa przeglądarce). **Wymóg dotyczy tylko INSERT, nie UPDATE** —
+`device_ref` jest edytowalny w wierszu listy (`InlineEditCell`, obok przycisk "↗" do karty produktu, widoczny tylko
+gdy pole niepuste) i da się go później poprawić albo nawet wyczyścić bez blokady — inaczej niż w Testach, gdzie
+numer seryjny zostaje tylko do odczytu po rozpoczęciu testu. Dzięki temu stare wpisy sprzed tej zmiany (z pustym
+`device_ref`) nadal da się normalnie edytować (status, uwagi, części) — trigger sprawdza tylko moment startu.
 **Kolumna "Części"** (30.09.2026, `part_serials text[]`) — numery seryjne części wykorzystanych w naprawie,
 dowolna liczba (często zero, czasem kilka). W odróżnieniu od Padów w Trade-in (pole "ilość" generuje tyle
 slotów) tu wprost przyciski **+/- przy każdym polu** (`PartsCell.tsx`, nowy współdzielony komponent): "+"

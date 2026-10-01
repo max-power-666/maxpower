@@ -48,6 +48,23 @@ create index if not exists service_log_employee_idx on service_log (employee_use
 create index if not exists service_log_started_idx on service_log (started_at desc);
 create index if not exists service_log_finished_idx on service_log (finished_at desc);
 
+-- Rozpoczęcie naprawy wymaga numeru seryjnego/IMEI (01.10.2026, na prośbę właściciela) — tylko przy
+-- INSERT (rozpoczęciu), nie przy UPDATE: numer da się potem edytować/poprawić w wierszu listy (w tym
+-- wyczyścić), a stare wpisy sprzed tej zmiany (device_ref puste) dalej da się normalnie aktualizować
+-- (status, uwagi, części) bez blokady.
+create or replace function service_log_require_device_ref() returns trigger
+language plpgsql as $$
+begin
+  if coalesce(btrim(new.device_ref), '') = '' then
+    raise exception 'Rozpoczęcie naprawy wymaga numeru seryjnego / IMEI.' using errcode = '23514';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists service_log_require_device_ref_trg on service_log;
+create trigger service_log_require_device_ref_trg before insert on service_log
+  for each row execute function service_log_require_device_ref();
+
 alter table service_log enable row level security;
 
 drop policy if exists "authenticated read service_log" on service_log;
