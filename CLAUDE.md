@@ -721,16 +721,33 @@ brutto / Status dokumentu) — na wyraźną prośbę właściciela.
   `invoices_ready_orders` jest czytelny dla każdego `authenticated` (ten sam, szeroki dostęp co `sales_orders`/
   `sales_order_items` — nie dokłada nowej ekspozycji danych, tylko filtruje już czytelne tabele), ale sama tabela `invoices`
   (dane nabywcy, kwoty) jest już zawężona do `is_admin_or_manager()`, tak jak `shipments`.
-- **"Wystaw fakturę →"** otwiera panel boczny z podglądem pozycji (SKU + numer seryjny + cena) i EDYTOWALNYM formularzem
-  nabywcy — nie wysyła na ślepo. Wstępne wypełnienie (`app/api/invoices/prefill`, GET) czyta adres z surowej tabeli kanału
-  (`bm_orders`/`refurbed_orders`/`octopia_orders` — te same co "Nadaj przesyłkę DHL" w `SalesOrderCard.tsx`, przez nowy
-  `rawBuyerAddress` w `lib/shipping.ts`, wydzielony z `buildShipPrefill` BEZ filtra `DHL_EU_COUNTRIES` — faktura ma
-  obowiązywać niezależnie od tego, czy danym krajem w ogóle wysyłamy DHL-em). **Erli, Allegro i Amazon nie mają tu jeszcze
-  obsługi adresu** (ten sam, znany gdzie indziej brak danych — Amazon SP-API w ogóle nie udostępnia PII, patrz sekcja
-  Wysyłka; Erli/Allegro po prostu jeszcze nie zrobione) — formularz wtedy startuje pusty i pracownik wypełnia go ręcznie;
-  to nie blokuje wystawienia faktury dla tych kanałów, tylko nie ma czym go wstępnie wypełnić. **Pole NIP jest zawsze
-  puste z prefillu i zawsze edytowalne** — żadne API marketplace'u nie przekazuje numeru NIP nabywcy (sprzedaż
-  konsumencka); gdy klient poproszył o fakturę na firmę, pracownik wpisuje NIP ręcznie przed wystawieniem.
+- **"Wystaw fakturę →"** otwiera panel boczny z podglądem pozycji (produkt + SKU + numer seryjny + cena) i EDYTOWALNYM
+  formularzem nabywcy — nie wysyła na ślepo. Wstępne wypełnienie (`app/api/invoices/prefill`, GET;
+  `buildInvoiceBuyerPrefill` w `lib/invoices.ts`) czyta dane z surowej tabeli kanału (`bm_orders`/`refurbed_orders`/
+  `allegro_orders`/`octopia_orders`). **Dla faktury czytamy inne pole niż dla wysyłki** — zgłoszone przez właściciela
+  01.10.2026 na żywym zamówieniu refurbed z firmą i NIP-em, które na karcie zamówienia (`SalesOrderCard.tsx`) nie
+  pokazywały się wcale, bo adres do PACZKI i dane do FAKTURY to często osobne pola tego samego zamówienia, sprawdzone
+  bezpośrednio w danych, nie zgadywane:
+  - **refurbed**: `invoice_address` (NIE `shipping_address`) — pole `entity` rozstrzyga firma/osoba: `"COMPANY"` niesie
+    `company_name`/`company_vatin` (np. `"EE102125100"`), `"MALE"`/`"FEMALE"` to osoba prywatna (`first_name`/
+    `family_name`, bez NIP-u). `invoice_address` jest zawsze obecne (sprawdzone na 1000 zamówień — zero braków).
+  - **Back Market**: `billing_address` (NIE `shipping_address`, choć adres zwykle identyczny — e-mail-przekaźnik ma
+    inny prefiks, `invoice_...` vs `shipping_...`) — pola `company` i `customer_id_number` są NIEZALEŻNE od siebie i
+    od pola z imieniem/nazwiskiem (sprawdzone: 34/1000 zamówień miało `company`, 12/1000 `customer_id_number`, różne
+    podzbiory) — `customer_id_number` to numer identyfikacyjny podatkowy nabywcy (np. hiszpański NIF), NIE tylko dla
+    firm: Hiszpania/Włochy wymagają go też od osób prywatnych.
+  - **Allegro**: `invoice.required` mówi, czy kupujący w ogóle poprosił o fakturę (większość zamówień: nie — wtedy
+    fallback na `buyer.address`/`buyer.firstName`/`buyer.lastName`/`buyer.companyName`, zwykle bez firmy). Gdy
+    `true`, `invoice.address` ma ALBO `company` (`{ids, name, taxId}`) ALBO `naturalPerson` (`{firstName,
+    lastName}`) — i to inny adres niż `buyer.address` (potwierdzone na żywym zamówieniu: różne miasta).
+  - **Octopia**: żadnego osobnego pola faktury/VAT nie znaleziono (sprawdzone) — zostaje adres dostawy jak przy
+    wysyłce (`rawBuyerAddress` w `lib/shipping.ts`), bez NIP.
+  - **Erli, Amazon**: bez obsługi adresu (Amazon SP-API w ogóle nie udostępnia PII, patrz sekcja Wysyłka; Erli
+    jeszcze nie zrobione) — formularz startuje pusty, pracownik wypełnia ręcznie; to nie blokuje wystawienia faktury
+    dla tych kanałów, tylko nie ma czym go wstępnie wypełnić.
+  Zweryfikowane bezpośrednio w `invoices.test.js` (scratchpad) na dosłownych kształtach pól z żywych zamówień (nie na
+  wymyślonych fixture'ach) — jedyna rzecz, której NIE dało się sprawdzić na żywym API, to samo wystawienie faktury
+  (brak kluczy Fakturowni w środowisku asystenta).
 - **Stawka VAT jest jedna, stała dla wszystkich pozycji i kanałów** (`INVOICE_VAT_RATE` w `lib/invoices.ts`, 23% —
   świadoma decyzja właściciela 01.10.2026, BEZ logiki OSS per kraj nabywcy, mimo sprzedaży też do DE/ES/FR/IT i innych
   krajów UE) — jedna stała w kodzie, nie rozsiana, żeby ewentualne przejście na OSS było zmianą w jednym miejscu, nie
@@ -1053,5 +1070,6 @@ Configuration) musi być aktualny adres produkcyjny, inaczej magic link nie zadz
 9. ⬜ Integracje z kanałami sprzedaży (Allegro, eBay) — osobny etap, wymaga kluczy API
 10. ⬜ Twarde uprawnienia per rola (RLS)
 11. ⬜ Zwroty: rejestr fizycznej obsługi zwrotu (przyjęcie, ocena stanu, decyzja co dalej)
-12. 🟡 Faktury: wystawianie faktur VAT w Fakturowni (ręczny przycisk) zrobione · ⬜ synchronizacja statusu płatności,
-    ⬜ obsługa adresu nabywcy dla Erli/Allegro/Amazon, ⬜ procedura OSS/VAT-marża per kraj nabywcy (dziś jedna stała stawka)
+12. 🟡 Faktury: wystawianie faktur VAT w Fakturowni (ręczny przycisk), dane firmy/NIP z Back Market/refurbed/Allegro
+    zrobione · ⬜ synchronizacja statusu płatności, ⬜ obsługa adresu nabywcy dla Erli/Amazon, ⬜ procedura OSS/VAT-marża
+    per kraj nabywcy (dziś jedna stała stawka)

@@ -4,9 +4,11 @@ import { requireRole } from "@/lib/serverAuth";
 import { buildInvoiceBuyerPrefill } from "@/lib/invoices";
 
 // Wstępne wypełnienie formularza "Wystaw fakturę" (zakładka Faktury) — czyta surowe dane zamówienia z tabeli
-// kanału (bm_orders/refurbed_orders/octopia_orders, te same co SalesOrderCard.tsx używa do "Nadaj przesyłkę DHL")
-// i oddaje gotowe pola nabywcy, żeby InvoicesView.tsx nie musiało powtarzać tej logiki po stronie przeglądarki.
-// Dla kanałów bez obsługi adresu (Erli, Allegro, Amazon) oddaje puste pola — pracownik wypełnia ręcznie.
+// kanału (bm_orders/refurbed_orders/allegro_orders/octopia_orders) i oddaje gotowe pola nabywcy, żeby
+// InvoicesView.tsx nie musiało powtarzać tej logiki po stronie przeglądarki. Back Market/refurbed/Allegro czytają
+// dane FAKTUROWE (billing_address/invoice_address/invoice.address), nie adres dostawy — patrz komentarz w
+// buildInvoiceBuyerPrefill (lib/invoices.ts) dla pełnego uzasadnienia różnicy. Dla kanałów bez obsługi (Erli,
+// Amazon) oddaje puste pola — pracownik wypełnia ręcznie.
 
 const admin = () => createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 
@@ -32,8 +34,11 @@ export async function GET(request: Request) {
   } else if (marketplace === "octopia") {
     const { data } = await db.from("octopia_orders").select("raw").eq("id", externalId).maybeSingle();
     raw = data?.raw ?? null;
+  } else if (marketplace === "allegro") {
+    const { data } = await db.from("allegro_orders").select("raw").eq("id", externalId).maybeSingle();
+    raw = data?.raw ?? null;
   }
-  // Erli/Allegro/Amazon: raw zostaje null celowo — rawBuyerAddress (lib/shipping.ts) i tak odda puste pola.
+  // Erli/Amazon: raw zostaje null celowo — buildInvoiceBuyerPrefill i tak odda puste pola.
 
   const buyer = buildInvoiceBuyerPrefill(marketplace, raw, customerEmail);
 

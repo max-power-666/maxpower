@@ -4,7 +4,9 @@
 // cofnięcia — korekta to osobny dokument, nie usunięcie — więc nie generujemy ich automatycznie bez przeglądu).
 // Ten sam FAKTUROWNIA_DOMAIN/FAKTUROWNIA_API_TOKEN co fakturownia/sync (zakładka Magazyn) — jedno konto.
 
-import { rawBuyerAddress } from "./shipping";
+import { rawBuyerAddress, splitStreet } from "./shipping";
+
+const clean = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 
 // Stawka VAT jednolita dla wszystkich pozycji/kanałów (decyzja właściciela 01.10.2026 — bez logiki OSS per kraj
 // nabywcy na razie). Stała, nie rozsiana po kodzie, żeby zmiana w przyszłości (np. na OSS) była w jednym miejscu.
@@ -26,24 +28,104 @@ const EMPTY_BUYER: InvoiceBuyerPrefill = {
   name: "", company: "", street: "", houseNumber: "", apartment: "", postalCode: "", city: "", countryCode: "", taxNo: "",
 };
 
-// Wstępne wypełnienie danych nabywcy z surowego zamówienia — bez filtra kraju (w odróżnieniu od buildShipPrefill
-// w lib/shipping.ts, który filtruje do krajów DHL). Dla kanałów bez obsługi adresu (Erli, Allegro, Amazon — patrz
-// komentarz w rawBuyerAddress) zwraca puste pola: pracownik uzupełnia je ręcznie w formularzu przed wystawieniem —
-// to nie blokuje wystawienia faktury dla tych kanałów, tylko nie ma czym wstępnie wypełnić formularza.
+// Wstępne wypełnienie danych nabywcy DO FAKTURY — osobna logika od buildShipPrefill (lib/shipping.ts), bo adres
+// do WYSYŁKI i dane do FAKTURY to często różne pola w tym samym zamówieniu (sprawdzone na żywych danych
+// 01.10.2026, zgłoszenie właściciela przy konkretnym zamówieniu refurbed z firmą i NIP-em):
+//
+// - **refurbed**: `invoice_address` (NIE `shipping_address`) ma pole `entity` — "COMPANY" (z `company_name` i
+//   `company_vatin`, np. "EE102125100") albo "MALE"/"FEMALE" (osoba prywatna, `first_name`/`family_name`).
+//   `invoice_address` jest zawsze obecne (sprawdzone na 1000 zamówień — 0 bez tego pola), ale mimo to zostaje
+//   fallback do `shipping_address`, na wszelki wypadek.
+// - **Back Market**: `billing_address` (NIE `shipping_address`, choć w praktyce te same dane — e-mail-przekaźnik
+//   ma inny prefiks: "invoice_..." vs "shipping_...", potwierdzone na żywych zamówieniach) ma pola `company` i
+//   `customer_id_number` (numer identyfikacyjny podatkowy nabywcy — np. hiszpański NIF "12409537W"; NIE tylko dla
+//   firm, Włochy/Hiszpania wymagają go też od osób prywatnych) — oba pola niezależne od siebie, sprawdzone na
+//   żywych danych: 34/1000 zamówień miało `company`, 12/1000 miało `customer_id_number`, różne podzbiory.
+// - **Allegro**: `invoice.required` mówi, czy kupujący w ogóle poprosił o fakturę; jeśli tak, `invoice.address`
+//   ma albo `company` (`{ids:[{type,value}], name, taxId}`) albo `naturalPerson` ({firstName, lastName}) — inny
+//   adres niż `buyer.address` (potwierdzone na żywym zamówieniu: adres faktury w innym mieście niż adres
+//   dostawy). Gdy `invoice.required` jest false (większość zamówień), spadamy na `buyer.address`/`buyer.companyName`
+//   (zwykle pusty — prywatny kupujący bez faktury).
+// - **Octopia**: żadnego osobnego pola faktury/VAT nie znaleziono (sprawdzone na żywych danych) — zostaje na
+//   `rawBuyerAddress` (adres dostawy) jak przy wysyłce, bez NIP.
+// - **Erli, Amazon**: bez obsługi adresu (patrz komentarz w `rawBuyerAddress`, lib/shipping.ts) — formularz
+//   startuje pusty, pracownik wypełnia ręcznie.
 export function buildInvoiceBuyerPrefill(marketplace: string, raw: any, customerEmail?: string | null): InvoiceBuyerPrefill {
-  const p = rawBuyerAddress(marketplace, raw, customerEmail);
-  if (!p) return EMPTY_BUYER;
-  return {
-    name: p.name,
-    company: p.company,
-    street: p.street,
-    houseNumber: p.houseNumber,
-    apartment: p.apartment,
-    postalCode: p.postalCode,
-    city: p.city,
-    countryCode: p.countryCode,
-    taxNo: "",
-  };
+  if (marketplace === "backmarket") {
+    const a = raw?.billing_address || raw?.shipping_address;
+    if (a) {
+      return {
+        name: [clean(a.first_name), clean(a.last_name)].filter(Boolean).join(" "),
+        company: clean(a.company),
+        ...splitStreet(clean(a.street)),
+        apartment: clean(a.street2),
+        postalCode: clean(a.postal_code),
+        city: clean(a.city),
+        countryCode: clean(a.country).toUpperCase(),
+        taxNo: clean(a.customer_id_number),
+      };
+    }
+  } else if (marketplace === "refurbed") {
+    const a = raw?.invoice_address || raw?.shipping_address;
+    if (a) {
+      const isCompany = a.entity === "COMPANY";
+      return {
+        name: isCompany ? "" : [clean(a.first_name), clean(a.family_name)].filter(Boolean).join(" "),
+        company: isCompany ? clean(a.company_name) : "",
+        street: clean(a.street_name),
+        houseNumber: clean(a.house_no),
+        apartment: clean(a.supplement),
+        postalCode: clean(a.post_code),
+        city: clean(a.town),
+        countryCode: clean(a.country_code).toUpperCase(),
+        taxNo: isCompany ? clean(a.company_vatin) : "",
+      };
+    }
+  } else if (marketplace === "allegro") {
+    const ia = raw?.invoice?.required ? raw?.invoice?.address : null;
+    if (ia) {
+      const isCompany = !!ia.company;
+      return {
+        name: isCompany ? "" : [clean(ia.naturalPerson?.firstName), clean(ia.naturalPerson?.lastName)].filter(Boolean).join(" "),
+        company: isCompany ? clean(ia.company?.name) : "",
+        ...splitStreet(clean(ia.street)),
+        apartment: "",
+        postalCode: clean(ia.zipCode),
+        city: clean(ia.city),
+        countryCode: clean(ia.countryCode).toUpperCase(),
+        taxNo: isCompany ? clean(ia.company?.taxId) : "",
+      };
+    }
+    const b = raw?.buyer;
+    if (b?.address) {
+      return {
+        name: [clean(b.firstName), clean(b.lastName)].filter(Boolean).join(" "),
+        company: clean(b.companyName),
+        ...splitStreet(clean(b.address.street)),
+        apartment: "",
+        postalCode: clean(b.address.postCode),
+        city: clean(b.address.city),
+        countryCode: clean(b.address.countryCode).toUpperCase(),
+        taxNo: "",
+      };
+    }
+  } else {
+    const p = rawBuyerAddress(marketplace, raw, customerEmail);
+    if (p) {
+      return {
+        name: p.name,
+        company: p.company,
+        street: p.street,
+        houseNumber: p.houseNumber,
+        apartment: p.apartment,
+        postalCode: p.postalCode,
+        city: p.city,
+        countryCode: p.countryCode,
+        taxNo: "",
+      };
+    }
+  }
+  return EMPTY_BUYER;
 }
 
 export type InvoicePosition = {
