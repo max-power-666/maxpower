@@ -35,6 +35,10 @@
     {
       "path": "/api/orders/amazon-sync",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/nbp/sync",
+      "schedule": "0 13 * * *"
     }
   ]
 }

@@ -25,17 +25,19 @@ numerach seryjnych, wielokanałowa synchronizacja stanów, naprawy, auto-wycena)
 - `app/page.tsx` — jeden duży client component: logowanie, nawigacja, role, zakładki
   Przegląd / Magazyn / Zespół. Większe moduły są osobno w `app/_components/`:
   `ServiceView.tsx` (Serwis), `TestsView.tsx` (Testy), `ProductCardDrawer.tsx` (karta produktu), `TradeInHub.tsx` + `TradeInOrdersView.tsx` (Trade-in),
-  `TradeInView.tsx` (Bidder), `SalesOrdersHub.tsx` (Zamówienia, karta zamówienia w `SalesOrderCard.tsx`), `ErliParcelPanel.tsx` (nadawanie Paczkomatów InPost 24/7 przez Erli, osadzony na karcie zamówienia Erli), `ShippingView.tsx` (Wysyłka DHL), `InvoicesView.tsx` (Faktury).
+  `TradeInView.tsx` (Bidder), `SalesOrdersHub.tsx` (Zamówienia, karta zamówienia w `SalesOrderCard.tsx`), `ErliParcelPanel.tsx` (nadawanie Paczkomatów InPost 24/7 przez Erli, osadzony na karcie zamówienia Erli), `ShippingView.tsx` (Wysyłka DHL), `InvoicesView.tsx` (Faktury), `NbpView.tsx` (kursy NBP), `OverviewSalesDashboard.tsx` (dashboard sprzedaży na Przeglądzie).
 - `app/api/*/route.ts` — endpointy serwerowe (sekrety tylko tu, nigdy w przeglądarce):
-  `fakturownia/sync`, `tradein/bidder`, `tradein/competitors`, `tradein/orders-sync`, `tradein/validate`, `orders/bm-sync`, `orders/refurbed-sync`, `orders/erli-sync`, `orders/allegro-sync`, `orders/allegro-auth`, `orders/allegro-callback`, `orders/octopia-sync`, `orders/amazon-sync`, `orders/validate`, `orders/bm-refresh`, `orders/erli-refresh`, `shipping/dhl-express/{check,create}`, `shipping/dhl-parcel/{check,create,label,cancel}`, `shipping/erli/{create,label,cancel}`, `shipping/sync-marketplace`, `shipping/render-zpl`, `shipping/fetch-remote-pdf`, `shipping/qz-sign`, `invoices/{create,prefill}`.
+  `fakturownia/sync`, `tradein/bidder`, `tradein/competitors`, `tradein/orders-sync`, `tradein/validate`, `orders/bm-sync`, `orders/refurbed-sync`, `orders/erli-sync`, `orders/allegro-sync`, `orders/allegro-auth`, `orders/allegro-callback`, `orders/octopia-sync`, `orders/amazon-sync`, `orders/validate`, `orders/bm-refresh`, `orders/erli-refresh`, `shipping/dhl-express/{check,create}`, `shipping/dhl-parcel/{check,create,label,cancel}`, `shipping/erli/{create,label,cancel}`, `shipping/sync-marketplace`, `shipping/render-zpl`, `shipping/fetch-remote-pdf`, `shipping/qz-sign`, `invoices/{create,prefill}`, `nbp/sync`, `overview/sales-stats`.
 - `lib/` — `supabaseClient.ts`, `buyback.ts` (logika biddera + `isAuthorized`),
   `displayName.ts` (skrócone imię: "Maksymilian J."), `workLog.ts` (interwały Dziś/7/30 dni,
   liczenie czasu i **etykiety typów czynności/statusów** — jedno źródło dla list i karty produktu),
   `search.ts` (`escapeLike` do wyszukiwania po numerze seryjnym), `scanOrders.ts` (stronicowany skan
-  zamówień Back Market z budżetem czasu i kursorem), `invoices.ts` (wystawianie faktur w Fakturowni, stawka VAT, prefill nabywcy).
+  zamówień Back Market z budżetem czasu i kursorem), `invoices.ts` (wystawianie faktur w Fakturowni, stawka VAT, prefill nabywcy),
+  `nbp.ts` (kursy NBP: pobieranie, kurs z dnia poprzedniego, przeliczanie na PLN), `overview.ts` (bucketing dzienny/kanałowy na Przeglądzie).
 - `supabase/*.sql` — schemat, każdy plik idempotentny: `schema.sql` (units, members,
   cache Fakturowni), `tradein.sql` (bidder), `buyback-orders.sql` (zamówienia + obsługa
-  paczek), `backlog.sql` (zakładka Backlog), `shipping.sql` (Wysyłka: nadawca, szablony, przesyłki), `sales-orders.sql` (zamówienia sprzedaży Back Market, refurbed, Erli, Allegro, Octopia i Amazon, plus archiwum Apilo; tokeny OAuth), `service.sql` (rejestr napraw), `tests.sql` (rejestr testów), `invoices.sql` (zakładka Faktury: tabela faktur + widok `invoices_ready_orders`).
+  paczek), `backlog.sql` (zakładka Backlog), `shipping.sql` (Wysyłka: nadawca, szablony, przesyłki), `sales-orders.sql` (zamówienia sprzedaży Back Market, refurbed, Erli, Allegro, Octopia i Amazon, plus archiwum Apilo; tokeny OAuth), `service.sql` (rejestr napraw), `tests.sql` (rejestr testów), `invoices.sql` (zakładka Faktury: tabela faktur + widok `invoices_ready_orders`),
+  `overview.sql` (widok `sales_order_values` dla dashboardu Przeglądu), `nbp.sql` (zakładka NBP: kursy walut).
 - `scripts/import-buyback.mjs` — jednorazowy import ze starego programu Buyback Bidder.
 
 ## Zakładki i role
@@ -57,6 +59,7 @@ Rola jest zwykłym tekstem w `members.role` — dodanie roli nie wymaga SQL.
 | Backlog | `backlog` | wszyscy (każda rola) |
 | Wysyłka | `shipping` | Admin, Manager, Zamówienia |
 | Faktury | `invoices` | Admin, Manager, Zamówienia |
+| NBP | `nbp` | Admin, Manager |
 | RCP | `rcp` | wszyscy (każda rola) |
 | Zwroty | `returns` | wszyscy (każda rola) |
 | Zespół | `team` | Admin (edycja), Manager (tylko odczyt) |
@@ -93,6 +96,51 @@ jest więc chroniona automatycznie, bez dodatkowej polityki; sprawdzone wprost t
 rola zostają edytowalne bezpośrednio w wierszu tabeli jak dotąd (okno dotyczy tylko dostępu i danych pracowniczych).
 
 ## Model danych i moduły
+
+**Przegląd** (`OverviewSalesDashboard.tsx`, widoczny dla wszystkich ról). Dashboard sprzedaży wzorowany na
+zrzucie ekranu dashboardu Apilo od właściciela (01.10.2026): 4 kafelki (ilość/wartość zamówień dzisiaj, ilość/
+wartość z ostatnich 30 dni), wykres dzienny (słupki = wartość, linia = ilość) i udział kanałów z ostatnich 30
+dni — **jako poziome słupki z procentem, nie koło/donut jak w pierwowzorze** (świadoma decyzja właściciela,
+wyraźnie poproszona zamiana). Pod spodem zostają bez zmian cztery stare kafelki z tabeli `units` (URZĄDZENIA/
+WARTOŚĆ MAGAZYNU/GOTOWE DO SPRZEDAŻY/W NAPRAWIE, dziś zawsze zero — patrz niżej, osobny, starszy temat).
+- **"Ostatnie 30 dni" to 30 PEŁNYCH dni PRZED dzisiaj, BEZ dzisiaj** — potwierdzone wprost na zrzucie ekranu
+  (wykres kończy się dzień przed "dzisiaj", nie na nim); "dzisiaj" ma własne, osobne kafelki. Bucketing po
+  LOKALNYM dniu kalendarzowym przeglądarki (`lib/overview.ts`, ten sam duch co `summarizeDays` w
+  `lib/salesOrders.ts` dla kafelków Zamówień dzisiaj/wczoraj, tylko tu dowolna liczba dni) — serwer
+  (`app/api/overview/sales-stats`) oddaje surowe, już przeliczone na PLN wiersze z ~35-dniowym zapasem, a
+  bucketing liczy klient, żeby "dzisiaj" zawsze zgadzało się z zegarem patrzącej osoby, nie z serwerem Vercela.
+- **Zamówienia filtrowane tym samym `isCountedOrder`/`NOT_COUNTED`** co kafelki Zamówienia dzisiaj/wczoraj w
+  `SalesOrdersHub.tsx` (`lib/salesOrders.ts`) — nie osobna, druga definicja "co się liczy".
+- **Różne waluty (EUR/DKK/PLN — sprawdzone na żywych danych 01.10.2026: Back Market/refurbed/Octopia/Amazon
+  głównie EUR, część refurbed w DKK, Allegro/Erli w PLN) wymagają przeliczenia na jedną wspólną PLN** — właściciel
+  świadomie wybrał automatyczne przeliczanie wg kursu NBP (patrz **NBP** niżej), a NIE: pokazywanie osobnych sum
+  per waluta ani ręcznie wpisany stały kurs. **Zasada księgowa: kurs z OSTATNIEGO DNIA ROBOCZEGO PRZED dniem
+  zamówienia** (zgłoszone wprost przez właściciela), nigdy z dnia samego zamówienia — `rateBeforeDate` w
+  `lib/nbp.ts` szuka najpóźniejszej daty ŚCIŚLE mniejszej niż data zamówienia. Zamówienie bez dostępnego kursu
+  (np. sprzed zakresu zsynchronizowanych kursów) jest pomijane z sum (`missingRate` w odpowiedzi route'a), NIE
+  liczone jako 0 ani zgadywane.
+- Agregacja wartości zamówienia: widok `sales_order_values` (`overview.sql`) sumuje `sales_order_items.price`
+  per zamówienie (join z `sales_orders`) — `null`, gdy żadna pozycja nie ma jeszcze ceny (np. bardzo świeże
+  zamówienie Amazon przed fazą 2 synchronizacji), wtedy zamówienie pomijane z sum, nie liczone jako 0.
+- Wykresy to **surowe SVG rysowane ręcznie** (ten sam wzorzec co wykres kołowy Magazynu i wykres Biddera w
+  `TradeInView.tsx`) — w projekcie świadomie nie ma biblioteki wykresów (recharts/chart.js itp.), żeby nie
+  dokładać zależności dla dwóch prostych wykresów.
+
+**NBP** (`NbpView.tsx`, `lib/nbp.ts`, `nbp.sql`, `app/api/nbp/sync`) — kursy średnie NBP (tabela A, `api.nbp.pl`,
+publiczne, bez klucza/autoryzacji — stąd brak nowej zmiennej środowiskowej). Dziś używane do przeliczania
+wartości zamówień na PLN na Przeglądzie, ale **świadomie osobna, reużywalna zakładka** (nie funkcja wewnętrzna
+Przeglądu) — na wyraźną prośbę właściciela, bo kursy przydadzą się gdzie indziej w przyszłości. Dostęp Admin/
+Manager (zakładka techniczna/konfiguracyjna, nie codzienna operacyjna — inaczej niż Faktury/Wysyłka).
+- **Tylko EUR i DKK** na razie (`NBP_CURRENCIES` w `lib/nbp.ts`) — jedyne obce waluty faktycznie występujące w
+  zamówieniach (sprawdzone na żywych danych), łatwe do rozszerzenia listą, bez zmian schematu.
+- Synchronizacja (`app/api/nbp/sync`, GET): cron raz dziennie (`vercel.json`, `13:00 UTC` — z zapasem po
+  publikacji NBP ok. południa czasu polskiego, niezależnie od zmiany czasu) + przycisk "Odśwież" w zakładce.
+  Pierwszy przebieg dla danej waluty (brak wierszy) robi backfill **60 dni wstecz** — zapas na 30-dniowe okno
+  Przeglądu plus "kurs z dnia poprzedniego" na samym początku tego okna; kolejne przebiegi dociągają tylko od
+  ostatniego zsynchronizowanego dnia. NBP pomija dni bez notowania (weekendy/święta) — zakres bez ŻADNEGO dnia
+  roboczego zwraca 404, co traktujemy jako "brak danych", nie błąd.
+- `nbp_rates` (`currency`, `rate_date`, `mid`) — odczyt dla każdego `authenticated` (kursy walut nie są
+  wrażliwe), zapis WYŁĄCZNIE przez serwer (service_role, zero polityk insert/update — jak `oauth_tokens`).
 
 **Magazyn.** Zakładka ma dwa podwidoki: *Podsumowanie* (liczba sztuk ze `stock_level = 1`, wartość
 wg **ceny zakupu brutto** — `price_gross` jest w Fakturowni puste dla prawie wszystkich sztuk —
@@ -1098,6 +1146,8 @@ Configuration) musi być aktualny adres produkcyjny, inaczej magic link nie zadz
 10. ⬜ Twarde uprawnienia per rola (RLS)
 11. ⬜ Zwroty: rejestr fizycznej obsługi zwrotu (przyjęcie, ocena stanu, decyzja co dalej)
 12. 🟡 Faktury: wystawianie faktur VAT w Fakturowni (ręczny przycisk), dane fakturowe (firma/NIP gdzie dostępne) ze
-    wszystkich kanałów poza Amazon zrobione · ⬜ synchronizacja statusu płatności, ⬜ adres nabywcy dla Amazon (PII
-    niedostępne bez Restricted Data Token), ⬜ procedura OSS/VAT-marża
+    wszystkich kanałów poza Amazon, numer wewnętrzny ERP/{nr}/{MM}/{YYYY} zrobione · ⬜ synchronizacja statusu
+    płatności, ⬜ adres nabywcy dla Amazon (PII niedostępne bez Restricted Data Token), ⬜ procedura OSS/VAT-marża
     per kraj nabywcy (dziś jedna stała stawka)
+13. ✅ Przegląd: dashboard sprzedaży (kafelki Dziś/30 dni, wykres dzienny, udział kanałów) + NBP: kursy walut do
+    przeliczania na PLN (01.10.2026)
