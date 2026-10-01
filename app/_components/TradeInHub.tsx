@@ -9,6 +9,7 @@ import PadSerialsCell, { MAX_PADS } from "./PadSerialsCell";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { INTAKE_STATUSES, INTERVALS, fmtDuration, rangeStart, type Interval } from "@/lib/workLog";
 import { escapeLike } from "@/lib/search";
+import { buybackStatusLabel, buybackStatusStyle } from "@/lib/buybackOrders";
 
 // Zakładka Trade-in: domyślnie obsługa paczek przez pracowników (IntakeView — rejestr pracy
 // wg Regulaminu premiowania, jak Serwis), plus podstrona "Raw data" z pełną, zsynchronizowaną
@@ -58,13 +59,14 @@ type IntakeEntry = {
   status: IntakeStatus;
   points: number;
   history: HistoryEntry[];
-  // Zadeklarowane dane zamówienia z Back Marketu (buyback_orders) — SKU i dane klienta z chwili złożenia
-  // zamówienia BuyBack, INNE od pól wyżej, które wpisuje pracownik po fizycznym sprawdzeniu paczki.
-  buyback_orders: { sku: string | null; customer_first_name: string | null; customer_last_name: string | null } | null;
+  // Zadeklarowane dane zamówienia z Back Marketu (buyback_orders) — SKU, dane klienta i stan zamówienia w BM
+  // z chwili złożenia/przebiegu zamówienia BuyBack, INNE od pól wyżej, które wpisuje pracownik po fizycznym
+  // sprawdzeniu paczki.
+  buyback_orders: { sku: string | null; customer_first_name: string | null; customer_last_name: string | null; status: string } | null;
 };
 
 const INTAKE_COLUMNS =
-  "id, order_public_id, serial_number, sku, pads, pad_serials, docs, notes, entered_by_email, entered_at, finished_at, status, points, history, buyback_orders(sku, customer_first_name, customer_last_name)";
+  "id, order_public_id, serial_number, sku, pads, pad_serials, docs, notes, entered_by_email, entered_at, finished_at, status, points, history, buyback_orders(sku, customer_first_name, customer_last_name, status)";
 
 // Statusy Back Market po walidacji — takiego zamówienia nie walidujemy drugi raz.
 const BM_ALREADY_VALIDATED = ["VALIDATED", "PAID", "MONEY_TRANSFERED"];
@@ -542,6 +544,7 @@ function IntakeView({
               <th className="p-3">Pady</th>
               <th className="p-3">Nr seryjny padów</th>
               <th className="p-3">Dok.</th>
+              <th className="p-3">Status BM</th>
               <th className="p-3">Status</th>
               <th className="p-3">Uwagi</th>
               {isAdminOrManager && <th className="p-3">Czas</th>}
@@ -551,7 +554,7 @@ function IntakeView({
           </thead>
           <tbody>
             {!loading && entries.length === 0 && (
-              <tr><td colSpan={13 + (isAdminOrManager ? 1 : 0) + (isAdmin ? 1 : 0)} className="p-6 text-center text-inksoft text-sm">{search ? "Nic nie znaleziono dla tego numeru." : "Brak paczek — rozpocznij pierwszą powyżej."}</td></tr>
+              <tr><td colSpan={14 + (isAdminOrManager ? 1 : 0) + (isAdmin ? 1 : 0)} className="p-6 text-center text-inksoft text-sm">{search ? "Nic nie znaleziono dla tego numeru." : "Brak paczek — rozpocznij pierwszą powyżej."}</td></tr>
             )}
             {entries.map((e) => (
               <tr key={e.id} className="border-b border-line last:border-b-0 hover:bg-paper">
@@ -608,6 +611,15 @@ function IntakeView({
                     className="w-4 h-4 accent-teal"
                     aria-label="Dok."
                   />
+                </td>
+                <td className="p-3 whitespace-nowrap">
+                  {e.buyback_orders ? (
+                    <span className={`text-xs font-semibold px-2 py-1 rounded-full ${buybackStatusStyle(e.buyback_orders.status)}`}>
+                      {buybackStatusLabel(e.buyback_orders.status)}
+                    </span>
+                  ) : (
+                    "—"
+                  )}
                 </td>
                 <td className="p-3">
                   <select
@@ -766,7 +778,7 @@ function OrderCardDrawer({
         {order && (
           <>
             <div className="flex items-center gap-3 mb-6">
-              <span className="inline-block text-xs font-semibold px-2 py-1 rounded-full bg-tealsoft text-teal">{order.status}</span>
+              <span className={`inline-block text-xs font-semibold px-2 py-1 rounded-full ${buybackStatusStyle(order.status)}`}>{buybackStatusLabel(order.status)}</span>
               {/* Panel sprzedawcy Back Market: jedna domena (.fr) dla zamówień ze wszystkich rynków */}
               <a
                 href={`https://www.backmarket.fr/bo-seller/buyback/orders/${encodeURIComponent(order.order_public_id)}`}

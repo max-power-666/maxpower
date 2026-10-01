@@ -167,6 +167,23 @@ Macu jest wyłączony; bidder działa na produkcji, włącznik: `buyback_setting
   oraz kompletu numer seryjny/SKU/pady w bazie; zamówienie już VALIDATED/PAID/MONEY_TRANSFERED nie jest walidowane drugi raz
   (ponowna próba po błędzie zapisu statusu jest bezpieczna). Wynik ląduje w logu ("Walidacja Back Market: zwalidowano").
   Cofnięcie statusu paczki NIE cofa walidacji w BM. Mapper zamówienia jest wspólny: `lib/buybackOrders.ts`.
+- **Status zamówienia w Back Markecie** (`buyback_orders.status`, surowy stan z API BuyBack — np. `SUSPENDED`,
+  `TO_SEND` — NIE mylić z naszym statusem obsługi paczki, `buyback_order_intake.status`, patrz wyżej) ma teraz
+  (30.09.2026, na prośbę właściciela) polskie etykiety i kolory: `BUYBACK_ORDER_STATES`/`buybackStatusLabel`/
+  `buybackStatusStyle` w `lib/buybackOrders.ts`, jedno źródło dla karty zamówienia (gdzie wcześniej widać było
+  surowe `SUSPENDED` zamiast "Wstrzymane"), kolumny **"Status BM"** w Wprowadzanie (nowa kolumna, przy nowej
+  "Status" pracownika dla porównania) i kolumny "Status" w Raw data (tam wcześniej też surowy string — przy
+  okazji poprawione, to samo źródło, nie osobna kolumna w bazie). **Oficjalna dokumentacja Back Marketu
+  (`buybackOrderState`, api.backmarket.dev) wymienia tylko 10 wartości** (NEW/PENDING/TO_SEND/SENT/RECEIVED/
+  COUNTER_PROPOSAL/VALIDATED/PAID/MONEY_TRANSFERED/SUSPENDED) — **`CANCELED` w ogóle nie jest w tym schemacie**,
+  a mimo to realnie występuje na żywych danych (sprawdzone: 7477 z ok. 17,5 tys. zamówień — drugi po
+  `MONEY_TRANSFERED` najczęstszy stan) — zaufaliśmy żywym danym, nie dokumentacji, i dodaliśmy mu etykietę
+  ("Anulowane") mimo braku w schemacie; nieznana wartość (gdyby BM dodał kolejną) i tak pokaże się surowa
+  zamiast wybuchać. Kolory pogrupowane wg znaczenia, nie jeden unikalny kolor na wartość (za dużo stanów, żeby
+  to było czytelne): teal = zakończone wypłatą (VALIDATED/PAID/MONEY_TRANSFERED), niebieski (`#e3ecf9`/`#2a6bb5`,
+  ten sam co "Kontroferta" w naszym statusie obsługi — inny system, to samo pojęcie biznesowe) = COUNTER_PROPOSAL,
+  rust = wstrzymane/anulowane (SUSPENDED/CANCELED), amber = reszta normalnego przebiegu (NEW/PENDING/TO_SEND/
+  SENT/RECEIVED).
 - Numer zamówienia jest linkiem do **karty zamówienia** (panel boczny): dane z API + dane
   pracownika (numer seryjny, SKU, pady, uwagi — edytowalne) + numerowany log zmian.
   Na górze karty link "Otwórz w Back Market" → `https://www.backmarket.fr/bo-seller/buyback/orders/{numer}`

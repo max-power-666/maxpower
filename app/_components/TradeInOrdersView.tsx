@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
+import { buybackStatusLabel, buybackStatusStyle } from "@/lib/buybackOrders";
 
 // Podgląd zamówień BuyBack zsynchronizowanych z Back Marketu (patrz
 // app/api/tradein/orders-sync/route.ts). Na razie tylko odczyt — bez akcji na
@@ -344,7 +345,7 @@ export default function TradeInOrdersView({ session, onOpenOrder }: { session: S
                 <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDateTime(o.modification_date)}</td>
                 <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDateTime(o.payment_date)}</td>
                 <td className="p-3">
-                  <span className="text-xs font-semibold px-2 py-1 rounded-full bg-tealsoft text-teal">{o.status}</span>
+                  <span className={`text-xs font-semibold px-2 py-1 rounded-full ${buybackStatusStyle(o.status)}`}>{buybackStatusLabel(o.status)}</span>
                 </td>
                 <td className="p-3">{o.market || "—"}</td>
                 <td className="p-3 font-mono">{o.sku || "—"}</td>
