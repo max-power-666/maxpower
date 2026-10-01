@@ -64,7 +64,7 @@ export async function POST(request: Request) {
 
   const { data: items, error: itemsErr } = await db
     .from("sales_order_items")
-    .select("item_key, sku, serial_number, price, currency")
+    .select("item_key, sku, name, serial_number, price, currency")
     .eq("marketplace", marketplace)
     .eq("external_id", externalId)
     .order("position", { ascending: true });
@@ -76,7 +76,7 @@ export async function POST(request: Request) {
   }
 
   const positions: InvoicePosition[] = items.map((i) => ({
-    name: i.sku ? `Produkt ${i.sku}` : "Produkt",
+    name: i.name || (i.sku ? `Produkt ${i.sku}` : "Produkt"),
     code: i.sku,
     additionalInfo: i.serial_number ? `Nr seryjny/IMEI: ${i.serial_number}` : null,
     totalPriceGross: Number(i.price) || 0,

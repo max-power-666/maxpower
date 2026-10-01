@@ -246,7 +246,18 @@ dzielenia, ale z innego powodu: refurbed w ogóle nie rozbija `quantity` (każda
 `o.currencyCode`), więc mapper bierze ją stamtąd, nie z pozycji. Kolumna "Cena" na liście pokazuje `"kwota waluta"`
 (`fmtPrice` w `SalesOrdersHub.tsx`), "—" gdy nie ma danych. Uzupełnienie dla starych wierszy w `sales-orders.sql`
 (po jednym `update` per kanał, ta sama logika co w odpowiednim `mapXItems`) — `price`/`currency` chronione tym
-samym triggerem co SKU/pozycja (tylko synchronizacja może je zmieniać). **Nr przesyłki i "Etap" (kubełek statusu, patrz niżej) ukryte z listy 30.09.2026** — na prośbę właściciela, żeby lista była mniej zatłoczona; dane
+samym triggerem co SKU/pozycja (tylko synchronizacja może je zmieniać). **`sales_order_items.name`** (01.10.2026) —
+nazwa produktu z marketplace'u, osobna od SKU (kod, nie czytelna nazwa): Back Market `orderline.product`, refurbed
+`item.name`, Erli `item.name`, Allegro `lineItem.offer.name`, Octopia `line.offer.productTitle`, Amazon
+`orderItem.Title` — dokładnie te same pola, które `SalesOrderCard.tsx` już pokazywał na karcie zamówienia jako
+"Produkt"/"Oferta" w sekcji POZYCJE (patrz `Row label="Produkt"` per kanał), teraz też zapisane w bazie zamiast
+tylko odczytywane z `raw` na żywo. Główny powód: **nazwa pozycji na fakturze w Fakturowni** (zakładka Faktury,
+zgłoszone przez właściciela 01.10.2026 — wcześniej faktura miała tam tylko `"Produkt {SKU}"`, czytelne wyłącznie
+dla kogoś, kto zna katalog na pamięć) — `app/api/invoices/create` używa `name`, z fallbackiem do SKU dla starych
+wierszy sprzed tej zmiany albo kanałów, gdzie go zabraknie. Uzupełnienie dla starych wierszy w `sales-orders.sql`,
+ten sam wzorzec co przy cenie/walucie (jeden `update` per kanał, dopisany do istniejącego). `name` dołączony też
+do `sales_order_items_protect_api_fields` (ten sam trigger co SKU/cena/waluta) — zespół nie edytuje go ręcznie,
+tylko synchronizacja. **Nr przesyłki i "Etap" (kubełek statusu, patrz niżej) ukryte z listy 30.09.2026** — na prośbę właściciela, żeby lista była mniej zatłoczona; dane
 i tak zostają: `sales_orders.tracking_number` dalej widoczne na karcie zamówienia (`Row label="Numer przesyłki"` per kanał), a Etap dalej rządzi pigułkami filtra (Wszystkie/Nowe/Wysłane/Anulowane), tylko nie ma już własnej kolumny w tabeli. Przy okazji: numer zamówienia na liście dostał mniejszą czcionkę (`text-xs`, wcześniej dziedziczył `text-sm` z tabeli). Etap = kubełek statusu liczony WPROST ze statusu kanału (`statusBucket` w `lib/salesOrders.ts`: Nowe /
 Wysłane / Anulowane), **nie osobna kolumna** — zastąpił dawne ręcznie zmieniane `sales_orders.our_status`, wycofane
 30.09.2026 na prośbę właściciela ("korzystajmy ze statusów dostępnych w marketplace'ach", zamiast ręcznie śledzić
@@ -727,7 +738,9 @@ brutto / Status dokumentu) — na wyraźną prośbę właściciela.
   dodawaniu kolumny "Cena" w Zamówieniach) wprost jako `total_price_gross`, `quantity` zawsze 1 (ten sam powód co w
   Zamówieniach: jedna pozycja = jedna sztuka, rozbite wcześniej z `quantity` > 1).
 - **Jedna faktura na zamówienie** (`invoices` ma `unique (marketplace, external_id)`), NIE na pozycję — wszystkie sztuki
-  zamówienia trafiają na jedną fakturę jako osobne pozycje (`code` = SKU, `additional_info` = numer seryjny/IMEI).
+  zamówienia trafiają na jedną fakturę jako osobne pozycje: `name` = `sales_order_items.name` (prawdziwa nazwa produktu
+  z marketplace'u, patrz sekcja Zamówienia wyżej — zgłoszone przez właściciela 01.10.2026, wcześniej było tylko
+  `"Produkt {SKU}"`), `code` = SKU, `additional_info` = numer seryjny/IMEI.
   Serwer sprawdza WSZYSTKO jeszcze raz przy wystawianiu (nie ufa przeglądarce): numer przesyłki, komplet numerów
   seryjnych, brak już istniejącej faktury — nawet jeśli UI pokazało zamówienie na liście "Do wystawienia".
 - **Sprzedawca** = domyślny department konta Fakturowni (ten sam `FAKTUROWNIA_DOMAIN`/`FAKTUROWNIA_API_TOKEN` co

@@ -211,7 +211,7 @@ export default function InvoicesView({ session, members }: { session: Session; m
   );
 }
 
-type ItemPreview = { item_key: string; sku: string | null; serial_number: string | null; price: number | null; currency: string | null };
+type ItemPreview = { item_key: string; sku: string | null; name: string | null; serial_number: string | null; price: number | null; currency: string | null };
 
 const emptyBuyer: InvoiceBuyerPrefill = {
   name: "", company: "", street: "", houseNumber: "", apartment: "", postalCode: "", city: "", countryCode: "", taxNo: "",
@@ -314,9 +314,12 @@ function IssueInvoiceDrawer({
             <h3 className="text-xs font-semibold text-inksoft mb-2">POZYCJE</h3>
             <div className="border border-line bg-white mb-4">
               {items.map((it) => (
-                <div key={it.item_key} className="p-2 border-b border-line last:border-b-0 text-sm flex justify-between">
-                  <span className="font-mono">{it.sku || "—"} <span className="text-inksoft">(nr: {it.serial_number || "—"})</span></span>
-                  <span className="font-mono font-semibold">{fmtMoney(it.price, it.currency)}</span>
+                <div key={it.item_key} className="p-2 border-b border-line last:border-b-0 text-sm flex justify-between gap-3">
+                  <span>
+                    {it.name || <span className="font-mono">{it.sku || "—"}</span>}
+                    <span className="text-inksoft text-xs block">SKU {it.sku || "—"} · nr {it.serial_number || "—"}</span>
+                  </span>
+                  <span className="font-mono font-semibold whitespace-nowrap">{fmtMoney(it.price, it.currency)}</span>
                 </div>
               ))}
             </div>

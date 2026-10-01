@@ -176,7 +176,10 @@ const num = (v: unknown): number | null => {
 // Wspólny kształt wiersza sales_order_items produkowanego przez każdy mapItems (jedna sztuka = jeden wiersz).
 // price to cena JEDNOSTKOWA tej sztuki (nie suma dla całej pozycji przy quantity > 1) — patrz komentarz przy
 // mapBmItems, gdzie część kanałów zwraca cenę już za całą pozycję i trzeba ją podzielić przez quantity.
-type SalesItemRow = { marketplace: string; external_id: string; item_key: string; position: number; sku: string | null; price: number | null; currency: string | null };
+// name = nazwa produktu z marketplace'u (01.10.2026, do wyświetlania i jako nazwa pozycji na fakturze w
+// Fakturowni — osobna od SKU, bo SKU to nasz/kanałowy kod, nie czytelna nazwa). Pole per kanał dokładnie to
+// samo, które SalesOrderCard.tsx już pokazywał w sekcji POZYCJE jako "Produkt"/"Oferta" (patrz Row label="Produkt").
+type SalesItemRow = { marketplace: string; external_id: string; item_key: string; position: number; sku: string | null; name: string | null; price: number | null; currency: string | null };
 
 // Kod kraju odbiorcy (adres dostawy) do jednolitej postaci: 2 litery, wielkie, bez spacji. Niepełne/dziwne
 // wartości (np. pełna nazwa kraju zamiast kodu) zostają odrzucone zamiast pokazywać coś mylącego.
@@ -273,6 +276,7 @@ export function mapBmItems(o: any) {
     const qty = Math.max(Number.isFinite(Number(l?.quantity)) ? Math.trunc(Number(l.quantity)) : 1, 1);
     const base = String(l?.id ?? i + 1);
     const sku = typeof l?.listing === "string" && l.listing.trim() ? l.listing.trim() : null;
+    const name = typeof l?.product === "string" && l.product.trim() ? l.product.trim() : null;
     const lineTotal = num(l?.price);
     const unitPrice = lineTotal === null ? null : lineTotal / qty;
     const currency = typeof l?.currency === "string" && l.currency.trim() ? l.currency.trim() : null;
@@ -283,6 +287,7 @@ export function mapBmItems(o: any) {
         item_key: k > 1 ? `${base}-${k}` : base,
         position: items.length + 1,
         sku,
+        name,
         price: unitPrice,
         currency,
       });
@@ -355,6 +360,7 @@ export function mapRefurbedItems(o: any): SalesItemRow[] {
     item_key: String(it?.id ?? i + 1),
     position: i + 1,
     sku: typeof it?.sku === "string" && it.sku.trim() ? it.sku.trim() : null,
+    name: typeof it?.name === "string" && it.name.trim() ? it.name.trim() : null,
     price: num(it?.total_charged),
     currency: typeof it?.currency_code === "string" && it.currency_code.trim() ? it.currency_code.trim() : null,
   }));
@@ -452,6 +458,7 @@ export function mapErliItems(o: any) {
     const qty = Math.max(Number.isFinite(Number(it?.quantity)) ? Math.trunc(Number(it.quantity)) : 1, 1);
     const base = String(it?.id ?? i + 1);
     const price = num(it?.unitPrice);
+    const name = typeof it?.name === "string" && it.name.trim() ? it.name.trim() : null;
     for (let k = 1; k <= qty; k++) {
       items.push({
         marketplace: "erli",
@@ -459,6 +466,7 @@ export function mapErliItems(o: any) {
         item_key: k > 1 ? `${base}-${k}` : base,
         position: items.length + 1,
         sku: erliItemSku(it),
+        name,
         price: price === null ? null : price / 100,
         currency,
       });
@@ -547,6 +555,7 @@ export function mapAllegroItems(o: any) {
     const base = String(li?.id ?? i + 1);
     const price = num(li?.price?.amount);
     const currency = typeof li?.price?.currency === "string" && li.price.currency.trim() ? li.price.currency.trim() : null;
+    const name = typeof li?.offer?.name === "string" && li.offer.name.trim() ? li.offer.name.trim() : null;
     for (let k = 1; k <= qty; k++) {
       items.push({
         marketplace: "allegro",
@@ -554,6 +563,7 @@ export function mapAllegroItems(o: any) {
         item_key: k > 1 ? `${base}-${k}` : base,
         position: items.length + 1,
         sku: allegroItemSku(li),
+        name,
         price,
         currency,
       });
@@ -672,9 +682,10 @@ export function mapOctopiaItems(o: any) {
     const qty = Math.max(Number.isFinite(Number(l?.quantity)) ? Math.trunc(Number(l.quantity)) : 1, 1);
     const base = String(l?.orderLineId ?? i + 1);
     const sku = typeof l?.offer?.sellerProductId === "string" && l.offer.sellerProductId.trim() ? l.offer.sellerProductId.trim() : null;
+    const name = typeof l?.offer?.productTitle === "string" && l.offer.productTitle.trim() ? l.offer.productTitle.trim() : null;
     const price = num(l?.sellingPrice?.unitSalesPrice ?? l?.offerPrice?.unitSalesPrice);
     for (let k = 1; k <= qty; k++) {
-      items.push({ marketplace: "octopia", external_id: String(o.orderId), item_key: k > 1 ? `${base}-${k}` : base, position: items.length + 1, sku, price, currency });
+      items.push({ marketplace: "octopia", external_id: String(o.orderId), item_key: k > 1 ? `${base}-${k}` : base, position: items.length + 1, sku, name, price, currency });
     }
   });
   return items;
@@ -722,11 +733,12 @@ export function mapAmazonItems(orderId: string, items: any[]) {
     const qty = Math.max(Number.isFinite(Number(it?.QuantityOrdered)) ? Math.trunc(Number(it.QuantityOrdered)) : 1, 1);
     const base = String(it?.OrderItemId ?? i + 1);
     const sku = typeof it?.SellerSKU === "string" && it.SellerSKU.trim() ? it.SellerSKU.trim() : null;
+    const name = typeof it?.Title === "string" && it.Title.trim() ? it.Title.trim() : null;
     const lineTotal = num(it?.ItemPrice?.Amount);
     const price = lineTotal === null ? null : lineTotal / qty;
     const currency = typeof it?.ItemPrice?.CurrencyCode === "string" && it.ItemPrice.CurrencyCode.trim() ? it.ItemPrice.CurrencyCode.trim() : null;
     for (let k = 1; k <= qty; k++) {
-      rows.push({ marketplace: "amazon", external_id: orderId, item_key: k > 1 ? `${base}-${k}` : base, position: rows.length + 1, sku, price, currency });
+      rows.push({ marketplace: "amazon", external_id: orderId, item_key: k > 1 ? `${base}-${k}` : base, position: rows.length + 1, sku, name, price, currency });
     }
   });
   return rows;

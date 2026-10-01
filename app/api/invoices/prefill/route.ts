@@ -39,7 +39,7 @@ export async function GET(request: Request) {
 
   const { data: items } = await db
     .from("sales_order_items")
-    .select("item_key, sku, serial_number, price, currency")
+    .select("item_key, sku, name, serial_number, price, currency")
     .eq("marketplace", marketplace)
     .eq("external_id", externalId)
     .order("position", { ascending: true });
