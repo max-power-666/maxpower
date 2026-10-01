@@ -5,6 +5,7 @@ import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import InlineEditCell from "./InlineEditCell";
+import PartsCell from "./PartsCell";
 import ProductCardDrawer from "./ProductCardDrawer";
 import {
   INTERVALS,
@@ -45,6 +46,7 @@ type LogRow = {
   notes: string | null;
   started_at: string;
   finished_at: string | null;
+  part_serials: string[] | null;
 };
 
 function fmtDateTime(iso: string) {
@@ -102,7 +104,7 @@ export default function ServiceView({
           .gte("finished_at", rangeStart(interval)),
         supabase
           .from("service_log")
-          .select("id, employee_email, task_type, points, device_ref, status, notes, started_at, finished_at")
+          .select("id, employee_email, task_type, points, device_ref, status, notes, started_at, finished_at, part_serials")
           .order("started_at", { ascending: false })
           .limit(50),
       ]);
@@ -165,6 +167,11 @@ export default function ServiceView({
   async function saveNotes(row: LogRow, notes: string | null) {
     const { error: err } = await supabase.from("service_log").update({ notes }).eq("id", row.id);
     if (err) setError(`Nie udało się zapisać uwag: ${err.message}`);
+  }
+
+  async function savePartSerials(row: LogRow, partSerials: string[]) {
+    const { error: err } = await supabase.from("service_log").update({ part_serials: partSerials.length > 0 ? partSerials : null }).eq("id", row.id);
+    if (err) setError(`Nie udało się zapisać części: ${err.message}`);
   }
 
   async function changeStatus(row: LogRow, status: StatusKey) {
@@ -250,6 +257,7 @@ export default function ServiceView({
               <th className="p-3">Pracownik</th>
               <th className="p-3">Czynność</th>
               <th className="p-3">Numer seryjny</th>
+              <th className="p-3">Części</th>
               <th className="p-3">Status</th>
               <th className="p-3">Uwagi</th>
               {isAdminOrManager && <th className="p-3">Czas</th>}
@@ -259,7 +267,7 @@ export default function ServiceView({
           </thead>
           <tbody>
             {!loading && recent.length === 0 && (
-              <tr><td colSpan={7 + (isAdminOrManager ? 1 : 0) + (isAdmin ? 1 : 0)} className="p-6 text-center text-inksoft text-sm">Brak wpisów — rozpocznij pierwszą naprawę powyżej.</td></tr>
+              <tr><td colSpan={8 + (isAdminOrManager ? 1 : 0) + (isAdmin ? 1 : 0)} className="p-6 text-center text-inksoft text-sm">Brak wpisów — rozpocznij pierwszą naprawę powyżej.</td></tr>
             )}
             {recent.map((r) => (
               <tr key={r.id} className="border-b border-line last:border-b-0 hover:bg-paper">
@@ -272,6 +280,9 @@ export default function ServiceView({
                   ) : (
                     "—"
                   )}
+                </td>
+                <td className="p-3">
+                  <PartsCell values={r.part_serials} onSave={(next) => savePartSerials(r, next)} />
                 </td>
                 <td className="p-3">
                   <select

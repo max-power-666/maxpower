@@ -698,6 +698,13 @@ Joy-Con para 15 pkt, kontroler PS4 25, Xbox One 35, PS5 12, czyszczenie konsoli 
 Jeden wiersz = jedna naprawa: `started_at`, status (w_naprawie / naprawiony / uszkodzony),
 `finished_at`. Pracownik = zawsze zalogowana osoba (nie do wyboru). Wpisy może usuwać
 tylko Admin (przycisk "Usuń", tak samo w Testach i Trade-in). Podsumowanie punktacji u góry (Dziś/7/30 dni) liczy tylko "naprawiony".
+**Kolumna "Części"** (30.09.2026, `part_serials text[]`) — numery seryjne części wykorzystanych w naprawie,
+dowolna liczba (często zero, czasem kilka). W odróżnieniu od Padów w Trade-in (pole "ilość" generuje tyle
+slotów) tu wprost przyciski **+/- przy każdym polu** (`PartsCell.tsx`, nowy współdzielony komponent): "+"
+dokłada kolejne puste pole zaraz pod tym, "-" usuwa TO pole; przy zerze części widać tylko mały przycisk
+"+ część". Dodanie/usunięcie pola zapisuje całą tablicę od razu, sama treść pola dopiero przy wyjściu z
+niego/Enterem (`InlineEditCell` per pole, ten sam wzorzec zapisu co reszta kolumn edytowanych w wierszu).
+Nie wymagane do żadnego statusu — czysto informacyjne, nie wpływa na punkty ani na warunek "naprawiony".
 
 **Testy** (`TestsView.tsx`, `test_log`). Rejestr testów urządzeń: pole numer seryjny +
 "Rozpocznij test". Jeden wiersz = jeden test: status (w_trakcie / przetestowane / przerwany),

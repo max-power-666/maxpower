@@ -21,6 +21,7 @@ create table if not exists service_log (
   device_ref text,                           -- numer seryjny / identyfikator urządzenia — Regulamin §2 ust. 5 wymaga wskazania urządzenia w ewidencji
   status text not null default 'w_naprawie', -- w_naprawie | naprawiony | uszkodzony
   notes text,                                -- uwagi, edytowane w wierszu listy
+  part_serials text[],                       -- numery seryjne części wykorzystanych w naprawie; dowolna liczba (często 0)
   started_at timestamptz not null default now(),
   finished_at timestamptz                    -- ustawiane przy przejściu na status naprawiony/uszkodzony
 );
@@ -35,6 +36,7 @@ end $$;
 alter table service_log add column if not exists status text not null default 'w_naprawie';
 alter table service_log add column if not exists finished_at timestamptz;
 alter table service_log add column if not exists notes text;
+alter table service_log add column if not exists part_serials text[];
 -- ON DELETE SET NULL (30.09.2026) — usuwanie użytkownika w Supabase Auth blokowało się na tej FK (domyślne NO
 -- ACTION); employee_email jest już zapisany osobno, więc "kto to zrobił" zostaje widoczne mimo zerwania linku
 -- do konta. Patrz ten sam wzorzec i pełne wyjaśnienie w schema.sql (members.user_id).
