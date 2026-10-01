@@ -317,7 +317,7 @@ function IssueInvoiceDrawer({
                 <div key={it.item_key} className="p-2 border-b border-line last:border-b-0 text-sm flex justify-between gap-3">
                   <span>
                     {it.name || <span className="font-mono">{it.sku || "—"}</span>}
-                    <span className="text-inksoft text-xs block">SKU {it.sku || "—"} · nr {it.serial_number || "—"}</span>
+                    <span className="text-inksoft text-xs block">Numer seryjny: {it.serial_number || "—"}</span>
                   </span>
                   <span className="font-mono font-semibold whitespace-nowrap">{fmtMoney(it.price, it.currency)}</span>
                 </div>
