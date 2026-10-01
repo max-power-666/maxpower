@@ -639,7 +639,7 @@ function OrdersList({
                         </span>
                       </td>
                       <td rowSpan={items.length} className="p-3 text-xs font-mono whitespace-nowrap">{r.country_code || "—"}</td>
-                      <td rowSpan={items.length} className="p-3 text-xs whitespace-nowrap">{r.shipping_method || "—"}</td>
+                      <td rowSpan={items.length} className={`p-3 text-xs whitespace-nowrap ${r.shipping_method === "Express" ? "text-amber font-semibold" : ""}`}>{r.shipping_method || "—"}</td>
                     </>
                   )}
                   <td className="p-3 font-mono whitespace-nowrap">{it ? it.sku || "—" : r.sku || "—"}</td>
