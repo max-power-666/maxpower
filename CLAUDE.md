@@ -887,12 +887,12 @@ najechania na wykresie Biddera (`TradeInView.tsx`, `#C7CCB9`/`#57614F`) zostały
 - **Uwagi w wierszu listy:** kolumna "Uwagi" (między Statusem a Czasem) w Serwisie, Testach i Trade-in
   to `InlineEditCell` (tak samo kolumny "Numer seryjny", "SKU" i "Pady" w Trade-in) — zapis przy wyjściu z pola/Enterem,
   Escape porzuca. W Trade-in edycja trafia też do logu zmian karty zamówienia; zapisy z listy Trade-in idą
-  jedną kolejką na najświeższym wierszu (szybkie skanowanie nie nadpisuje poprzednich pól). **Serwis -> Uwagi
-  (01.10.2026, zgłoszone przez właściciela — dłuższe uwagi obcinały się w jednowierszowym polu)** dostało prop
-  `multiline`: `InlineEditCell` renderuje wtedy `<textarea>` zawijający tekst i rosnący w pionie do treści (JS
-  liczy `scrollHeight`) zamiast jednowierszowego `<input>`; Enter wstawia nową linię zamiast zapisywać, zapis
-  dalej przy wyjściu z pola/Escape jak w trybie domyślnym. Tylko Serwis — Testy i Trade-in mają krótsze uwagi i
-  zostały przy jednowierszowym trybie domyślnym.
+  jedną kolejką na najświeższym wierszu (szybkie skanowanie nie nadpisuje poprzednich pól). **Serwis i Testy ->
+  Uwagi (01.10.2026, zgłoszone przez właściciela — dłuższe uwagi obcinały się w jednowierszowym polu)** dostały
+  prop `multiline`: `InlineEditCell` renderuje wtedy `<textarea>` zawijający tekst i rosnący w pionie do treści
+  (JS liczy `scrollHeight`) zamiast jednowierszowego `<input>`; Enter wstawia nową linię zamiast zapisywać, zapis
+  dalej przy wyjściu z pola/Escape jak w trybie domyślnym. Trade-in (Wprowadzanie) zostało przy jednowierszowym
+  trybie domyślnym — nie zgłoszone, krótsze uwagi.
 - **Cykl życia rekordu:** status + `started_at`/`finished_at`, `finished_at` czyszczone przy
   powrocie do statusu początkowego (wzór: `service_log`, `buyback_order_intake`).
 

@@ -323,7 +323,7 @@ export default function TestsView({
                     ))}
                   </select>
                 </td>
-                <td className="p-3"><InlineEditCell value={r.notes} onSave={(n) => saveNotes(r, n)} /></td>
+                <td className="p-3"><InlineEditCell value={r.notes} onSave={(n) => saveNotes(r, n)} multiline className="w-64" /></td>
                 {isAdminOrManager && <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDuration(r.started_at, r.finished_at)}</td>}
                 <td className="p-3 text-right font-mono font-semibold">{r.status === "przetestowane" ? fmtPoints(r.points) : "—"}</td>
                 {isAdmin && (
