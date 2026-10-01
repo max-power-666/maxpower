@@ -16,7 +16,9 @@ import { escapeLike } from "@/lib/search";
 // listą zamówień BuyBack (TradeInOrdersView).
 //
 // Jedna paczka = jeden rekord z cyklem życia w statusie. Punkty (100/6 za paczkę) liczą się do
-// podsumowania dopiero dla "Obsłużona" (Regulamin §2 ust. 4). "Czas" jest tylko informacyjny.
+// podsumowania dla "Obsłużona", "Kontroferta" i "Problem" (30.09.2026, na prośbę właściciela —
+// wcześniej tylko "Obsłużona", zgodnie z §2 ust. 4 regulaminu; rozszerzenie na Kontrofertę i Problem
+// to świadoma decyzja biznesowa, nie literalne odczytanie regulaminu). "Czas" jest tylko informacyjny.
 
 const pill = (active: boolean) =>
   `px-3 py-1.5 rounded-full text-sm font-semibold border ${active ? "bg-ink text-paper border-ink" : "bg-white border-line"}`;
@@ -30,8 +32,17 @@ const INTAKE_STATUS_LABEL = Object.fromEntries(INTAKE_STATUSES.map((s) => [s.key
 const INTAKE_STATUS_STYLE: Record<IntakeStatus, string> = {
   w_trakcie: "bg-ambersoft text-amber",
   obsluzona: "bg-tealsoft text-teal",
+  kontroferta: "bg-[#e3ecf9] text-[#2a6bb5]",
   problem: "bg-rustsoft text-rust",
 };
+// Statusy "zakończenia" paczki, które naliczają punkty do podsumowania (30.09.2026: rozszerzone z samej
+// "Obsłużona" o "Kontroferta" i "Problem", na wyraźną prośbę właściciela).
+const POINTS_STATUSES: IntakeStatus[] = ["obsluzona", "kontroferta", "problem"];
+// Statusy wymagające kompletu danych (numer seryjny, SKU, pady) — pilnuje tego też trigger w bazie
+// (buyback_order_intake_require_complete). "Kontroferta" dołączona 30.09.2026: dotyczy konkretnego, już
+// zidentyfikowanego urządzenia, więc wymaga tego samego kompletu co "Obsłużona"; "Problem" zostaje bez
+// wymagań (paczka mogła nie dojść do etapu identyfikacji urządzenia).
+const COMPLETE_REQUIRED_STATUSES: IntakeStatus[] = ["obsluzona", "kontroferta"];
 
 type IntakeEntry = {
   id: number;
@@ -48,9 +59,13 @@ type IntakeEntry = {
   status: IntakeStatus;
   points: number;
   history: HistoryEntry[];
+  // Zadeklarowane dane zamówienia z Back Marketu (buyback_orders) — SKU i dane klienta z chwili złożenia
+  // zamówienia BuyBack, INNE od pól wyżej, które wpisuje pracownik po fizycznym sprawdzeniu paczki.
+  buyback_orders: { sku: string | null; customer_first_name: string | null; customer_last_name: string | null } | null;
 };
 
-const INTAKE_COLUMNS = "id, order_public_id, serial_number, sku, pads, pad_serials, docs, notes, entered_by_email, entered_at, finished_at, status, points, history";
+const INTAKE_COLUMNS =
+  "id, order_public_id, serial_number, sku, pads, pad_serials, docs, notes, entered_by_email, entered_at, finished_at, status, points, history, buyback_orders(sku, customer_first_name, customer_last_name)";
 
 // Statusy Back Market po walidacji — takiego zamówienia nie walidujemy drugi raz.
 const BM_ALREADY_VALIDATED = ["VALIDATED", "PAID", "MONEY_TRANSFERED"];
@@ -204,14 +219,14 @@ function IntakeView({
         supabase
           .from("buyback_order_intake")
           .select("entered_by_email, points")
-          .eq("status", "obsluzona")
+          .in("status", POINTS_STATUSES)
           .gte("finished_at", rangeStart(interval)),
         listQuery,
       ]);
       if (rangeErr) throw rangeErr;
       if (listErr) throw listErr;
       setRangeRows(rangeData || []);
-      setEntries((listData as IntakeEntry[]) || []);
+      setEntries((listData as unknown as IntakeEntry[]) || []);
     } catch (e: any) {
       setError(`Nie udało się wczytać paczek: ${e.message || e}`);
     } finally {
@@ -419,12 +434,14 @@ function IntakeView({
     try {
       const changes: FieldChange[] = [{ field: "Status", from: INTAKE_STATUS_LABEL[row.status], to: INTAKE_STATUS_LABEL[status] }];
       let validatedNow = false;
-      if (status === "obsluzona") {
+      if (COMPLETE_REQUIRED_STATUSES.includes(status)) {
         const missing = missingForDone(row);
         if (missing.length > 0) {
-          setError(`Paczki ${row.order_public_id} nie można oznaczyć jako Obsłużona — uzupełnij: ${missing.join(", ")}.`);
+          setError(`Paczki ${row.order_public_id} nie można oznaczyć jako ${INTAKE_STATUS_LABEL[status]} — uzupełnij: ${missing.join(", ")}.`);
           return;
         }
+      }
+      if (status === "obsluzona") {
         const validation = await validateAtBackMarket(row);
         if (!validation) return;
         if (!validation.already) {
@@ -457,7 +474,7 @@ function IntakeView({
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
-        <h2 className="text-xs font-semibold text-inksoft">PODSUMOWANIE PUNKTACJI (obsłużone paczki)</h2>
+        <h2 className="text-xs font-semibold text-inksoft">PODSUMOWANIE PUNKTACJI (obsłużone, kontroferty i problemy)</h2>
         <div className="flex gap-2">
           {INTERVALS.map((i) => (
             <button key={i.key} onClick={() => setInterval(i.key)} className={pill(interval === i.key)}>{i.label}</button>
@@ -525,7 +542,9 @@ function IntakeView({
               <th className="p-3">Rozpoczęto</th>
               <th className="p-3">Pracownik</th>
               <th className="p-3">Numer zamówienia</th>
+              <th className="p-3">Imię i nazwisko</th>
               <th className="p-3">Numer seryjny</th>
+              <th className="p-3">Zadeklarowane SKU</th>
               <th className="p-3">SKU</th>
               <th className="p-3">Pady</th>
               <th className="p-3">Nr seryjny padów</th>
@@ -539,7 +558,7 @@ function IntakeView({
           </thead>
           <tbody>
             {!loading && entries.length === 0 && (
-              <tr><td colSpan={11 + (isAdminOrManager ? 1 : 0) + (isAdmin ? 1 : 0)} className="p-6 text-center text-inksoft text-sm">{search ? "Nic nie znaleziono dla tego numeru." : "Brak paczek — rozpocznij pierwszą powyżej."}</td></tr>
+              <tr><td colSpan={13 + (isAdminOrManager ? 1 : 0) + (isAdmin ? 1 : 0)} className="p-6 text-center text-inksoft text-sm">{search ? "Nic nie znaleziono dla tego numeru." : "Brak paczek — rozpocznij pierwszą powyżej."}</td></tr>
             )}
             {entries.map((e) => (
               <tr key={e.id} className="border-b border-line last:border-b-0 hover:bg-paper">
@@ -549,6 +568,16 @@ function IntakeView({
                   <button onClick={() => onOpenOrder(e.order_public_id)} className="font-mono font-semibold text-teal hover:underline">
                     {e.order_public_id}
                   </button>
+                </td>
+                <td className="p-3 text-xs whitespace-nowrap">
+                  {e.buyback_orders?.customer_first_name || e.buyback_orders?.customer_last_name ? (
+                    <>
+                      <div>{e.buyback_orders?.customer_first_name || "—"}</div>
+                      <div className="text-inksoft">{e.buyback_orders?.customer_last_name || "—"}</div>
+                    </>
+                  ) : (
+                    "—"
+                  )}
                 </td>
                 <td className="p-3">
                   <div className="flex items-center gap-1">
@@ -569,6 +598,7 @@ function IntakeView({
                     )}
                   </div>
                 </td>
+                <td className="p-3 font-mono whitespace-nowrap text-inksoft">{e.buyback_orders?.sku || "—"}</td>
                 <td className="p-3">
                   <InlineEditCell
                     value={e.sku}
@@ -610,7 +640,7 @@ function IntakeView({
                 </td>
                 <td className="p-3"><InlineEditCell value={e.notes} onSave={(n) => saveField(e, "notes", "Uwagi", n)} /></td>
                 {isAdminOrManager && <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDuration(e.entered_at, e.finished_at)}</td>}
-                <td className="p-3 text-right font-mono font-semibold">{e.status === "obsluzona" ? fmtPoints(e.points) : "—"}</td>
+                <td className="p-3 text-right font-mono font-semibold">{POINTS_STATUSES.includes(e.status) ? fmtPoints(e.points) : "—"}</td>
                 {isAdmin && (
                   <td className="p-3 text-right">
                     <button onClick={() => deleteRow(e)} className="text-xs font-semibold text-rust hover:underline">
@@ -671,7 +701,7 @@ function OrderCardDrawer({
     ]);
     if (orderErr) setError(orderErr.message);
     setOrder((orderData as OrderDetail) ?? null);
-    setIntake((intakeData as IntakeEntry) ?? null);
+    setIntake((intakeData as unknown as IntakeEntry) ?? null);
   }
 
   function startEdit() {

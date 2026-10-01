@@ -130,8 +130,15 @@ Macu jest wyłączony; bidder działa na produkcji, włącznik: `buyback_setting
 - *Wprowadzanie*: obsługa paczek przez pracowników. Pracownik podaje numer zamówienia LUB
   przesyłki, aplikacja znajduje zamówienie (`buyback_order_intake`, unikalne na
   `order_public_id` — ta sama paczka nie zaliczy się dwa razy). Status:
-  W trakcie / Obsłużona / Problem, czas obsługi, punkty 100/6 za paczkę tylko po
-  "Obsłużona", podsumowanie punktacji Dziś/7/30 dni. Numer przesyłki służy tylko do
+  W trakcie / Obsłużona / **Kontroferta** (30.09.2026) / Problem, czas obsługi, podsumowanie
+  punktacji Dziś/7/30 dni. **Punkty 100/6 za paczkę liczą się dla Obsłużona, Kontroferta I Problem**
+  (`POINTS_STATUSES` w `TradeInHub.tsx`) — pierwotnie (Regulamin §2 ust. 4: po prawidłowym zakończeniu
+  procesu) tylko dla "Obsłużona"; rozszerzenie na Kontrofertę i Problem to **świadoma decyzja
+  właściciela**, nie literalny zapis regulaminu — potwierdzone wprost przy dodawaniu tej funkcji, nie
+  domyślone. "Kontroferta" jest **czysto wewnętrznym statusem** — w odróżnieniu od "Obsłużona" NIE woła
+  żadnego API Back Marketu (BM ma wprawdzie własną koncepcję `COUNTER_PROPOSAL`/`counter_offer_price`/
+  `counter_offer_reasons` na poziomie zamówienia, ale świadomie z nią nie integrujemy — to był jawny wybór
+  przy dodawaniu statusu, nie przeoczenie). Numer przesyłki służy tylko do
   znalezienia zamówienia przy rozpoczynaniu (w liście nie ma kolumny przesyłki; jest na karcie).
   **Lista "Ostatnie paczki" pokazuje bez wyszukiwania tylko najświeższe 50 wpisów** (`.limit(50)`, bez pełnej
   paginacji jak w Raw data — świadomie, to lista roboczo-przeglądowa, nie archiwum); wyszukiwarka nad listą
@@ -139,11 +146,20 @@ Macu jest wyłączony; bidder działa na produkcji, włącznik: `buyback_setting
   I numerze seryjnym (`order_public_id.ilike.%...%,serial_number.ilike.%...%` — PostgREST `.or()`) i wtedy limit
   rośnie do 200, bo szukany wpis mógł dawno wypaść poza najświeższe 50.
 - Kolumny edytowane w wierszu: Numer seryjny, SKU, Pady (liczba padów w zestawie — konsole; int >= 0,
-  0 jest poprawną wartością), Numery seryjne padów (`pad_serials text[]`, element i = pad i+1; osobne pole na każdy pad, tyle ile wpisano w Pady, max 20; Enter w polu — skaner — zapisuje i przechodzi do następnego; nie wymagane do "Obsłużona"), Uwagi. **Warunek:** status "Obsłużona" wymaga numeru seryjnego, SKU i padów —
-  pilnuje tego UI (`changeStatus`, komunikat co brakuje) i trigger `buyback_order_intake_require_complete`
-  w bazie (sprawdza przy przejściu na "Obsłużona" i przy czyszczeniu pola w już obsłużonej paczce,
-  więc stare obsłużone wiersze bez danych można uzupełniać po jednym polu).
-- Kolumna **Dok.** = checkbox `docs` (boolean, domyślnie false; nie jest wymagana do "Obsłużona"; zmiany w logu jako "tak"/"nie").
+  0 jest poprawną wartością), Numery seryjne padów (`pad_serials text[]`, element i = pad i+1; osobne pole na każdy pad, tyle ile wpisano w Pady, max 20; Enter w polu — skaner — zapisuje i przechodzi do następnego; nie wymagane do "Obsłużona"/"Kontroferta"), Uwagi. **Warunek:** statusy "Obsłużona" I "Kontroferta"
+  (30.09.2026 — kontroferta dotyczy konkretnego, już zidentyfikowanego urządzenia, więc ten sam komplet;
+  "Problem" zostaje bez wymagań, bo paczka mogła nie dojść do etapu identyfikacji) wymagają numeru
+  seryjnego, SKU i padów — pilnuje tego UI (`changeStatus`, `COMPLETE_REQUIRED_STATUSES`, komunikat co
+  brakuje z nazwą statusu) i trigger `buyback_order_intake_require_complete` w bazie (sprawdza przy
+  przejściu na jeden z tych dwóch statusów i przy czyszczeniu pola w już zakończonej paczce, więc stare
+  wiersze bez danych można uzupełniać po jednym polu). Kolumna **Dok.** = checkbox `docs` (boolean, domyślnie false; nie jest wymagana do żadnego statusu; zmiany w logu jako "tak"/"nie").
+- **Zadeklarowane SKU** i **Imię i nazwisko** (30.09.2026, kolumny tylko do odczytu) — dane z samego
+  zamówienia BuyBack (`buyback_orders.sku`/`customer_first_name`/`customer_last_name`, dociągnięte przez
+  PostgREST embed `buyback_orders(...)` po kluczu obcym `order_public_id`, zwraca pojedynczy obiekt, nie
+  tablicę — sprawdzone bezpośrednio zapytaniem, nie zgadywane), INNE od edytowalnej kolumny "SKU" obok
+  (to, co wpisuje pracownik po fizycznym sprawdzeniu paczki — może różnić się od tego, co klient
+  zadeklarował przy składaniu zamówienia). "Imię i nazwisko" renderuje imię NAD nazwiskiem (dwie linie w
+  jednej komórce), żeby kolumna nie poszerzała tabeli.
 - **Walidacja w Back Market przy "Obsłużona"** (`app/api/tradein/validate/route.ts`, `PUT /ws/buyback/v1/orders/{id}/validate`,
   bez body): najpierw ostrzeżenie (`confirm`: nieodwracalne, uruchamia wypłatę dla klienta, kwota, status BM), potem serwer
   waliduje w BM i dopiero po sukcesie zapisuje status paczki. Odmowa BM (np. status inny niż RECEIVED) = status się nie
