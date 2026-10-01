@@ -101,8 +101,10 @@ rola zostają edytowalne bezpośrednio w wierszu tabeli jak dotąd (okno dotyczy
 zrzucie ekranu dashboardu Apilo od właściciela (01.10.2026): 4 kafelki (ilość/wartość zamówień dzisiaj, ilość/
 wartość z ostatnich 30 dni), wykres dzienny (słupki = wartość, linia = ilość) i udział kanałów z ostatnich 30
 dni — **jako poziome słupki z procentem, nie koło/donut jak w pierwowzorze** (świadoma decyzja właściciela,
-wyraźnie poproszona zamiana). Pod spodem zostają bez zmian cztery stare kafelki z tabeli `units` (URZĄDZENIA/
-WARTOŚĆ MAGAZYNU/GOTOWE DO SPRZEDAŻY/W NAPRAWIE, dziś zawsze zero — patrz niżej, osobny, starszy temat).
+wyraźnie poproszona zamiana). Pod spodem zostają cztery starsze kafelki (patrz niżej, osobny, starszy temat) —
+"Urządzenia"/"Wartość magazynu" przełączone 01.10.2026 na prawdziwe dane z Fakturowni (`fakturowniaSummary`, te
+same liczby co w Magazyn → Podsumowanie), "Gotowe do sprzedaży"/"W naprawie" wciąż z wycofanej tabeli `units`
+(zawsze zero, bo nic już do niej nie zapisuje).
 - **"Ostatnie 30 dni" to 30 PEŁNYCH dni PRZED dzisiaj, BEZ dzisiaj** — potwierdzone wprost na zrzucie ekranu
   (wykres kończy się dzień przed "dzisiaj", nie na nim); "dzisiaj" ma własne, osobne kafelki. Bucketing po
   LOKALNYM dniu kalendarzowym przeglądarki (`lib/overview.ts`, ten sam duch co `summarizeDays` w
@@ -157,10 +159,14 @@ zespół ma tylko odczyt.
 
 Ręczna ewidencja sztuk w tabeli `units` została **wycofana z Magazynu** na prośbę właściciela
 i jej kod usunięto z `page.tsx` (lista, dodawanie, panel szczegółów, `CATEGORIES` z polami per
-kategoria). Sama tabela `units` zostaje w `schema.sql`, a zakładka Przegląd wciąż liczy z niej
-cztery kafelki (dziś same zera, bo nic do niej nie zapisuje). Planowana karta towaru z magazynu
-ma ją zastąpić (wzorzec: karta zamówienia Trade-in) — wtedy kafelki Przeglądu trzeba przełączyć
-na nowe źródło.
+kategoria). Sama tabela `units` zostaje w `schema.sql` — dwa z czterech starych kafelków Przeglądu
+("Gotowe do sprzedaży", "W naprawie") wciąż z niej liczą (dziś same zera, bo nic do niej nie
+zapisuje). **"Urządzenia" i "Wartość magazynu" przełączone na prawdziwe dane 01.10.2026** (na
+prośbę właściciela, wprost na te same liczby co kafelki "Dostępne produkty"/"Łączna wartość" w
+Magazyn → Podsumowanie) — `fakturowniaSummary.totalCount`/`totalValue` (ten sam stan już liczony
+z `fakturownia_stock_cache`, patrz sekcja Magazyn niżej), nie osobne zapytanie. Planowana karta
+towaru z magazynu ma zastąpić `units` całkowicie — wtedy pozostałe dwa kafelki też trzeba
+przełączyć na nowe źródło.
 
 **Bidder** (zakładka Bidder, `TradeInView.tsx`). Automat cen skupu Back Market (DE/ES/FR/IT):
 dla każdego SKU ustawia chwilowo 10 €, czyta `price_to_win` i ustawia `min(price_to_win, cena max)`.

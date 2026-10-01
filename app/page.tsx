@@ -108,10 +108,6 @@ type Unit = {
   created_at: string;
 };
 
-function fmtEUR(n: number) {
-  return "€" + (n || 0).toLocaleString("pl-PL", { maximumFractionDigits: 0 });
-}
-
 function fmtDateTime(iso: string) {
   return new Date(iso).toLocaleString("pl-PL", {
     day: "2-digit",
@@ -400,8 +396,6 @@ export default function Home() {
     }
   }
 
-  const activeUnits = useMemo(() => units.filter((u) => !["Sprzedane", "Złom"].includes(u.status)), [units]);
-  const value = activeUnits.reduce((s, u) => s + Number(u.price_cost || 0), 0);
   const ready = units.filter((u) => u.status === "Gotowe do sprzedaży").length;
 
   if (session === undefined) return <div className="min-h-screen flex items-center justify-center text-inksoft text-sm">Ładowanie…</div>;
@@ -478,8 +472,8 @@ export default function Home() {
             <div>
               <OverviewSalesDashboard session={session} />
               <div className="grid grid-cols-4 gap-px bg-line border border-line">
-                <div className="bg-white p-5"><div className="text-xs text-inksoft mb-2">URZĄDZENIA</div><div className="text-3xl font-bold font-mono">{activeUnits.length}</div></div>
-                <div className="bg-white p-5"><div className="text-xs text-inksoft mb-2">WARTOŚĆ MAGAZYNU</div><div className="text-3xl font-bold font-mono">{fmtEUR(value)}</div></div>
+                <div className="bg-white p-5"><div className="text-xs text-inksoft mb-2">URZĄDZENIA</div><div className="text-3xl font-bold font-mono">{(fakturowniaSummary?.totalCount ?? 0).toLocaleString("pl-PL")}</div></div>
+                <div className="bg-white p-5"><div className="text-xs text-inksoft mb-2">WARTOŚĆ MAGAZYNU</div><div className="text-3xl font-bold font-mono">{fmtPLN(fakturowniaSummary?.totalValue ?? 0)}</div></div>
                 <div className="bg-white p-5"><div className="text-xs text-inksoft mb-2">GOTOWE DO SPRZEDAŻY</div><div className="text-3xl font-bold font-mono">{ready}</div></div>
                 <div className="bg-white p-5"><div className="text-xs text-inksoft mb-2">W NAPRAWIE</div><div className="text-3xl font-bold font-mono">{units.filter((u) => u.status === "W naprawie").length}</div></div>
               </div>
