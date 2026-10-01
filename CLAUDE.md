@@ -142,28 +142,37 @@ Macu jest wyłączony; bidder działa na produkcji, włącznik: `buyback_setting
 - *Wprowadzanie*: obsługa paczek przez pracowników. Pracownik podaje numer zamówienia LUB
   przesyłki, aplikacja znajduje zamówienie (`buyback_order_intake`, unikalne na
   `order_public_id` — ta sama paczka nie zaliczy się dwa razy). Status:
-  W trakcie / Obsłużona / **Kontroferta** (30.09.2026) / Problem, czas obsługi, podsumowanie
-  punktacji Dziś/7/30 dni. **Punkty 100/6 za paczkę liczą się dla Obsłużona, Kontroferta I Problem**
-  (`POINTS_STATUSES` w `TradeInHub.tsx`) — pierwotnie (Regulamin §2 ust. 4: po prawidłowym zakończeniu
-  procesu) tylko dla "Obsłużona"; rozszerzenie na Kontrofertę i Problem to **świadoma decyzja
-  właściciela**, nie literalny zapis regulaminu — potwierdzone wprost przy dodawaniu tej funkcji, nie
-  domyślone. "Kontroferta" jest **czysto wewnętrznym statusem** — w odróżnieniu od "Obsłużona" NIE woła
+  W trakcie / Obsłużona / **Kontroferta** (30.09.2026) / **Ok. Dok.** (01.10.2026) / Problem, czas obsługi,
+  podsumowanie punktacji Dziś/7/30 dni. **Punkty 100/6 za paczkę liczą się dla Obsłużona, Kontroferta, Ok. Dok.
+  I Problem** (`POINTS_STATUSES` w `TradeInHub.tsx`) — pierwotnie (Regulamin §2 ust. 4: po prawidłowym zakończeniu
+  procesu) tylko dla "Obsłużona"; rozszerzenie na Kontrofertę, Ok. Dok. i Problem to **świadoma decyzja
+  właściciela**, nie literalny zapis regulaminu — potwierdzone wprost przy dodawaniu tych statusów, nie
+  domyślone. "Kontroferta" i "Ok. Dok." są **czysto wewnętrznymi statusami** — w odróżnieniu od "Obsłużona" NIE wołają
   żadnego API Back Marketu (BM ma wprawdzie własną koncepcję `COUNTER_PROPOSAL`/`counter_offer_price`/
   `counter_offer_reasons` na poziomie zamówienia, ale świadomie z nią nie integrujemy — to był jawny wybór
-  przy dodawaniu statusu, nie przeoczenie). Numer przesyłki służy tylko do
+  przy dodawaniu statusu, nie przeoczenie). "Ok. Dok." oznacza paczkę z kompletną, poprawną dokumentacją
+  (potwierdzone przy dodawaniu tej funkcji, że ma wymagać tego samego kompletu numer seryjny/SKU/pady co
+  "Obsłużona" i "Kontroferta" — nie osobny, luźniejszy warunek). Numer przesyłki służy tylko do
   znalezienia zamówienia przy rozpoczynaniu (w liście nie ma kolumny przesyłki; jest na karcie).
   **Lista "Ostatnie paczki" pokazuje bez wyszukiwania tylko najświeższe 50 wpisów** (`.limit(50)`, bez pełnej
   paginacji jak w Raw data — świadomie, to lista roboczo-przeglądowa, nie archiwum); wyszukiwarka nad listą
   (30.09.2026, `escapeLike` jak w `InventoryRawView.tsx`, debounce 300 ms) szuka jednocześnie po numerze zamówienia
   I numerze seryjnym (`order_public_id.ilike.%...%,serial_number.ilike.%...%` — PostgREST `.or()`) i wtedy limit
-  rośnie do 200, bo szukany wpis mógł dawno wypaść poza najświeższe 50.
+  rośnie do 200, bo szukany wpis mógł dawno wypaść poza najświeższe 50. **Kolorowanie wierszy wg osoby, która
+  dodała wpis** (01.10.2026, `ROW_COLOR_BY_EMAIL`/`rowColorForUser` w `TradeInHub.tsx`): przypisanie
+  e-mail -> kolor na sztywno w kodzie, kolory dobrane przez właściciela po imieniu (Zuzanna różowy, Kuba
+  Szymoniak niebieski, Kuba Gola fioletowy, Adrian żółty — wszystkie jasne/pastelowe, żeby nie gryzły się z
+  plakietkami statusu w komórkach) — nie wyliczane automatycznie z hasha. Osoba spoza tej listy (np. nowa w
+  zespole) dostaje brak koloru (zwykłe tło wiersza), dopóki właściciel nie poda dla niej koloru. Czysto
+  wizualne ułatwienie do szybkiego rozróżnienia "czyja to paczka" na oko, bez osobnej kolumny ani filtra.
 - Kolumny edytowane w wierszu: Numer seryjny, SKU, Pady (liczba padów w zestawie — konsole; int >= 0,
-  0 jest poprawną wartością), Numery seryjne padów (`pad_serials text[]`, element i = pad i+1; osobne pole na każdy pad, tyle ile wpisano w Pady, max 20; Enter w polu — skaner — zapisuje i przechodzi do następnego; nie wymagane do "Obsłużona"/"Kontroferta"), Uwagi. **Warunek:** statusy "Obsłużona" I "Kontroferta"
+  0 jest poprawną wartością), Numery seryjne padów (`pad_serials text[]`, element i = pad i+1; osobne pole na każdy pad, tyle ile wpisano w Pady, max 20; Enter w polu — skaner — zapisuje i przechodzi do następnego; nie wymagane do "Obsłużona"/"Kontroferta"/"Ok. Dok."), Uwagi. **Warunek:** statusy "Obsłużona", "Kontroferta" I "Ok. Dok."
   (30.09.2026 — kontroferta dotyczy konkretnego, już zidentyfikowanego urządzenia, więc ten sam komplet;
+  01.10.2026 — Ok. Dok. tak samo;
   "Problem" zostaje bez wymagań, bo paczka mogła nie dojść do etapu identyfikacji) wymagają numeru
   seryjnego, SKU i padów — pilnuje tego UI (`changeStatus`, `COMPLETE_REQUIRED_STATUSES`, komunikat co
   brakuje z nazwą statusu) i trigger `buyback_order_intake_require_complete` w bazie (sprawdza przy
-  przejściu na jeden z tych dwóch statusów i przy czyszczeniu pola w już zakończonej paczce, więc stare
+  przejściu na jeden z tych trzech statusów i przy czyszczeniu pola w już zakończonej paczce, więc stare
   wiersze bez danych można uzupełniać po jednym polu). Kolumna **Dok.** = checkbox `docs` (boolean, domyślnie false; nie jest wymagana do żadnego statusu; zmiany w logu jako "tak"/"nie").
 - **Zadeklarowane SKU** i **Imię i nazwisko** (30.09.2026, kolumny tylko do odczytu) — dane z samego
   zamówienia BuyBack (`buyback_orders.sku`/`customer_first_name`/`customer_last_name`, dociągnięte przez

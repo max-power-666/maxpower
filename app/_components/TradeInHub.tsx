@@ -16,9 +16,9 @@ import { buybackStatusLabel, buybackStatusStyle } from "@/lib/buybackOrders";
 // listą zamówień BuyBack (TradeInOrdersView).
 //
 // Jedna paczka = jeden rekord z cyklem życia w statusie. Punkty (100/6 za paczkę) liczą się do
-// podsumowania dla "Obsłużona", "Kontroferta" i "Problem" (30.09.2026, na prośbę właściciela —
-// wcześniej tylko "Obsłużona", zgodnie z §2 ust. 4 regulaminu; rozszerzenie na Kontrofertę i Problem
-// to świadoma decyzja biznesowa, nie literalne odczytanie regulaminu). "Czas" jest tylko informacyjny.
+// podsumowania dla "Obsłużona", "Kontroferta", "Ok. Dok." i "Problem" (30.09.2026, na prośbę właściciela —
+// wcześniej tylko "Obsłużona", zgodnie z §2 ust. 4 regulaminu; rozszerzenie to świadoma decyzja biznesowa,
+// nie literalne odczytanie regulaminu). "Czas" jest tylko informacyjny.
 
 const pill = (active: boolean) =>
   `px-3 py-1.5 rounded-full text-sm font-semibold border ${active ? "bg-ink text-paper border-ink" : "bg-white border-line"}`;
@@ -33,16 +33,32 @@ const INTAKE_STATUS_STYLE: Record<IntakeStatus, string> = {
   w_trakcie: "bg-ambersoft text-amber",
   obsluzona: "bg-tealsoft text-teal",
   kontroferta: "bg-[#e3ecf9] text-[#2a6bb5]",
+  ok_dok: "bg-[#efe6f8] text-[#7a3fb0]",
   problem: "bg-rustsoft text-rust",
 };
 // Statusy "zakończenia" paczki, które naliczają punkty do podsumowania (30.09.2026: rozszerzone z samej
-// "Obsłużona" o "Kontroferta" i "Problem", na wyraźną prośbę właściciela).
-const POINTS_STATUSES: IntakeStatus[] = ["obsluzona", "kontroferta", "problem"];
+// "Obsłużona" o "Kontroferta", "Ok. Dok." i "Problem", na wyraźną prośbę właściciela).
+const POINTS_STATUSES: IntakeStatus[] = ["obsluzona", "kontroferta", "ok_dok", "problem"];
 // Statusy wymagające kompletu danych (numer seryjny, SKU, pady) — pilnuje tego też trigger w bazie
-// (buyback_order_intake_require_complete). "Kontroferta" dołączona 30.09.2026: dotyczy konkretnego, już
-// zidentyfikowanego urządzenia, więc wymaga tego samego kompletu co "Obsłużona"; "Problem" zostaje bez
+// (buyback_order_intake_require_complete). "Kontroferta" i "Ok. Dok." (30.09.2026) dotyczą konkretnego, już
+// zidentyfikowanego urządzenia, więc wymagają tego samego kompletu co "Obsłużona"; "Problem" zostaje bez
 // wymagań (paczka mogła nie dojść do etapu identyfikacji urządzenia).
-const COMPLETE_REQUIRED_STATUSES: IntakeStatus[] = ["obsluzona", "kontroferta"];
+const COMPLETE_REQUIRED_STATUSES: IntakeStatus[] = ["obsluzona", "kontroferta", "ok_dok"];
+
+// Kolor wiersza wg pracownika, który go dodał (30.09.2026, na wyraźną prośbę właściciela; kolory dobrane
+// przez właściciela po imieniu 01.10.2026) — przypisanie e-mail -> kolor na sztywno, nie wyliczane. Osoby
+// spoza listy (np. nowa osoba w zespole) dostają brak koloru (zwykłe tło wiersza), dopóki właściciel nie
+// poda koloru dla niej.
+const ROW_COLOR_BY_EMAIL: Record<string, string> = {
+  "zuzanna.recoo@gmail.com": "#fde3ec", // Zuzanna — jasny różowy
+  "jakubszy.recoo@gmail.com": "#e3f2fd", // Kuba Szymoniak — jasny niebieski
+  "jakubgola.recoo@gmail.com": "#f0e3fd", // Kuba Gola — jasny fioletowy
+  "adrian.recoo@gmail.com": "#fef6d8", // Adrian — jasny żółty
+};
+function rowColorForUser(email: string | null): string | undefined {
+  if (!email) return undefined;
+  return ROW_COLOR_BY_EMAIL[email.toLowerCase()];
+}
 
 type IntakeEntry = {
   id: number;
@@ -469,7 +485,7 @@ function IntakeView({
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
-        <h2 className="text-xs font-semibold text-inksoft">PODSUMOWANIE PUNKTACJI (obsłużone, kontroferty i problemy)</h2>
+        <h2 className="text-xs font-semibold text-inksoft">PODSUMOWANIE PUNKTACJI (obsłużone, kontroferty, ok. dok. i problemy)</h2>
         <div className="flex gap-2">
           {INTERVALS.map((i) => (
             <button key={i.key} onClick={() => setInterval(i.key)} className={pill(interval === i.key)}>{i.label}</button>
@@ -557,7 +573,7 @@ function IntakeView({
               <tr><td colSpan={14 + (isAdminOrManager ? 1 : 0) + (isAdmin ? 1 : 0)} className="p-6 text-center text-inksoft text-sm">{search ? "Nic nie znaleziono dla tego numeru." : "Brak paczek — rozpocznij pierwszą powyżej."}</td></tr>
             )}
             {entries.map((e) => (
-              <tr key={e.id} className="border-b border-line last:border-b-0 hover:bg-paper">
+              <tr key={e.id} className="border-b border-line last:border-b-0" style={{ backgroundColor: rowColorForUser(e.entered_by_email) }}>
                 <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDateTime(e.entered_at)}</td>
                 <td className="p-3">{displayNameForEmail(e.entered_by_email, members)}</td>
                 <td className="p-3">

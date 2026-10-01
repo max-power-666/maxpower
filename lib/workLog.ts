@@ -57,6 +57,7 @@ export const INTAKE_STATUSES = [
   { key: "w_trakcie", label: "W trakcie" },
   { key: "obsluzona", label: "Obsłużona" },
   { key: "kontroferta", label: "Kontroferta" },
+  { key: "ok_dok", label: "Ok. Dok." },
   { key: "problem", label: "Problem" },
 ] as const;
 

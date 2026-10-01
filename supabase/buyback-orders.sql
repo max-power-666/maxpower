@@ -81,15 +81,15 @@ create policy "authenticated read buyback_orders_sync_meta" on buyback_orders_sy
 -- pilnuje Regulaminu §2 ust. 3 i §9 ust. 2: ta sama paczka nie może być zaliczona dwa razy.
 -- entered_at = początek obsługi; finished_at ustawia się przy przejściu na status końcowy.
 -- "Czas" (finished_at - entered_at) jest tylko informacyjny. Punkty do podsumowania liczą się
--- dla status w ('obsluzona', 'kontroferta', 'problem') — pierwotnie (§2 ust. 4: po prawidłowym
--- zakończeniu procesu) tylko 'obsluzona'; rozszerzenie na kontrofertę i problem to świadoma decyzja
--- właściciela (30.09.2026), nie literalny zapis regulaminu.
+-- dla status w ('obsluzona', 'kontroferta', 'ok_dok', 'problem') — pierwotnie (§2 ust. 4: po prawidłowym
+-- zakończeniu procesu) tylko 'obsluzona'; rozszerzenie to świadoma decyzja właściciela (30.09.2026),
+-- nie literalny zapis regulaminu.
 create table if not exists buyback_order_intake (
   id bigint generated always as identity primary key,
   order_public_id text not null references buyback_orders(order_public_id),
-  serial_number text,                        -- wymagane do statusu "obsluzona"/"kontroferta" (trigger poniżej)
-  sku text,                                  -- wymagane do statusu "obsluzona"/"kontroferta" (trigger poniżej)
-  pads int check (pads is null or pads >= 0), -- liczba padów w zestawie (konsole); wymagane do "obsluzona"/"kontroferta", 0 jest dozwolone
+  serial_number text,                        -- wymagane do statusu "obsluzona"/"kontroferta"/"ok_dok" (trigger poniżej)
+  sku text,                                  -- wymagane do statusu "obsluzona"/"kontroferta"/"ok_dok" (trigger poniżej)
+  pads int check (pads is null or pads >= 0), -- liczba padów w zestawie (konsole); wymagane do "obsluzona"/"kontroferta"/"ok_dok", 0 jest dozwolone
   pad_serials text[],                        -- numery seryjne padów: element i = pad i+1 (osobne pole na każdy pad, skanery)
   docs boolean not null default false,       -- kolumna "dok." (checkbox)
   notes text default '',
@@ -97,7 +97,7 @@ create table if not exists buyback_order_intake (
   entered_by_email text,
   entered_at timestamptz not null default now(),
   history jsonb not null default '[]'::jsonb,  -- [{action: "created"|"edited", by_email, at, changes?}, ...]
-  status text not null default 'w_trakcie',    -- w_trakcie | obsluzona | kontroferta | problem
+  status text not null default 'w_trakcie',    -- w_trakcie | obsluzona | kontroferta | ok_dok | problem
   finished_at timestamptz,
   -- Migawka punktów za paczkę: 100/6 (Regulamin §2 tabela). Celowo bez zaokrąglania (§2 ust. 7,
   -- §4 ust. 8) — zaokrąglamy dopiero przy wyświetlaniu. Gdyby stawka się zmieniła, zmieniamy
@@ -148,18 +148,19 @@ begin
   end if;
 end $$;
 
--- Warunek kompletności: statusy "obsluzona" i "kontroferta" (30.09.2026 — kontroferta dotyczy konkretnego,
--- już zidentyfikowanego urządzenia, więc wymaga tego samego kompletu; "problem" zostaje bez wymagań, bo
--- paczka mogła nie dojść do etapu identyfikacji) wymagają numeru seryjnego, SKU i liczby padów. To twarde
--- zabezpieczenie w bazie (działa też przy bezpośrednim wywołaniu API); UI pokazuje ten sam komunikat.
+-- Warunek kompletności: statusy "obsluzona", "kontroferta" i "ok_dok" (30.09.2026 — wszystkie trzy dotyczą
+-- konkretnego, już zidentyfikowanego urządzenia, więc wymagają tego samego kompletu; "problem" zostaje bez
+-- wymagań, bo paczka mogła nie dojść do etapu identyfikacji) wymagają numeru seryjnego, SKU i liczby padów.
+-- To twarde zabezpieczenie w bazie (działa też przy bezpośrednim wywołaniu API); UI pokazuje ten sam komunikat.
 -- Sprawdzamy przy przejściu NA jeden z tych statusów oraz gdy w już zakończonej paczce ktoś czyści któreś z pól.
 -- Dzięki temu stare wiersze bez tych danych można dalej edytować (np. uzupełniać po jednym polu).
 create or replace function buyback_order_intake_require_complete() returns trigger
 language plpgsql as $$
 declare
-  requires_complete boolean := new.status in ('obsluzona', 'kontroferta');
-  entering boolean := tg_op = 'INSERT' or old.status not in ('obsluzona', 'kontroferta');
+  requires_complete boolean := new.status in ('obsluzona', 'kontroferta', 'ok_dok');
+  entering boolean := tg_op = 'INSERT' or old.status not in ('obsluzona', 'kontroferta', 'ok_dok');
   missing text[] := '{}';
+  status_label text := case new.status when 'obsluzona' then 'Obsłużona' when 'kontroferta' then 'Kontroferta' else 'Ok. Dok.' end;
 begin
   if not requires_complete then
     return new;
@@ -174,8 +175,7 @@ begin
     missing := array_append(missing, 'pady');
   end if;
   if array_length(missing, 1) > 0 then
-    raise exception 'Status „%” wymaga uzupełnienia: %.',
-      (case when new.status = 'obsluzona' then 'Obsłużona' else 'Kontroferta' end), array_to_string(missing, ', ')
+    raise exception 'Status „%” wymaga uzupełnienia: %.', status_label, array_to_string(missing, ', ')
       using errcode = '23514';
   end if;
   return new;
