@@ -12,9 +12,11 @@ create table if not exists members (
   email text default '',                -- zapisywany przy wyborze roli, żeby zakładka Zespół mogła pokazać kto jest kim
   name text default '',                 -- imię i nazwisko, ustawiane przez Admina w Zespole; skrócone (np. "Maksymilian J.") w logach
   view_access text[],                   -- nadpisanie dostępu do zakładek (klucze ViewKey) ponad domyślny wg roli; NULL = użyj domyślnego
+  employment_type text,                 -- forma zatrudnienia (np. "Umowa o pracę"/"Umowa zlecenie") — zwykły tekst jak rola, lista opcji tylko w UI
   created_at timestamptz default now()
 );
 alter table members add column if not exists view_access text[];
+alter table members add column if not exists employment_type text;
 -- ON DELETE CASCADE (30.09.2026) — bez tego usunięcie użytkownika w Supabase Auth (Authentication -> Users ->
 -- Delete) kończyło się "Database error deleting user": auth.users jest referencjonowane stąd i z kilku innych
 -- tabel (units.created_by, service_log/test_log.employee_user_id, buyback_order_intake.entered_by_user_id,

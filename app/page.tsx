@@ -73,7 +73,11 @@ const ROLE_ACCESS: Record<string, ViewKey[]> = {
 
 const spaceOf = (k: ViewKey): Space => TABS.find((t) => t.key === k)?.space ?? "erp";
 
-type Member = { user_id: string; role: string; email: string; name: string; view_access: string[] | null };
+type Member = { user_id: string; role: string; email: string; name: string; view_access: string[] | null; employment_type: string | null };
+
+// Forma zatrudnienia — zwykły tekst w bazie (jak rola), ta lista to tylko opcje w rozwijanej liście
+// w UI; dodanie kolejnej formy nie wymaga SQL.
+const EMPLOYMENT_TYPES = ["Umowa o pracę", "Umowa zlecenie"];
 
 // Dostęp do zakładek dla danego członka zespołu: view_access (jeśli ustawiony przez Admina w Zespole) nadpisuje
 // domyślny zestaw z ROLE_ACCESS dla jego roli. NULL = jeszcze nikt tego nie dotykał, używamy domyślnego wg roli.
@@ -303,12 +307,15 @@ export default function Home() {
   async function changeMemberAccess(userId: string, access: ViewKey[] | null) {
     await supabase.from("members").update({ view_access: access }).eq("user_id", userId);
   }
+  async function changeMemberEmploymentType(userId: string, employmentType: string | null) {
+    await supabase.from("members").update({ employment_type: employmentType }).eq("user_id", userId);
+  }
   async function loadUnits() {
     const { data } = await supabase.from("units").select("*").order("created_at", { ascending: false });
     setUnits((data as Unit[]) || []);
   }
   async function loadMembers() {
-    const { data } = await supabase.from("members").select("user_id, role, email, name, view_access").order("email");
+    const { data } = await supabase.from("members").select("user_id, role, email, name, view_access, employment_type").order("email");
     setMembers((data as Member[]) || []);
   }
   // Supabase (PostgREST) domyślnie zwraca max 1000 wierszy na zapytanie — przy > 1000
@@ -522,6 +529,7 @@ export default function Home() {
               onChangeRole={changeMemberRole}
               onChangeName={changeMemberName}
               onChangeAccess={changeMemberAccess}
+              onChangeEmploymentType={changeMemberEmploymentType}
             />
           )}
 
@@ -680,6 +688,7 @@ function TeamView({
   onChangeRole,
   onChangeName,
   onChangeAccess,
+  onChangeEmploymentType,
 }: {
   members: Member[];
   currentUserId: string;
@@ -687,11 +696,15 @@ function TeamView({
   onChangeRole: (userId: string, role: string) => void;
   onChangeName: (userId: string, name: string) => void;
   onChangeAccess: (userId: string, access: ViewKey[] | null) => void;
+  onChangeEmploymentType: (userId: string, employmentType: string | null) => void;
 }) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
 
   // Imię i nazwisko to zwykły tekst; dopiero "Zmień" (tylko Admin) otwiera pole, żeby nie dało się go przypadkiem edytować.
   const [editingId, setEditingId] = useState<string | null>(null);
+  // Dostęp do zakładek i dane pracownika (forma zatrudnienia) edytuje się w osobnym oknie (30.09.2026) —
+  // wcześniej cała siatka checkboxów siedziała wprost w wierszu tabeli, co robiło się nieczytelne.
+  const [editingAccessId, setEditingAccessId] = useState<string | null>(null);
 
   function cancelEdit(userId: string) {
     setDrafts(({ [userId]: _omit, ...rest }) => rest);
@@ -709,14 +722,7 @@ function TeamView({
     cancelEdit(userId);
   }
 
-  // "Przegląd" jest wspólną stroną startową dla każdej roli — zawsze wymuszony, nie da się go odznaczyć
-  // (inaczej dałoby się kogoś całkiem zablokować z aplikacji).
-  function toggleAccess(m: Member, key: ViewKey) {
-    if (key === "overview") return;
-    const current = effectiveAccess(m.role, m.view_access);
-    const next = current.includes(key) ? current.filter((k) => k !== key) : [...current, key];
-    onChangeAccess(m.user_id, (next.includes("overview") ? next : ["overview", ...next]) as ViewKey[]);
-  }
+  const editingMember = members.find((m) => m.user_id === editingAccessId) ?? null;
 
   return (
     <div className="border border-line bg-white">
@@ -787,33 +793,110 @@ function TeamView({
                   </select>
                 </td>
                 <td className="p-3">
-                  <div className="flex flex-wrap gap-x-3 gap-y-1 max-w-md">
-                    {TABS.map((t) => {
-                      const checked = effectiveAccess(m.role, m.view_access).includes(t.key);
-                      return (
-                        <label key={t.key} className={`flex items-center gap-1 text-xs ${canEdit && t.key !== "overview" ? "cursor-pointer" : ""} ${checked ? "text-ink" : "text-inksoft"}`}>
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            disabled={!canEdit || t.key === "overview"}
-                            onChange={() => toggleAccess(m, t.key)}
-                          />
-                          {t.space === "shop" ? `Sklep: ${t.label}` : t.label}
-                        </label>
-                      );
-                    })}
-                  </div>
-                  {canEdit && m.view_access !== null && (
-                    <button onClick={() => onChangeAccess(m.user_id, null)} className="text-xs font-semibold text-teal hover:underline mt-1">
-                      Resetuj do domyślnych (rola)
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => setEditingAccessId(m.user_id)} className="text-xs font-semibold text-teal hover:underline">
+                      {canEdit ? "Edytuj" : "Pokaż"}
                     </button>
-                  )}
+                    {m.view_access !== null && <span className="text-xs text-inksoft">dostosowany</span>}
+                  </div>
                 </td>
               </tr>
             );
           })}
         </tbody>
       </table>
+
+      {editingMember && (
+        <MemberEditDrawer
+          member={editingMember}
+          canEdit={canEdit}
+          onChangeAccess={onChangeAccess}
+          onChangeEmploymentType={onChangeEmploymentType}
+          onClose={() => setEditingAccessId(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// Okno edycji jednego pracownika (30.09.2026): dostęp do zakładek (dawniej siatka checkboxów wprost w wierszu
+// tabeli Zespołu) i dane pracownicze (na razie forma zatrudnienia). Tylko Admin edytuje (polityka w bazie i tak
+// by to zablokowała) — reszta widzi okno w trybie tylko do odczytu, żeby dało się sprawdzić czyjś dostęp.
+function MemberEditDrawer({
+  member,
+  canEdit,
+  onChangeAccess,
+  onChangeEmploymentType,
+  onClose,
+}: {
+  member: Member;
+  canEdit: boolean;
+  onChangeAccess: (userId: string, access: ViewKey[] | null) => void;
+  onChangeEmploymentType: (userId: string, employmentType: string | null) => void;
+  onClose: () => void;
+}) {
+  // "Przegląd" jest wspólną stroną startową dla każdej roli — zawsze wymuszony, nie da się go odznaczyć
+  // (inaczej dałoby się kogoś całkiem zablokować z aplikacji).
+  function toggleAccess(key: ViewKey) {
+    if (key === "overview") return;
+    const current = effectiveAccess(member.role, member.view_access);
+    const next = current.includes(key) ? current.filter((k) => k !== key) : [...current, key];
+    onChangeAccess(member.user_id, (next.includes("overview") ? next : ["overview", ...next]) as ViewKey[]);
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/30 flex justify-end z-50" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="w-full max-w-lg bg-paper h-full overflow-y-auto p-6 border-l border-line">
+        <div className="flex justify-between items-start mb-6">
+          <div>
+            <div className="text-xs text-inksoft">PRACOWNIK</div>
+            <h2 className="text-lg font-semibold">{member.name || member.email || "—"}</h2>
+            <div className="text-xs text-inksoft">{member.email}</div>
+          </div>
+          <button onClick={onClose} className="text-inksoft text-lg">✕</button>
+        </div>
+
+        <h3 className="text-xs font-semibold text-inksoft mb-2">DANE PRACOWNICZE</h3>
+        <div className="border border-line bg-white p-4 mb-6">
+          <label className="text-xs font-semibold text-inksoft block mb-1">Forma zatrudnienia</label>
+          <select
+            value={member.employment_type ?? ""}
+            onChange={(e) => onChangeEmploymentType(member.user_id, e.target.value || null)}
+            disabled={!canEdit}
+            className="w-full border border-line bg-white px-2 py-2 rounded text-sm disabled:opacity-60"
+          >
+            <option value="">— nie ustawiono —</option>
+            {EMPLOYMENT_TYPES.map((t) => (
+              <option key={t} value={t}>{t}</option>
+            ))}
+          </select>
+        </div>
+
+        <h3 className="text-xs font-semibold text-inksoft mb-2">DOSTĘP DO ZAKŁADEK</h3>
+        <div className="border border-line bg-white p-4">
+          <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+            {TABS.map((t) => {
+              const checked = effectiveAccess(member.role, member.view_access).includes(t.key);
+              return (
+                <label key={t.key} className={`flex items-center gap-2 text-sm ${canEdit && t.key !== "overview" ? "cursor-pointer" : ""} ${checked ? "text-ink" : "text-inksoft"}`}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={!canEdit || t.key === "overview"}
+                    onChange={() => toggleAccess(t.key)}
+                  />
+                  {t.space === "shop" ? `Sklep: ${t.label}` : t.label}
+                </label>
+              );
+            })}
+          </div>
+          {canEdit && member.view_access !== null && (
+            <button onClick={() => onChangeAccess(member.user_id, null)} className="text-xs font-semibold text-teal hover:underline mt-3">
+              Resetuj do domyślnych (rola)
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

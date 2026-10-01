@@ -68,16 +68,28 @@ Uwaga: nazwa zakładki "Bidder" to klucz `tradein`, a zakładka "Trade-in" to kl
 historyczne, nie mylić. Aktywna zakładka jest zapamiętywana w `localStorage`.
 
 **Dostęp do zakładek per osoba (od 30.09.2026).** Tabela wyżej to tylko DOMYŚLNY zestaw wg roli (`ROLE_ACCESS`
-w `app/page.tsx`) — Admin może go nadpisać dla KAŻDEJ osoby z osobna w zakładce Zespół: przy każdym członku zespołu
-checkbox przy każdej zakładce, zapisywane w `members.view_access` (`text[]`, `null` = jeszcze nikt nie dotykał, więc
-liczy się domyślny zestaw dla roli). `effectiveAccess(role, viewAccess)` w `app/page.tsx` liczy efektywny dostęp
-(nadpisanie, jeśli jest, inaczej `ROLE_ACCESS[role]`) i jest jedynym miejscem, które o tym decyduje — użyte zarówno
-przy filtrowaniu nawigacji/gate'owaniu widoku dla zalogowanej osoby, jak i przy renderowaniu checkboxów w Zespole
-dla każdego wiersza. "Przegląd" jest zawsze wymuszony (checkbox zablokowany, zaznaczony) — nie da się nikogo całkiem
-zablokować z aplikacji. Przycisk "Resetuj do domyślnych (rola)" czyści nadpisanie (`view_access = null`) — zmiana
-samej roli NIE resetuje automatycznie nadpisania (świadomie, żeby poprawka literówki w roli nie kasowała starannie
-dobranego dostępu; do zresetowania służy ten przycisk). Nadal tylko UI (RLS pozwala każdemu `authenticated` na
-wszystko) — twarde uprawnienia per rola są w planie rozwoju, punkt 10.
+w `app/page.tsx`) — Admin może go nadpisać dla KAŻDEJ osoby z osobna, zapisywane w `members.view_access`
+(`text[]`, `null` = jeszcze nikt nie dotykał, więc liczy się domyślny zestaw dla roli). `effectiveAccess(role,
+viewAccess)` w `app/page.tsx` liczy efektywny dostęp (nadpisanie, jeśli jest, inaczej `ROLE_ACCESS[role]`) i jest
+jedynym miejscem, które o tym decyduje — użyte zarówno przy filtrowaniu nawigacji/gate'owaniu widoku dla
+zalogowanej osoby, jak i przy renderowaniu checkboxów. "Przegląd" jest zawsze wymuszony (checkbox zablokowany,
+zaznaczony) — nie da się nikogo całkiem zablokować z aplikacji. Przycisk "Resetuj do domyślnych (rola)" czyści
+nadpisanie (`view_access = null`) — zmiana samej roli NIE resetuje automatycznie nadpisania (świadomie, żeby
+poprawka literówki w roli nie kasowała starannie dobranego dostępu; do zresetowania służy ten przycisk). Nadal
+tylko UI (RLS pozwala każdemu `authenticated` na wszystko) — twarde uprawnienia per rola są w planie rozwoju,
+punkt 10.
+
+**Okno edycji pracownika (30.09.2026, `MemberEditDrawer` w `app/page.tsx`).** Checkboxy dostępu do zakładek
+przeniesione z wiersza tabeli Zespołu (robiło się nieczytelne, dużo zakładek naraz) do osobnego okna bocznego —
+kolumna "Dostęp do zakładek" w tabeli ma teraz tylko przycisk "Edytuj" (dla Admina) albo "Pokaż" (reszta, okno w
+trybie tylko do odczytu) + etykietę "dostosowany", gdy `view_access` nie jest `null`, żeby dało się ocenić z
+samej listy, kto ma nadpisany dostęp bez otwierania okna każdej osoby. W tym samym oknie: **"Forma zatrudnienia"**
+(`members.employment_type`, nowa kolumna — zwykły tekst jak `role`, bez CHECK constraint; `EMPLOYMENT_TYPES` w
+`app/page.tsx` to tylko lista opcji w rozwijanej liście UI — "Umowa o pracę" / "Umowa zlecenie", dodanie kolejnej
+formy nie wymaga SQL, tak samo jak dodanie roli). Zmienia tylko Admin — chroni to już istniejąca polityka RLS
+`admin update members` (`USING (is_admin())` bez wyjątków kolumnowych, patrz sekcja Uprawnienia), nowa kolumna
+jest więc chroniona automatycznie, bez dodatkowej polityki; sprawdzone wprost testem, nie tylko założone. Imię i
+rola zostają edytowalne bezpośrednio w wierszu tabeli jak dotąd (okno dotyczy tylko dostępu i danych pracowniczych).
 
 ## Model danych i moduły
 
