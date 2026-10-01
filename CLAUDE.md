@@ -25,17 +25,17 @@ numerach seryjnych, wielokanałowa synchronizacja stanów, naprawy, auto-wycena)
 - `app/page.tsx` — jeden duży client component: logowanie, nawigacja, role, zakładki
   Przegląd / Magazyn / Zespół. Większe moduły są osobno w `app/_components/`:
   `ServiceView.tsx` (Serwis), `TestsView.tsx` (Testy), `ProductCardDrawer.tsx` (karta produktu), `TradeInHub.tsx` + `TradeInOrdersView.tsx` (Trade-in),
-  `TradeInView.tsx` (Bidder), `SalesOrdersHub.tsx` (Zamówienia, karta zamówienia w `SalesOrderCard.tsx`), `ErliParcelPanel.tsx` (nadawanie Paczkomatów InPost 24/7 przez Erli, osadzony na karcie zamówienia Erli), `ShippingView.tsx` (Wysyłka DHL).
+  `TradeInView.tsx` (Bidder), `SalesOrdersHub.tsx` (Zamówienia, karta zamówienia w `SalesOrderCard.tsx`), `ErliParcelPanel.tsx` (nadawanie Paczkomatów InPost 24/7 przez Erli, osadzony na karcie zamówienia Erli), `ShippingView.tsx` (Wysyłka DHL), `InvoicesView.tsx` (Faktury).
 - `app/api/*/route.ts` — endpointy serwerowe (sekrety tylko tu, nigdy w przeglądarce):
-  `fakturownia/sync`, `tradein/bidder`, `tradein/competitors`, `tradein/orders-sync`, `tradein/validate`, `orders/bm-sync`, `orders/refurbed-sync`, `orders/erli-sync`, `orders/allegro-sync`, `orders/allegro-auth`, `orders/allegro-callback`, `orders/octopia-sync`, `orders/amazon-sync`, `orders/validate`, `orders/bm-refresh`, `orders/erli-refresh`, `shipping/dhl-express/{check,create}`, `shipping/dhl-parcel/{check,create,label,cancel}`, `shipping/erli/{create,label,cancel}`, `shipping/sync-marketplace`, `shipping/render-zpl`, `shipping/fetch-remote-pdf`, `shipping/qz-sign`.
+  `fakturownia/sync`, `tradein/bidder`, `tradein/competitors`, `tradein/orders-sync`, `tradein/validate`, `orders/bm-sync`, `orders/refurbed-sync`, `orders/erli-sync`, `orders/allegro-sync`, `orders/allegro-auth`, `orders/allegro-callback`, `orders/octopia-sync`, `orders/amazon-sync`, `orders/validate`, `orders/bm-refresh`, `orders/erli-refresh`, `shipping/dhl-express/{check,create}`, `shipping/dhl-parcel/{check,create,label,cancel}`, `shipping/erli/{create,label,cancel}`, `shipping/sync-marketplace`, `shipping/render-zpl`, `shipping/fetch-remote-pdf`, `shipping/qz-sign`, `invoices/{create,prefill}`.
 - `lib/` — `supabaseClient.ts`, `buyback.ts` (logika biddera + `isAuthorized`),
   `displayName.ts` (skrócone imię: "Maksymilian J."), `workLog.ts` (interwały Dziś/7/30 dni,
   liczenie czasu i **etykiety typów czynności/statusów** — jedno źródło dla list i karty produktu),
   `search.ts` (`escapeLike` do wyszukiwania po numerze seryjnym), `scanOrders.ts` (stronicowany skan
-  zamówień Back Market z budżetem czasu i kursorem).
+  zamówień Back Market z budżetem czasu i kursorem), `invoices.ts` (wystawianie faktur w Fakturowni, stawka VAT, prefill nabywcy).
 - `supabase/*.sql` — schemat, każdy plik idempotentny: `schema.sql` (units, members,
   cache Fakturowni), `tradein.sql` (bidder), `buyback-orders.sql` (zamówienia + obsługa
-  paczek), `backlog.sql` (zakładka Backlog), `shipping.sql` (Wysyłka: nadawca, szablony, przesyłki), `sales-orders.sql` (zamówienia sprzedaży Back Market, refurbed, Erli, Allegro, Octopia i Amazon, plus archiwum Apilo; tokeny OAuth), `service.sql` (rejestr napraw), `tests.sql` (rejestr testów).
+  paczek), `backlog.sql` (zakładka Backlog), `shipping.sql` (Wysyłka: nadawca, szablony, przesyłki), `sales-orders.sql` (zamówienia sprzedaży Back Market, refurbed, Erli, Allegro, Octopia i Amazon, plus archiwum Apilo; tokeny OAuth), `service.sql` (rejestr napraw), `tests.sql` (rejestr testów), `invoices.sql` (zakładka Faktury: tabela faktur + widok `invoices_ready_orders`).
 - `scripts/import-buyback.mjs` — jednorazowy import ze starego programu Buyback Bidder.
 
 ## Zakładki i role
@@ -56,6 +56,7 @@ Rola jest zwykłym tekstem w `members.role` — dodanie roli nie wymaga SQL.
 | Zamówienia | `sales` | Admin, Manager, Zamówienia |
 | Backlog | `backlog` | wszyscy (każda rola) |
 | Wysyłka | `shipping` | Admin, Manager, Zamówienia |
+| Faktury | `invoices` | Admin, Manager, Zamówienia |
 | RCP | `rcp` | wszyscy (każda rola) |
 | Zwroty | `returns` | wszyscy (każda rola) |
 | Zespół | `team` | Admin (edycja), Manager (tylko odczyt) |
@@ -694,6 +695,57 @@ Express — `contactInformation.fullName` tylko z firmą). Nie testowane na żyw
 
 **Erli — Paczkomaty InPost 24/7** (`lib/erliShipping.ts`, `app/api/shipping/erli/{create,label,cancel}`, `ErliParcelPanel.tsx`) — trzeci, zupełnie inny sposób nadawania: to **Erli** zleca przesyłkę InPost na SWOIM koncie/rozliczeniu (`POST /shipping/parcels/` w tym samym "Marketplace API" co synchronizacja zamówień — ten sam `ERLI_API_KEY`/`ERLI_UA`, żadnych nowych zmiennych), nie my przez DHL. Dlatego przycisk **"Nadaj przez Erli (Paczkomat) →" siedzi wprost na karcie zamówienia Erli** (`SalesOrderCard.tsx`), nie w zakładce Wysyłka — widoczny tylko gdy klient faktycznie wybrał punkt InPost przy składaniu zamówienia w Erli (`order.raw.delivery.pickupPlace.provider === "inpost"`). **Adresu odbiorcy nie podajemy wcale** — Erli bierze go z zamówienia; wystarczy waga/wymiary (szablon albo ręcznie), w **milimetrach i gramach** (limity API: 1–2000 mm, 10–700 000 g), nie cm/kg jak w DHL — konwersja w `app/api/shipping/erli/create`. `typeId` = `erliPaczkomat` (pełny słownik metod: `GET /dictionaries/shippingMethods`, nieużywany — mamy tylko tę jedną). **Etykieta i numer śledzenia nie wracają od razu** przy tworzeniu — trzeba dopytać `POST /shipping/parcels/_search` (filter `field:"orderId", operator:"="`), ten sam wzorzec co "Pobierz etykietę ponownie" przy DHL Parcel; `notifyMarketplace` (patrz wyżej) tu nie ma zastosowania (to nie DHL). **Nadanie NIE musi wcale ruszyć pola `updated` zamówienia po stronie Erli** — okazało się błędnym założeniem (do 30.09.2026 dokumentacja tu mówiła "numer śledzenia i tak sam dojdzie przy kolejnej synchronizacji", bez pokrycia na żywych danych): zwykły cykliczny skan (`orders/erli-sync`) idzie kursorem po `updated`, więc zamówienie z realnie nadaną przesyłką (przez naszą integrację ALBO całkiem poza naszą aplikacją, np. wprost z panelu Erli) mogło zostać trwale niewidoczne dla tego skanu — ten sam wzorzec problemu co przy zmianie statusu płatności (`erli_paid`, patrz `orders/erli-sync/route.ts`). Zgłoszone przez właściciela 30.09.2026 na kilku takich zamówieniach (część sprzed prawie roku). Naprawione dwutorowo: **(1)** `app/api/orders/erli-refresh` — dogrywa NA ŻĄDANIE jedno zamówienie (`POST /orders/_search`, filter `field:"id", operator:"="`) i odświeża jego wiersz w `erli_orders`/`sales_orders`/`sales_order_items` (analogiczne do `bm-refresh` dla Back Marketu), wołane automatycznie (best-effort) zaraz po udanym nadaniu w `shipping/erli/create`; **(2)** przycisk **"Odśwież status z Erli ↻"** na karcie KAŻDEGO zamówienia Erli (`SalesOrderCard.tsx`, obok plakietki statusu) — dla zamówień wysłanych całkiem poza naszą integracją, gdzie nie ma żadnego momentu, w którym moglibyśmy odświeżyć automatycznie. **Anulowanie działa** (`DELETE /shipping/parcels/{id}`), dopóki przesyłka nie trafiła do sieci InPost — tak jak DHL Parcel, żaden test/sandbox nie istnieje, każde nadanie jest prawdziwe i płatne. **Bez migracji SQL:** carrier (`erli_paczkomat`) i product_code w `shipments` to zwykły tekst bez ograniczeń; id paczki Erli (potrzebny do anulowania) trzyma się w istniejącej kolumnie `charges` (`{erli_parcel_id}`) zamiast dodawać nową kolumnę tylko dla tego pola — stąd `dhlCharge()` w `ShippingView.tsx` sprawdza `Array.isArray` przed odczytem ceny DHL, żeby nie wywalić się na innym kształcie danych Erli. Nie testowane na żywym API (brak danych dostępowych w środowisku asystenta) — zweryfikowane na atrapie `fetch` wg `swagger.json` (`erli.pl/svc/shop-api/doc/swagger.json`).
 
+**Faktury** (zakładka Faktury, `InvoicesView.tsx`, `lib/invoices.ts`, `invoices.sql`, `app/api/invoices/{create,prefill}`) — wystawianie
+faktur VAT w Fakturowni dla zamówień, które mają już KOMPLET: numer przesyłki (`sales_orders.tracking_number`) ORAZ numer
+seryjny/IMEI na KAŻDEJ pozycji (`sales_order_items.serial_number`). Dostęp Admin, Manager i Zamówienia (`is_admin_or_manager()`
+z `shipping.sql`, ta sama funkcja co w Wysyłce). **Wyzwalacz jest RĘCZNY, nie automatyczny** — świadoma decyzja właściciela
+(01.10.2026): faktura to prawdziwy dokument księgowo-podatkowy, trudny do cofnięcia (korekta to osobny dokument, nie
+usunięcie), więc nie generujemy jej bez przeglądu człowieka, nawet gdy warunki są spełnione. Układ listy wzorowany na dawnym
+podglądzie faktur w Apilo (Numer dokumentu / Powiązane zamówienie / Data wystawienia / Data sprzedaży / Nabywca / Kwota
+brutto / Status dokumentu) — na wyraźną prośbę właściciela.
+- **Dwie pigułki:** *Do wystawienia* — zamówienia spełniające oba warunki, jeszcze bez faktury (widok `invoices_ready_orders`
+  w `invoices.sql`: `tracking_number is not null` AND żadna pozycja z pustym `serial_number` AND brak wiersza w `invoices` —
+  liczone raz po stronie bazy, nie w przeglądarce, bo `sales_orders`/`sales_order_items` mogą mieć tysiące wierszy; ten sam
+  powód co stronicowanie w innych raw-listach). *Wystawione* — lista z tabeli `invoices` (kolumny jak w Apilo wyżej).
+  `invoices_ready_orders` jest czytelny dla każdego `authenticated` (ten sam, szeroki dostęp co `sales_orders`/
+  `sales_order_items` — nie dokłada nowej ekspozycji danych, tylko filtruje już czytelne tabele), ale sama tabela `invoices`
+  (dane nabywcy, kwoty) jest już zawężona do `is_admin_or_manager()`, tak jak `shipments`.
+- **"Wystaw fakturę →"** otwiera panel boczny z podglądem pozycji (SKU + numer seryjny + cena) i EDYTOWALNYM formularzem
+  nabywcy — nie wysyła na ślepo. Wstępne wypełnienie (`app/api/invoices/prefill`, GET) czyta adres z surowej tabeli kanału
+  (`bm_orders`/`refurbed_orders`/`octopia_orders` — te same co "Nadaj przesyłkę DHL" w `SalesOrderCard.tsx`, przez nowy
+  `rawBuyerAddress` w `lib/shipping.ts`, wydzielony z `buildShipPrefill` BEZ filtra `DHL_EU_COUNTRIES` — faktura ma
+  obowiązywać niezależnie od tego, czy danym krajem w ogóle wysyłamy DHL-em). **Erli, Allegro i Amazon nie mają tu jeszcze
+  obsługi adresu** (ten sam, znany gdzie indziej brak danych — Amazon SP-API w ogóle nie udostępnia PII, patrz sekcja
+  Wysyłka; Erli/Allegro po prostu jeszcze nie zrobione) — formularz wtedy startuje pusty i pracownik wypełnia go ręcznie;
+  to nie blokuje wystawienia faktury dla tych kanałów, tylko nie ma czym go wstępnie wypełnić. **Pole NIP jest zawsze
+  puste z prefillu i zawsze edytowalne** — żadne API marketplace'u nie przekazuje numeru NIP nabywcy (sprzedaż
+  konsumencka); gdy klient poproszył o fakturę na firmę, pracownik wpisuje NIP ręcznie przed wystawieniem.
+- **Stawka VAT jest jedna, stała dla wszystkich pozycji i kanałów** (`INVOICE_VAT_RATE` w `lib/invoices.ts`, 23% —
+  świadoma decyzja właściciela 01.10.2026, BEZ logiki OSS per kraj nabywcy, mimo sprzedaży też do DE/ES/FR/IT i innych
+  krajów UE) — jedna stała w kodzie, nie rozsiana, żeby ewentualne przejście na OSS było zmianą w jednym miejscu, nie
+  polowaniem po repo. Cena pozycji = `sales_order_items.price` (już potwierdzona jako cena BRUTTO konsumencka przy
+  dodawaniu kolumny "Cena" w Zamówieniach) wprost jako `total_price_gross`, `quantity` zawsze 1 (ten sam powód co w
+  Zamówieniach: jedna pozycja = jedna sztuka, rozbite wcześniej z `quantity` > 1).
+- **Jedna faktura na zamówienie** (`invoices` ma `unique (marketplace, external_id)`), NIE na pozycję — wszystkie sztuki
+  zamówienia trafiają na jedną fakturę jako osobne pozycje (`code` = SKU, `additional_info` = numer seryjny/IMEI).
+  Serwer sprawdza WSZYSTKO jeszcze raz przy wystawianiu (nie ufa przeglądarce): numer przesyłki, komplet numerów
+  seryjnych, brak już istniejącej faktury — nawet jeśli UI pokazało zamówienie na liście "Do wystawienia".
+- **Sprzedawca** = domyślny department konta Fakturowni (ten sam `FAKTUROWNIA_DOMAIN`/`FAKTUROWNIA_API_TOKEN` co
+  `fakturownia/sync` w Magazynie — jedno konto, nie dodano nowych zmiennych środowiskowych). **Nabywca zawsze inline**
+  (`buyer_name`/`buyer_tax_no`/...), NIGDY `client_id` — świadomie nie zakładamy osobnej kartoteki klienta w Fakturowni
+  dla każdego kupującego z marketplace'u, to zaśmieciłoby listę kontrahentów setkami jednorazowych wpisów.
+- **Log zmian**: po sukcesie front-end (`InvoicesView.tsx`) dopisuje wpis do `sales_orders.history` przez RPC
+  `sales_order_add_log` z sesji przeglądarki — ten sam wzorzec co przycisk "Zaakceptuj zamówienie" w `SalesOrderCard.tsx`
+  (nie serwer — `by_email` bierze się z `session.user.email`, prościej niż dociąganie e-maila po stronie route'u).
+- **Świadomie NIE zrobione:** synchronizacja statusu płatności z Fakturowni (`invoices.status` to dziś zawsze
+  `'wystawiono'` zaraz po utworzeniu — kolumna ma też wartość `'zaplacone'`, ale nic jeszcze jej tam nie ustawia; wymaga
+  osobnego wywołania API Fakturowni per faktura albo webhooka) i procedura OSS/VAT-marża (patrz wyżej). Obie rzeczy są
+  świadomymi uproszczeniami pierwszej wersji, nie przeoczeniami.
+- Nie testowane na żywym API Fakturowni (brak kluczy w środowisku asystenta) — zweryfikowane wg oficjalnej dokumentacji
+  (`app.fakturownia.pl/api`, `github.com/fakturownia/api`), nie na atrapie `fetch` (brak czasu na testy jednostkowe przy
+  pierwszej wersji tego modułu — właściciel powinien przetestować pierwsze kilka faktur na produkcji ostrożnie, najlepiej
+  na mało istotnym zamówieniu, i porównać wynik w panelu Fakturowni z oczekiwaniem).
+
 **RCP** (`RcpView.tsx`) — rejestracja czasu pracy; **na razie tylko pusta zakładka-szkielet**, widoczna dla wszystkich ról. Docelowo z niej ma wyjść ewidencja godzin
 potrzebna do wydajności (punkty na godzinę) i premii z regulaminu (plan rozwoju, punkt 8).
 
@@ -988,3 +1040,5 @@ Configuration) musi być aktualny adres produkcyjny, inaczej magic link nie zadz
 9. ⬜ Integracje z kanałami sprzedaży (Allegro, eBay) — osobny etap, wymaga kluczy API
 10. ⬜ Twarde uprawnienia per rola (RLS)
 11. ⬜ Zwroty: rejestr fizycznej obsługi zwrotu (przyjęcie, ocena stanu, decyzja co dalej)
+12. 🟡 Faktury: wystawianie faktur VAT w Fakturowni (ręczny przycisk) zrobione · ⬜ synchronizacja statusu płatności,
+    ⬜ obsługa adresu nabywcy dla Erli/Allegro/Amazon, ⬜ procedura OSS/VAT-marża per kraj nabywcy (dziś jedna stała stawka)

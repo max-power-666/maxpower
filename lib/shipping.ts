@@ -31,10 +31,11 @@ export function splitStreet(text: string): { street: string; houseNumber: string
   return { street: t, houseNumber: "" };
 }
 
-// Adres odbiorcy z surowego zamówienia. Zwraca null, gdy brak adresu, kraj spoza obsługiwanych (DHL_EU_COUNTRIES —
-// obejmuje Polskę) albo marketplace inny niż backmarket/refurbed (Allegro/Erli mają własną, krajową obsługę wysyłki
-// — Erli bezpośrednio przez swoje API, patrz ErliParcelPanel.tsx — więc w ogóle nie przechodzą przez tę funkcję).
-export function buildShipPrefill(marketplace: string, externalId: string, raw: any, customerEmail?: string | null): ShipPrefill | null {
+// Adres odbiorcy z surowego zamówienia, BEZ filtra kraju — wspólna część dla buildShipPrefill (wysyłka, filtruje
+// do DHL_EU_COUNTRIES) i buildInvoiceBuyerPrefill (lib/invoices.ts — faktura ma obowiązywać niezależnie od tego,
+// czy danym kanałem/krajem w ogóle wysyłamy DHL-em). Zwraca null, gdy brak adresu albo marketplace inny niż
+// backmarket/refurbed/octopia (Erli/Allegro/Amazon — patrz komentarz niżej przy Amazon).
+export function rawBuyerAddress(marketplace: string, raw: any, customerEmail?: string | null): Omit<ShipPrefill, "marketplace" | "externalId"> | null {
   let p: Omit<ShipPrefill, "marketplace" | "externalId"> | null = null;
   if (marketplace === "backmarket") {
     const a = raw?.shipping_address;
@@ -102,7 +103,15 @@ export function buildShipPrefill(marketplace: string, externalId: string, raw: a
   // "Shipped"). To nie błąd mapowania: nasza aplikacja Amazon ma rolę "Inventory and Order Tracking" bez dostępu do
   // danych PII (Restricted Data Token) — pełny adres wymaga osobnego zatwierdzenia w Seller Central i osobnego
   // wywołania (POST /tokens/.../restrictedDataToken + GET /orders/v0/orders/{id}/address) — do zrobienia po stronie
-  // właściciela, zanim to ma sens kodować.
+  // właściciela, zanim to ma sens kodować. Erli i Allegro też bez branchu na razie — do zrobienia, gdy będą
+  // potrzebne (dziś mają własne, osobne ścieżki wysyłki, które adresu z tej funkcji nie potrzebują).
+  return p;
+}
+
+// Adres odbiorcy z surowego zamówienia, filtrowany do krajów, gdzie wysyłamy DHL-em (DHL_EU_COUNTRIES — obejmuje
+// Polskę). Zwraca null, gdy brak adresu albo kraj spoza listy.
+export function buildShipPrefill(marketplace: string, externalId: string, raw: any, customerEmail?: string | null): ShipPrefill | null {
+  const p = rawBuyerAddress(marketplace, raw, customerEmail);
   if (!p || !DHL_EU_COUNTRIES.includes(p.countryCode)) return null;
   return { marketplace, externalId, ...p };
 }

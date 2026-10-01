@@ -8,6 +8,7 @@ import TradeInHub from "./_components/TradeInHub";
 import SalesOrdersHub from "./_components/SalesOrdersHub";
 import BacklogView from "./_components/BacklogView";
 import ShippingView from "./_components/ShippingView";
+import InvoicesView from "./_components/InvoicesView";
 import RcpView from "./_components/RcpView";
 import ReturnsView from "./_components/ReturnsView";
 import ShopProductsView from "./_components/ShopProductsView";
@@ -22,7 +23,7 @@ import { displayNameForEmail } from "@/lib/displayName";
 const ROLES = ["Admin", "Manager", "Magazyn", "Zamówienia", "Serwis", "Testy", "Bidder", "Trade-in", "Sklep"];
 
 type ViewKey =
-  | "overview" | "inventory" | "sales" | "team" | "service" | "tests" | "tradein" | "orders" | "backlog" | "shipping" | "rcp" | "returns"
+  | "overview" | "inventory" | "sales" | "team" | "service" | "tests" | "tradein" | "orders" | "backlog" | "shipping" | "invoices" | "rcp" | "returns"
   // Recoo Sklep (backoffice sklepu, przełącznik w pasku bocznym):
   | "shop_products" | "shop_stock";
 
@@ -43,6 +44,7 @@ const TABS: { key: ViewKey; label: string; space?: Space }[] = [
   { key: "orders", label: "Trade-in" },
   { key: "backlog", label: "Backlog" },
   { key: "shipping", label: "Wysyłka" },
+  { key: "invoices", label: "Faktury" },
   { key: "rcp", label: "RCP" },
   { key: "returns", label: "Zwroty" },
   { key: "shop_products", label: "Produkty", space: "shop" },
@@ -59,10 +61,10 @@ const TABS: { key: ViewKey; label: string; space?: Space }[] = [
 // "orders" (zakładka Trade-in — podgląd zamówień BuyBack) na razie tylko dla Admina,
 // dopóki nie ustalimy docelowej roli dla osoby przetwarzającej zamówienia.
 const ROLE_ACCESS: Record<string, ViewKey[]> = {
-  Admin: ["overview", "inventory", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "rcp", "returns", "shop_products", "shop_stock"],
-  Manager: ["overview", "inventory", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "rcp", "returns", "shop_products", "shop_stock"], // wszystko; Zespół tylko do odczytu, usuwa tylko Admin
+  Admin: ["overview", "inventory", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "rcp", "returns", "shop_products", "shop_stock"],
+  Manager: ["overview", "inventory", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "rcp", "returns", "shop_products", "shop_stock"], // wszystko; Zespół tylko do odczytu, usuwa tylko Admin
   Magazyn: ["overview", "inventory", "backlog", "rcp", "returns"],
-  Zamówienia: ["overview", "sales", "shipping", "backlog", "rcp", "returns"],
+  Zamówienia: ["overview", "sales", "shipping", "invoices", "backlog", "rcp", "returns"],
   Serwis: ["overview", "service", "backlog", "rcp", "returns"],
   Testy: ["overview", "tests", "backlog", "rcp", "returns"],
   Bidder: ["overview", "tradein", "backlog", "rcp", "returns"],
@@ -542,6 +544,8 @@ export default function Home() {
           {view === "shipping" && (
             <ShippingView session={session} isAdmin={role === "Admin"} members={members} prefill={shipPrefill} onPrefillUsed={() => setShipPrefill(null)} />
           )}
+
+          {view === "invoices" && <InvoicesView session={session} members={members} />}
 
           {view === "rcp" && <RcpView />}
 
