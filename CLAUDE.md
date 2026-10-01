@@ -726,8 +726,21 @@ Nie wymagane do żadnego statusu — czysto informacyjne, nie wpływa na punkty 
 "Rozpocznij test". Jeden wiersz = jeden test: status (w_trakcie / przetestowane / przerwany),
 czas, punkty 200/13 (= 100/6,5) po "przetestowane", bez zaokrąglania. To samo urządzenie nie
 może mieć dwóch aktywnych wpisów naraz (indeks częściowy na `serial_number`); test
-"przerwany" nie blokuje ponownego podejścia. Punkty są niezależne od wyniku testu (sprawny /
-wadliwy) — do potwierdzenia z właścicielem.
+"przerwany" nie blokuje ponownego podejścia. Punkty są niezależne od wyniku testu —
+potwierdzone właśnie dzięki kolumnie "Wynik" niżej (01.10.2026): to osobne pole, nie
+podstatus, i w ogóle nie wchodzi do logiki punktów/aktywnego wpisu.
+**Kolumna "Rodzaj testu"** (01.10.2026, `test_log.test_kind`, `TEST_KINDS` w `lib/workLog.ts`) — skąd/czemu
+urządzenie trafiło do testu: Po dostawie / Po serwisie / Ponowny test z magazynu / OLX / Allegro / Vinted.
+Wybierane w formularzu "Rozpocznij test" (select, domyślnie pierwsza wartość — zawsze coś wybrane, bez pustej
+opcji) i edytowalne potem w wierszu listy (zwykły `<select>`, zapis od razu po zmianie, bez „Zapisz”). Zwykły
+tekst jak `role`/`employment_type` w innych modułach — dodanie kolejnej wartości to tylko wpis w `TEST_KINDS`,
+bez SQL; stare wiersze dostały default `'po_dostawie'` przy dodaniu kolumny. **Kolumna "Wynik"** (tabela,
+`test_log.result`, `TEST_RESULTS` w `lib/workLog.ts`) — stan urządzenia ustalony podczas testu: Sprawny /
+Serwis / RMA / Do poprawy / Outlet. Nullable (puste "—" dla starych wierszy i dopóki nikt nie wybierze),
+edytowalne w dowolnym momencie przez cały cykl życia testu, **całkowicie niezależne od statusu** (w_trakcie /
+przetestowane / przerwany, który dalej sam rządzi punktami i unikalnością aktywnego wpisu) — np. wpis może być
+"przetestowane" + "RMA" naraz, to nie sprzeczność. Żadne z tych dwóch pól nie jest wymagane do żadnego
+statusu — czysto informacyjne, podobnie jak "Części" w Serwisie.
 
 **Karta produktu** (`ProductCardDrawer.tsx`). Klik w numer seryjny w Testach i Serwisie (strzałka ↗
 przy polu) albo w Magazynie → Raw data otwiera panel. **W Trade-in (Wprowadzanie) ten odnośnik usunięty

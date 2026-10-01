@@ -53,6 +53,27 @@ export const TEST_STATUSES = [
   { key: "przerwany", label: "Przerwany" },
 ] as const;
 
+// Rodzaj testu (01.10.2026) — skąd/czemu urządzenie trafiło do testu, wybierane przy rozpoczęciu.
+export const TEST_KINDS = [
+  { key: "po_dostawie", label: "Po dostawie" },
+  { key: "po_serwisie", label: "Po serwisie" },
+  { key: "ponowny_z_magazynu", label: "Ponowny test z magazynu" },
+  { key: "olx", label: "OLX" },
+  { key: "allegro", label: "Allegro" },
+  { key: "vinted", label: "Vinted" },
+] as const;
+
+// Wynik testu (01.10.2026) — stan urządzenia ustalony podczas testu; niezależny od statusu
+// cyklu życia testu (w_trakcie/przetestowane/przerwany) i od punktów (Regulamin §2 ust. 4 —
+// punkty liczą się za prawidłowo zakończony test, niezależnie od tego, co test wykazał).
+export const TEST_RESULTS = [
+  { key: "sprawny", label: "Sprawny" },
+  { key: "serwis", label: "Serwis" },
+  { key: "rma", label: "RMA" },
+  { key: "do_poprawy", label: "Do poprawy" },
+  { key: "outlet", label: "Outlet" },
+] as const;
+
 export const INTAKE_STATUSES = [
   { key: "w_trakcie", label: "W trakcie" },
   { key: "obsluzona", label: "Obsłużona" },

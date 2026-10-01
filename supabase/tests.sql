@@ -23,6 +23,16 @@ create table if not exists test_log (
 );
 
 alter table test_log add column if not exists notes text;
+-- Rodzaj testu (01.10.2026) — skąd/czemu urządzenie trafiło do testu (po dostawie, po serwisie,
+-- ponowny test z magazynu, OLX, Allegro, Vinted); zwykły tekst jak role/typy w innych modułach —
+-- dodanie kolejnej wartości nie wymaga SQL, tylko TEST_KINDS w lib/workLog.ts. Default zapewnia,
+-- że stare wiersze dostają sensowną wartość bez ręcznego backfillu.
+alter table test_log add column if not exists test_kind text not null default 'po_dostawie';
+-- Wynik testu (01.10.2026) — stan urządzenia ustalony podczas testu (sprawny/serwis/rma/do
+-- poprawy/outlet); NIEZALEŻNY od statusu cyklu życia testu (w_trakcie/przetestowane/przerwany,
+-- kolumna `status` wyżej) i od punktów — ustalany dopiero w trakcie/po teście, więc nullable,
+-- bez default (stare wiersze zostają bez wyniku, pokazane jako "—").
+alter table test_log add column if not exists result text;
 -- ON DELETE SET NULL (30.09.2026) — patrz wyjaśnienie w schema.sql (members.user_id) i service.sql; employee_email
 -- jest już zapisany osobno, więc "kto to zrobił" zostaje widoczne mimo zerwania linku do konta.
 alter table test_log alter column employee_user_id drop not null;

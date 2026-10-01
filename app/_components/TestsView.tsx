@@ -6,7 +6,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import InlineEditCell from "./InlineEditCell";
 import ProductCardDrawer from "./ProductCardDrawer";
-import { INTERVALS, TEST_STATUSES as STATUSES, fmtDuration, rangeStart, type Interval } from "@/lib/workLog";
+import { INTERVALS, TEST_STATUSES as STATUSES, TEST_KINDS, TEST_RESULTS, fmtDuration, rangeStart, type Interval } from "@/lib/workLog";
 
 // Rejestr testów urządzeń wg Regulaminu premiowania (§2, 12.10.2026): 100/6,5 pkt = 200/13 pkt
 // za prawidłowo przetestowane urządzenie, bez zaokrąglania (wartość ustawia default w bazie).
@@ -21,11 +21,16 @@ const STATUS_STYLE: Record<StatusKey, string> = {
   przerwany: "bg-rustsoft text-rust",
 };
 
+type TestKindKey = (typeof TEST_KINDS)[number]["key"];
+type TestResultKey = (typeof TEST_RESULTS)[number]["key"];
+
 type TestRow = {
   id: number;
   employee_email: string | null;
   serial_number: string;
   status: StatusKey;
+  test_kind: TestKindKey;
+  result: TestResultKey | null;
   notes: string | null;
   started_at: string;
   finished_at: string | null;
@@ -61,6 +66,7 @@ export default function TestsView({
   const [error, setError] = useState("");
 
   const [serial, setSerial] = useState("");
+  const [testKind, setTestKind] = useState<TestKindKey>(TEST_KINDS[0].key);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
   const [openSerial, setOpenSerial] = useState<string | null>(null);
@@ -89,7 +95,7 @@ export default function TestsView({
           .gte("finished_at", rangeStart(interval)),
         supabase
           .from("test_log")
-          .select("id, employee_email, serial_number, status, notes, started_at, finished_at, points")
+          .select("id, employee_email, serial_number, status, test_kind, result, notes, started_at, finished_at, points")
           .order("started_at", { ascending: false })
           .limit(50),
       ]);
@@ -131,6 +137,7 @@ export default function TestsView({
         employee_user_id: session.user.id,
         employee_email: session.user.email,
         serial_number: value,
+        test_kind: testKind,
         status: "w_trakcie",
       });
       if (err) {
@@ -159,6 +166,16 @@ export default function TestsView({
   async function saveNotes(row: TestRow, notes: string | null) {
     const { error: err } = await supabase.from("test_log").update({ notes }).eq("id", row.id);
     if (err) setError(`Nie udało się zapisać uwag: ${err.message}`);
+  }
+
+  async function saveTestKind(row: TestRow, testKind: TestKindKey) {
+    const { error: err } = await supabase.from("test_log").update({ test_kind: testKind }).eq("id", row.id);
+    if (err) setError(`Nie udało się zapisać rodzaju testu: ${err.message}`);
+  }
+
+  async function saveResult(row: TestRow, result: TestResultKey | "") {
+    const { error: err } = await supabase.from("test_log").update({ result: result || null }).eq("id", row.id);
+    if (err) setError(`Nie udało się zapisać wyniku: ${err.message}`);
   }
 
   async function changeStatus(row: TestRow, status: StatusKey) {
@@ -224,6 +241,18 @@ export default function TestsView({
               className="w-full border border-line bg-white px-2 py-2 rounded text-sm font-mono"
             />
           </div>
+          <div>
+            <label className="text-xs font-semibold text-inksoft block mb-1">Rodzaj testu</label>
+            <select
+              value={testKind}
+              onChange={(e) => setTestKind(e.target.value as TestKindKey)}
+              className="w-full border border-line bg-white px-2 py-2 rounded text-sm"
+            >
+              {TEST_KINDS.map((t) => (
+                <option key={t.key} value={t.key}>{t.label}</option>
+              ))}
+            </select>
+          </div>
         </div>
         {formError && <p className="text-rust text-xs mb-2">{formError}</p>}
         <button onClick={submit} disabled={submitting} className={btnPrimary}>
@@ -239,7 +268,9 @@ export default function TestsView({
               <th className="p-3">Rozpoczęto</th>
               <th className="p-3">Pracownik</th>
               <th className="p-3">Numer seryjny</th>
+              <th className="p-3">Rodzaj testu</th>
               <th className="p-3">Status</th>
+              <th className="p-3">Wynik</th>
               <th className="p-3">Uwagi</th>
               {isAdminOrManager && <th className="p-3">Czas</th>}
               <th className="p-3 text-right">Punkty</th>
@@ -248,7 +279,7 @@ export default function TestsView({
           </thead>
           <tbody>
             {!loading && recent.length === 0 && (
-              <tr><td colSpan={6 + (isAdminOrManager ? 1 : 0) + (isAdmin ? 1 : 0)} className="p-6 text-center text-inksoft text-sm">Brak testów — rozpocznij pierwszy powyżej.</td></tr>
+              <tr><td colSpan={8 + (isAdminOrManager ? 1 : 0) + (isAdmin ? 1 : 0)} className="p-6 text-center text-inksoft text-sm">Brak testów — rozpocznij pierwszy powyżej.</td></tr>
             )}
             {recent.map((r) => (
               <tr key={r.id} className="border-b border-line last:border-b-0 hover:bg-paper">
@@ -259,12 +290,35 @@ export default function TestsView({
                 </td>
                 <td className="p-3">
                   <select
+                    value={r.test_kind}
+                    onChange={(e) => saveTestKind(r, e.target.value as TestKindKey)}
+                    className="text-xs border border-line bg-white px-2 py-1 rounded"
+                  >
+                    {TEST_KINDS.map((t) => (
+                      <option key={t.key} value={t.key}>{t.label}</option>
+                    ))}
+                  </select>
+                </td>
+                <td className="p-3">
+                  <select
                     value={r.status}
                     onChange={(e) => changeStatus(r, e.target.value as StatusKey)}
                     className={`text-xs font-semibold px-2 py-1 rounded-full border-none ${STATUS_STYLE[r.status]}`}
                   >
                     {STATUSES.map((s) => (
                       <option key={s.key} value={s.key}>{s.label}</option>
+                    ))}
+                  </select>
+                </td>
+                <td className="p-3">
+                  <select
+                    value={r.result ?? ""}
+                    onChange={(e) => saveResult(r, e.target.value as TestResultKey | "")}
+                    className="text-xs border border-line bg-white px-2 py-1 rounded"
+                  >
+                    <option value="">—</option>
+                    {TEST_RESULTS.map((t) => (
+                      <option key={t.key} value={t.key}>{t.label}</option>
                     ))}
                   </select>
                 </td>
