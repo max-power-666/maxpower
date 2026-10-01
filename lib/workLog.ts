@@ -49,9 +49,14 @@ export const SERVICE_TASKS = [
 
 export const SERVICE_STATUSES = [
   { key: "w_naprawie", label: "W naprawie" },
+  { key: "oczekuje_na_czesci", label: "Oczekuje na części" },
   { key: "naprawiony", label: "Naprawiony" },
   { key: "uszkodzony", label: "Uszkodzony" },
 ] as const;
+
+// Statusy, które NIE są zakończeniem naprawy (finished_at zostaje null, praca jest tylko
+// wstrzymana, nie skończona) — "w_naprawie" i "oczekuje_na_czesci" (01.10.2026).
+export const SERVICE_ACTIVE_STATUSES: string[] = ["w_naprawie", "oczekuje_na_czesci"];
 
 export const TEST_STATUSES = [
   { key: "w_trakcie", label: "W trakcie" },

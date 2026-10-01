@@ -9,6 +9,7 @@ import PartsCell from "./PartsCell";
 import ProductCardDrawer from "./ProductCardDrawer";
 import {
   INTERVALS,
+  SERVICE_ACTIVE_STATUSES,
   SERVICE_STATUSES as STATUSES,
   SERVICE_TASKS,
   fmtDuration,
@@ -20,7 +21,9 @@ import {
 // Nie liczy premii w zł (Regulamin §4-§7) — wymagałoby to danych o czasie pracy/urlopach,
 // których apka nie ma. Tu tylko czynności + punkty + podsumowanie w wybranym okresie.
 //
-// Jeden wiersz = jedna naprawa, z cyklem życia w statusie (start -> naprawiony/uszkodzony).
+// Jeden wiersz = jedna naprawa, z cyklem życia w statusie (start -> [oczekuje na części] ->
+// naprawiony/uszkodzony). "Oczekuje na części" (01.10.2026) to naprawa WSTRZYMANA, nie
+// zakończona — jak "w_naprawie", finished_at zostaje null (SERVICE_ACTIVE_STATUSES w lib/workLog.ts).
 // "Czas" (finished_at - started_at) jest tylko informacyjny dla zespołu — regulamin liczy
 // wydajność jako punkty / godziny przepracowane (ewidencja czasu pracy), nie sumę czasów
 // napraw. Punkty do podsumowania liczą się tylko dla status="naprawiony" (Regulamin §2 ust. 4:
@@ -32,6 +35,7 @@ const TASK_LABEL: Record<string, string> = Object.fromEntries(SERVICE_TASKS.map(
 type StatusKey = (typeof STATUSES)[number]["key"];
 const STATUS_STYLE: Record<StatusKey, string> = {
   w_naprawie: "bg-ambersoft text-amber",
+  oczekuje_na_czesci: "bg-[#e3ecf9] text-[#2a6bb5]",
   naprawiony: "bg-tealsoft text-teal",
   uszkodzony: "bg-rustsoft text-rust",
 };
@@ -186,7 +190,7 @@ export default function ServiceView({
   async function changeStatus(row: LogRow, status: StatusKey) {
     const patch: { status: StatusKey; finished_at: string | null } = {
       status,
-      finished_at: status === "w_naprawie" ? null : new Date().toISOString(),
+      finished_at: SERVICE_ACTIVE_STATUSES.includes(status) ? null : new Date().toISOString(),
     };
     await supabase.from("service_log").update(patch).eq("id", row.id);
   }

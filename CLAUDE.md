@@ -702,11 +702,16 @@ Docelowo: rejestr fizycznej obsługi zwrotu (przyjęcie zwróconej paczki, spraw
 utylizacja), wzorem Serwisu/Testów/Trade-in — **nie** zestawienie zwrotów z marketplace'ów (te już są widoczne w Zamówieniach jako część kubełka
 "Anulowane", patrz `statusBucket`/`CANCELLED_STATUS` w `lib/salesOrders.ts`).
 
-**Serwis** (`ServiceView.tsx`, `service_log`). Rejestr napraw wg tabeli z regulaminu:
-Joy-Con para 15 pkt, kontroler PS4 25, Xbox One 35, PS5 12, czyszczenie konsoli 45.
-Jeden wiersz = jedna naprawa: `started_at`, status (w_naprawie / naprawiony / uszkodzony),
+**Serwis** (`ServiceView.tsx`, `service_log`). Rejestr napraw wg tabeli z regulaminu (`SERVICE_TASKS`
+w `lib/workLog.ts`, patrz sekcja Regulamin premiowania niżej za aktualne stawki). Jeden wiersz = jedna
+naprawa: `started_at`, status (w_naprawie / **oczekuje_na_czesci** / naprawiony / uszkodzony),
 `finished_at`. Pracownik = zawsze zalogowana osoba (nie do wyboru). Wpisy może usuwać
 tylko Admin (przycisk "Usuń", tak samo w Testach i Trade-in). Podsumowanie punktacji u góry (Dziś/7/30 dni) liczy tylko "naprawiony".
+**Status "Oczekuje na części"** (01.10.2026, na prośbę właściciela) — naprawa WSTRZYMANA, nie zakończona:
+tak jak "W naprawie", `finished_at` zostaje `null` (`SERVICE_ACTIVE_STATUSES` w `lib/workLog.ts` — lista
+statusów, które NIE kończą naprawy; `changeStatus` w `ServiceView.tsx` sprawdza przynależność do tej
+listy zamiast porównania tylko z "w_naprawie", żeby dodanie kolejnego aktywnego statusu w przyszłości nie
+wymagało zmiany logiki w dwóch miejscach). Nie liczy się do punktów (tylko "naprawiony" się liczy).
 **Numer seryjny / IMEI jest wymagany, żeby ROZPOCZĄĆ naprawę** (01.10.2026, na prośbę właściciela) — pole w formularzu
 ma gwiazdkę, przycisk "Rozpocznij naprawę" jest zablokowany, dopóki pole jest puste, a pilnuje tego też trigger
 `service_log_require_device_ref` w bazie (serwer nie ufa przeglądarce). **Wymóg dotyczy tylko INSERT, nie UPDATE** —

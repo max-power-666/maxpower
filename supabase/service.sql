@@ -19,7 +19,7 @@ create table if not exists service_log (
   task_type text not null,                   -- joycon_pair | ps4_controller | xbox_controller | ps5_controller | console_cleaning
   points numeric not null,                   -- migawka punktów wg typu czynności (gdyby regulamin się zmienił, stare wpisy zostają poprawne)
   device_ref text,                           -- numer seryjny / identyfikator urządzenia — Regulamin §2 ust. 5 wymaga wskazania urządzenia w ewidencji
-  status text not null default 'w_naprawie', -- w_naprawie | naprawiony | uszkodzony
+  status text not null default 'w_naprawie', -- w_naprawie | oczekuje_na_czesci | naprawiony | uszkodzony
   notes text,                                -- uwagi, edytowane w wierszu listy
   part_serials text[],                       -- numery seryjne części wykorzystanych w naprawie; dowolna liczba (często 0)
   started_at timestamptz not null default now(),
