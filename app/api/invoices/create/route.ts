@@ -77,7 +77,6 @@ export async function POST(request: Request) {
 
   const positions: InvoicePosition[] = items.map((i) => ({
     name: i.name || (i.sku ? `Produkt ${i.sku}` : "Produkt"),
-    code: i.sku,
     additionalInfo: i.serial_number ? `Nr seryjny/IMEI: ${i.serial_number}` : null,
     totalPriceGross: Number(i.price) || 0,
     currency: i.currency || "PLN",

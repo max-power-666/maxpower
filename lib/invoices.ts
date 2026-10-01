@@ -184,7 +184,6 @@ export function buildInvoiceBuyerPrefill(marketplace: string, raw: any, customer
 
 export type InvoicePosition = {
   name: string;
-  code: string | null; // SKU
   additionalInfo: string | null; // numer seryjny/IMEI
   totalPriceGross: number;
   currency: string;
@@ -204,8 +203,9 @@ export function fakturowniaConfigFromEnv(): FakturowniaConfig | null {
 // (buyer_name/buyer_tax_no/...), bez client_id — nie zakładamy osobnej kartoteki klienta w Fakturowni dla
 // każdego kupującego z marketplace'u, to by zaśmieciło listę kontrahentów. Pozycje: total_price_gross + tax
 // (cena z sales_order_items.price jest ceną konsumencką, czyli brutto — sprawdzone przy dodawaniu kolumny "Cena"
-// w Zamówieniach), code = SKU, additional_info = numer seryjny/IMEI (ten sam wzorzec co identyfikator przy
-// zgłoszeniu numeru przesyłki do marketplace'u — lib/shipmentMarketplaceSync.ts).
+// w Zamówieniach), additional_info = numer seryjny/IMEI (ten sam wzorzec co identyfikator przy zgłoszeniu numeru
+// przesyłki do marketplace'u — lib/shipmentMarketplaceSync.ts). Świadomie BEZ "code" (SKU) — na prośbę właściciela
+// (01.10.2026) SKU w ogóle nie trafia do Fakturowni, tylko nazwa produktu i numer seryjny/IMEI.
 // Nie testowane na żywym API (brak kluczy w środowisku asystenta) — zweryfikowane na atrapie `fetch` wg
 // dokumentacji (app.fakturownia.pl/api, github.com/fakturownia/api).
 export async function createFakturowniaInvoice(
@@ -232,7 +232,6 @@ export async function createFakturowniaInvoice(
       buyer_country: buyer.countryCode,
       positions: positions.map((p) => ({
         name: p.name,
-        code: p.code || undefined,
         additional_info: p.additionalInfo || undefined,
         quantity: 1,
         tax: String(INVOICE_VAT_RATE),

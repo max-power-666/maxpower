@@ -767,7 +767,11 @@ brutto / Status dokumentu) — na wyraźną prośbę właściciela.
 - **Jedna faktura na zamówienie** (`invoices` ma `unique (marketplace, external_id)`), NIE na pozycję — wszystkie sztuki
   zamówienia trafiają na jedną fakturę jako osobne pozycje: `name` = `sales_order_items.name` (prawdziwa nazwa produktu
   z marketplace'u, patrz sekcja Zamówienia wyżej — zgłoszone przez właściciela 01.10.2026, wcześniej było tylko
-  `"Produkt {SKU}"`), `code` = SKU, `additional_info` = numer seryjny/IMEI.
+  `"Produkt {SKU}"`), `additional_info` = numer seryjny/IMEI. **SKU świadomie NIE jest wysyłane do Fakturowni**
+  (na wyraźną prośbę właściciela 01.10.2026 — ani jako `code` pozycji, ani nigdzie indziej w payloadzie; `InvoicePosition`
+  w `lib/invoices.ts` w ogóle nie ma już pola `code`). W panelu "Wystaw fakturę" (`InvoicesView.tsx`) SKU też usunięte
+  z podglądu pozycji (zostaje tylko jako fallback wyświetlania, gdy `sales_order_items.name` jest puste — stare
+  wiersze sprzed uzupełnienia nazwy produktu) — na liście "Pozycje" widać tylko nazwę produktu i numer seryjny/IMEI.
   Serwer sprawdza WSZYSTKO jeszcze raz przy wystawianiu (nie ufa przeglądarce): numer przesyłki, komplet numerów
   seryjnych, brak już istniejącej faktury — nawet jeśli UI pokazało zamówienie na liście "Do wystawienia".
 - **Sprzedawca** = domyślny department konta Fakturowni (ten sam `FAKTUROWNIA_DOMAIN`/`FAKTUROWNIA_API_TOKEN` co
