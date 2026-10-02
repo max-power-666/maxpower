@@ -273,8 +273,7 @@ export default function ServiceView({
         </button>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
-        <h2 className="text-xs font-semibold text-inksoft">OSTATNIE NAPRAWY</h2>
+      <div className="mb-2">
         <input
           value={searchInput}
           onChange={(e) => setSearchInput(e.target.value)}
