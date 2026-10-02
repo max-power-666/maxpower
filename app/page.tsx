@@ -10,6 +10,7 @@ import BacklogView from "./_components/BacklogView";
 import ShippingView from "./_components/ShippingView";
 import InvoicesView from "./_components/InvoicesView";
 import NbpView from "./_components/NbpView";
+import CategoryBreakdown, { FAKTUROWNIA_PALETTE } from "./_components/CategoryBreakdown";
 import OverviewSalesDashboard from "./_components/OverviewSalesDashboard";
 import RcpView from "./_components/RcpView";
 import ReturnsView from "./_components/ReturnsView";
@@ -98,8 +99,10 @@ function effectiveAccess(role: string, viewAccess: string[] | null | undefined, 
 }
 
 type FakturowniaCategorySummary = { name: string; count: number; value: number };
-// skuCount: ile z dostępnych sztuk ma SKU (widok fakturownia_stock_with_sku); null = nie udało się policzyć (np. nie uruchomiono inventory.sql).
-type FakturowniaSummary = { totalCount: number; totalValue: number; skuCount: number | null; categories: FakturowniaCategorySummary[] };
+// sku: rozbicie dostępnych sztuk wg "kategorii z SKU" (widok fakturownia_stock_with_sku); null = nie udało się policzyć
+// (np. nie uruchomiono inventory.sql). `categories` bez sztuk bez SKU — te są osobno w `none`.
+type FakturowniaSku = { count: number; categories: FakturowniaCategorySummary[]; none: { count: number; value: number } };
+type FakturowniaSummary = { totalCount: number; totalValue: number; sku: FakturowniaSku | null; categories: FakturowniaCategorySummary[] };
 
 type Unit = {
   id: string;
@@ -348,22 +351,56 @@ export default function Home() {
     return all;
   }
 
+  // Rozbicie wg kategorii z SKU — z widoku (SKU liczone z Testów/Trade-in/importu). Dodatek do podsumowania: błąd
+  // (np. brak widoku) zwraca null i nie blokuje reszty.
+  async function fetchSkuBreakdown(): Promise<FakturowniaSku | null> {
+    const PAGE = 1000;
+    let from = 0;
+    const rows: { sku_category: string | null; purchase_price_gross: number }[] = [];
+    while (true) {
+      const { data, error } = await supabase
+        .from("fakturownia_stock_with_sku")
+        .select("sku_category, purchase_price_gross")
+        .range(from, from + PAGE - 1);
+      if (error) return null;
+      rows.push(...((data as any[]) || []));
+      if (!data || data.length < PAGE) break;
+      from += PAGE;
+    }
+    const totals = new Map<string, FakturowniaCategorySummary>();
+    const none = { count: 0, value: 0 };
+    let count = 0;
+    for (const r of rows) {
+      const value = Number(r.purchase_price_gross) || 0;
+      if (!r.sku_category) {
+        none.count += 1;
+        none.value += value;
+        continue;
+      }
+      const entry = totals.get(r.sku_category) || { name: r.sku_category, count: 0, value: 0 };
+      entry.count += 1;
+      entry.value += value;
+      totals.set(r.sku_category, entry);
+      count += 1;
+    }
+    return { count, categories: Array.from(totals.values()).sort((a, b) => b.value - a.value), none };
+  }
+
   // Czyta z bazy (fakturownia_stock_cache), a nie z Fakturowni bezpośrednio — dlatego
   // podsumowanie jest dostępne od razu po odświeżeniu strony, bez czekania na API.
   async function loadFakturowniaSummaryFromDb() {
     let rows: { category_name: string; purchase_price_gross: number }[];
     let metaRow: { last_synced_at: string } | null;
-    let skuCount: number | null = null;
+    let sku: FakturowniaSku | null = null;
     try {
-      const [r, meta, skuRes] = await Promise.all([
+      const [r, meta, skuData] = await Promise.all([
         fetchAllStockCacheRows(),
         supabase.from("fakturownia_sync_meta").select("last_synced_at").eq("id", 1).maybeSingle().throwOnError(),
-        // Licznik "z SKU" jest dodatkiem do podsumowania — jego błąd (np. brak widoku) nie blokuje reszty.
-        supabase.from("fakturownia_stock_with_sku").select("id", { count: "exact", head: true }).not("sku", "is", null),
+        fetchSkuBreakdown(),
       ]);
       rows = r;
       metaRow = meta.data;
-      skuCount = skuRes.error ? null : skuRes.count ?? null;
+      sku = skuData;
     } catch (e: any) {
       setFakturowniaError(`Nie udało się wczytać podsumowania z bazy: ${e.message || e}`);
       return;
@@ -385,7 +422,7 @@ export default function Home() {
     setFakturowniaSummary({
       totalCount,
       totalValue,
-      skuCount,
+      sku,
       categories: Array.from(totals.values()).sort((a, b) => b.value - a.value),
     });
     setFakturowniaLastSynced((metaRow?.last_synced_at as string) ?? null);
@@ -586,51 +623,23 @@ export default function Home() {
 
 // Stała, walidowana kolejność barw kategorycznych (skill dataviz) — max 5 realnych
 // kategorii + "Inne", zgodnie z zasadą "part-to-whole na pierwszy rzut oka, <= 6 wycinków".
-const FAKTUROWNIA_PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4"];
-const FAKTUROWNIA_OTHER_COLOR = "#898781"; // wyciszony szary — wycinek zbiorczy, nie jest częścią palety kategorii
 
 function fmtPLN(n: number) {
   return Math.round(n).toLocaleString("pl-PL") + " zł";
 }
 
 function FakturowniaSummaryView({ summary }: { summary: FakturowniaSummary }) {
-  const TOP_N = FAKTUROWNIA_PALETTE.length;
-  const top = summary.categories.slice(0, TOP_N);
-  const rest = summary.categories.slice(TOP_N);
-  const otherValue = rest.reduce((s, c) => s + c.value, 0);
-  const otherCount = rest.reduce((s, c) => s + c.count, 0);
-
-  const slices = [
-    ...top.map((c, i) => ({ ...c, color: FAKTUROWNIA_PALETTE[i] })),
-    ...(rest.length > 0 ? [{ name: "Inne", count: otherCount, value: otherValue, color: FAKTUROWNIA_OTHER_COLOR }] : []),
-  ];
-
-  const RADIUS = 70;
-  const STROKE = 34;
-  const CIRC = 2 * Math.PI * RADIUS;
-  const GAP = slices.length > 1 ? 3 : 0;
-  let cursor = 0;
-  const arcs = slices
-    .filter((s) => s.value > 0)
-    .map((s) => {
-      const share = summary.totalValue > 0 ? s.value / summary.totalValue : 0;
-      const length = Math.max(share * CIRC - GAP, 0);
-      const offset = -cursor;
-      cursor += share * CIRC;
-      return { ...s, share, length, offset };
-    });
-
   return (
     <div>
       <div className="grid grid-cols-2 gap-px bg-line border border-line mb-6">
         <div className="bg-white p-5">
           <div className="text-xs text-inksoft mb-2">DOSTĘPNE PRODUKTY (stan = 1)</div>
           <div className="text-3xl font-bold font-mono">{summary.totalCount.toLocaleString("pl-PL")}</div>
-          {summary.skuCount !== null && (
+          {summary.sku !== null && (
             <div className="text-xs text-inksoft mt-2">
-              z SKU: <span className="font-semibold text-ink">{summary.skuCount.toLocaleString("pl-PL")}</span>
-              {summary.totalCount > 0 && ` (${Math.round((summary.skuCount / summary.totalCount) * 100)}%)`}
-              {" · "}bez SKU: <span className="font-semibold text-ink">{(summary.totalCount - summary.skuCount).toLocaleString("pl-PL")}</span>
+              z SKU: <span className="font-semibold text-ink">{summary.sku.count.toLocaleString("pl-PL")}</span>
+              {summary.totalCount > 0 && ` (${Math.round((summary.sku.count / summary.totalCount) * 100)}%)`}
+              {" · "}bez SKU: <span className="font-semibold text-ink">{(summary.totalCount - summary.sku.count).toLocaleString("pl-PL")}</span>
             </div>
           )}
         </div>
@@ -645,62 +654,22 @@ function FakturowniaSummaryView({ summary }: { summary: FakturowniaSummary }) {
           Brak produktów ze stanem magazynowym = 1.
         </div>
       ) : (
-        <div className="border border-line bg-white p-6 flex flex-col md:flex-row gap-8 items-center">
-          <svg viewBox="0 0 200 200" className="w-56 h-56 shrink-0">
-            {arcs.map((a) => (
-              <circle
-                key={a.name}
-                cx="100"
-                cy="100"
-                r={RADIUS}
-                fill="none"
-                stroke={a.color}
-                strokeWidth={STROKE}
-                strokeDasharray={`${a.length} ${Math.max(CIRC - a.length, 0)}`}
-                strokeDashoffset={a.offset}
-                transform="rotate(-90 100 100)"
-              />
-            ))}
-            <text x="100" y="96" textAnchor="middle" className="fill-ink" style={{ fontSize: 18, fontWeight: 700 }}>
-              {fmtPLN(summary.totalValue)}
-            </text>
-            <text x="100" y="116" textAnchor="middle" className="fill-inksoft" style={{ fontSize: 11 }}>
-              łącznie
-            </text>
-          </svg>
-
-          <div className="flex-1 w-full overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs text-inksoft border-b border-line">
-                  <th className="py-2 pr-3">Kategoria</th>
-                  <th className="py-2 pr-3">Ilość</th>
-                  <th className="py-2 pr-3">Wartość</th>
-                  <th className="py-2">Udział</th>
-                </tr>
-              </thead>
-              <tbody>
-                {summary.categories.map((c, i) => (
-                  <tr key={c.name + i} className="border-b border-line last:border-b-0">
-                    <td className="py-2 pr-3">
-                      <span className="flex items-center gap-2">
-                        <span
-                          className="w-3 h-3 rounded-sm inline-block shrink-0"
-                          style={{ background: i < TOP_N ? FAKTUROWNIA_PALETTE[i] : FAKTUROWNIA_OTHER_COLOR }}
-                        />
-                        <span className="font-semibold">{c.name}</span>
-                      </span>
-                    </td>
-                    <td className="py-2 pr-3 font-mono">{c.count}</td>
-                    <td className="py-2 pr-3 font-mono">{fmtPLN(c.value)}</td>
-                    <td className="py-2 font-mono text-inksoft">
-                      {summary.totalValue > 0 ? Math.round((c.value / summary.totalValue) * 100) : 0}%
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        // Dwa wykresy obok siebie, każdy na pół szerokości (02.10.2026): kategorie z Fakturowni i kategorie z SKU.
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <CategoryBreakdown title="WG KATEGORII Z FAKTUROWNI" categories={summary.categories} totalValue={summary.totalValue} />
+          {summary.sku ? (
+            <CategoryBreakdown
+              title="WG KATEGORII Z SKU"
+              categories={summary.sku.categories}
+              totalValue={summary.totalValue}
+              none={summary.sku.none}
+              maxRows={FAKTUROWNIA_PALETTE.length * 2}
+            />
+          ) : (
+            <div className="border border-line bg-white p-6 text-sm text-inksoft">
+              Wykres wg kategorii z SKU pojawi się po uruchomieniu <span className="font-mono">supabase/inventory.sql</span>.
+            </div>
+          )}
         </div>
       )}
     </div>
