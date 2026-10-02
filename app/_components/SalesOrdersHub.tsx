@@ -395,6 +395,8 @@ function OrdersList({
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusBucket | "wszystkie">("nowe");
   const [marketplaceFilter, setMarketplaceFilter] = useState<string | "wszystkie">("wszystkie");
+  // Sortowanie po "Planowana wysyłka": null = domyślne (po dacie zamówienia, najnowsze pierwsze).
+  const [plannedSort, setPlannedSort] = useState<"asc" | "desc" | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   // Zapisy idą jeden po drugim na najświeższym wierszu, żeby szybkie skanowanie kilku pól pod rząd
@@ -431,7 +433,7 @@ function OrdersList({
       supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, pageSize, search, statusFilter, marketplaceFilter, reloadKey]);
+  }, [page, pageSize, search, statusFilter, marketplaceFilter, plannedSort, reloadKey]);
 
   async function load() {
     const seq = ++loadSeq.current;
@@ -453,6 +455,9 @@ function OrdersList({
     // dostają teraz ten status zamiast "purchased"; bez tego dopisania byłyby błędnie ukrywane).
     q = q.or("marketplace.neq.erli,status.in.(purchased,purchased_cod,sent)");
     try {
+      // Przy sortowaniu po planowanej wysyłce zamówienia bez terminu (większość kanałów) zawsze na końcu,
+      // w obrębie tej samej daty — najnowsze zamówienia pierwsze.
+      if (plannedSort) q = q.order("planned_shipping_date", { ascending: plannedSort === "asc", nullsFirst: false });
       const { data, error: err, count } = await q
         .order("order_date", { ascending: false, nullsFirst: false })
         .order("position", { referencedTable: "sales_order_items" })
@@ -591,7 +596,16 @@ function OrdersList({
               <th className="p-3">Marketplace</th>
               <th className="p-3">Nr zamówienia</th>
               <th className="p-3">Data zamówienia</th>
-              <th className="p-3">Planowana wysyłka</th>
+              <th className="p-3">
+                <button
+                  onClick={() => { setPlannedSort((v) => (v === null ? "asc" : v === "asc" ? "desc" : null)); setPage(1); }}
+                  className="flex items-center gap-1 hover:text-ink"
+                  title="Sortuj: rosnąco → malejąco → domyślnie"
+                >
+                  Planowana wysyłka
+                  <span className="text-[10px] w-2.5 inline-block">{plannedSort === "asc" ? "▲" : plannedSort === "desc" ? "▼" : ""}</span>
+                </button>
+              </th>
               <th className="p-3">Status</th>
               <th className="p-3">Kraj</th>
               <th className="p-3">Metoda wysyłki</th>
