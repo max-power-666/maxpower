@@ -100,7 +100,7 @@ samej listy, kto ma nadpisany dostęp bez otwierania okna każdej osoby. W tym s
 formy nie wymaga SQL, tak samo jak dodanie roli). Zmienia tylko Admin — chroni to już istniejąca polityka RLS
 `admin update members` (`USING (is_admin())` bez wyjątków kolumnowych, patrz sekcja Uprawnienia), nowa kolumna
 jest więc chroniona automatycznie, bez dodatkowej polityki; sprawdzone wprost testem, nie tylko założone. Imię i
-rola zostają edytowalne bezpośrednio w wierszu tabeli jak dotąd (okno dotyczy tylko dostępu i danych pracowniczych).
+rola zostają edytowalne bezpośrednio w wierszu tabeli jak dotąd (okno dotyczy tylko dostępu i danych pracowniczych). Tabela Zespołu ma kolumnę **Lp.** (02.10.2026) przed "Użytkownik" — zwykły numer porządkowy wiersza w aktualnej kolejności listy, nie zapisany nigdzie identyfikator.
 
 ## Model danych i moduły
 

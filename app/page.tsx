@@ -744,6 +744,7 @@ function TeamView({
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-xs text-inksoft border-b border-line">
+            <th className="p-3 w-10">Lp.</th>
             <th className="p-3">Użytkownik</th>
             <th className="p-3">Email</th>
             <th className="p-3">Rola</th>
@@ -752,12 +753,13 @@ function TeamView({
         </thead>
         <tbody>
           {members.length === 0 && (
-            <tr><td colSpan={4} className="p-6 text-center text-inksoft text-sm">Brak członków zespołu.</td></tr>
+            <tr><td colSpan={5} className="p-6 text-center text-inksoft text-sm">Brak członków zespołu.</td></tr>
           )}
-          {members.map((m) => {
+          {members.map((m, idx) => {
             const draft = drafts[m.user_id];
             return (
               <tr key={m.user_id} className="border-b border-line last:border-b-0">
+                <td className="p-3 text-xs text-inksoft">{idx + 1}</td>
                 <td className="p-3">
                   {editingId === m.user_id ? (
                     <input
