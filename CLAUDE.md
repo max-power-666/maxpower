@@ -640,6 +640,13 @@ faktycznie rzuca wyjątek przy `require()`, tak jak qz-tray oczekuje. Nie testow
 (brak dostępu do sprzętu w środowisku asystenta) — zweryfikowane budowaniem projektu (`next build`, sukces) i
 testami jednostkowymi (`dhl.test.js`/`shipping.test.js`/`parcel.test.js` w scratchpadzie).
 
+**Test druku (TYMCZASOWY, 02.10.2026)** — ramka "Test druku" w Wysyłce, tuż pod pigułkami trybu druku, z dwoma przyciskami:
+próbna etykieta ZPL 100x150 mm na Zebrę i próbny delivery note (ręcznie składany PDF A4) na drukarkę A4, zawsze
+BEZPOŚREDNIO przez QZ Tray (niezależnie od wybranego trybu), na drukarki z ustawień nadawcy. **Nic nie nadaje w DHL, nic
+nie zapisuje w bazie i nic nie zgłasza do marketplace'u** — to nie "zamówienie testowe", tylko same próbne dokumenty
+(`lib/printTest.ts`, `testPrint` w `ShippingView.tsx`); same ASCII, bez polskich znaków. Do usunięcia, gdy drukowanie
+bezpośrednie zostanie sprawdzone na stanowiskach.
+
 **Instrukcja instalacji QZ Tray (Windows, dla każdego stanowiska, które ma drukować bezpośrednio):**
 1. Pobierz instalator ze strony **qz.io/download** (oficjalna strona QZ Tray — nie z innego źródła).
 2. Uruchom instalator, zaakceptuj domyślne ustawienia (instalacja jako aplikacja w tle + start z Windowsem).

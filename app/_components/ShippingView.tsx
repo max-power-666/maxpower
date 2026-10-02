@@ -8,6 +8,7 @@ import { base64ToBlobUrl, defaultShippingDate, dhlCharge, parcelQuoteTotal, type
 import { MARKETPLACES } from "@/lib/salesOrders";
 import { escapeLike } from "@/lib/search";
 import { printRawToZebra, printPdf, listPrinters, PrintAgentError } from "@/lib/printAgent";
+import { testLabelZpl, testDeliveryNotePdfBase64 } from "@/lib/printTest";
 import type { MemberLite } from "@/lib/displayName";
 import SalesOrderCard from "./SalesOrderCard";
 
@@ -125,6 +126,7 @@ export default function ShippingView({
   const [creating, setCreating] = useState(false);
   const [done, setDone] = useState<{ trackingNumber: string; trackingUrl: string | null; price: string; env: string; saved: boolean; labelBase64?: string | null; labelFormat?: string | null; id?: number; error?: string; carrier: Carrier; marketplaceSyncError?: string | null; deliveryNoteUrl?: string | null } | null>(null);
   const [directPrint, setDirectPrint] = useState(false);
+  const [testPrintMsg, setTestPrintMsg] = useState("");
   const [printBusy, setPrintBusy] = useState(false);
   const requestId = useRef<string>(crypto.randomUUID());
 
@@ -545,6 +547,25 @@ export default function ShippingView({
     }
   }
 
+  // TYMCZASOWY test druku bezpośredniego (02.10.2026): próbna etykieta ZPL na Zebrę i próbny PDF na A4 przez QZ Tray —
+  // niczego nie nadaje w DHL, nic nie zapisuje w bazie i nic nie zgłasza do marketplace'u.
+  async function testPrint(kind: "label" | "a4") {
+    setError("");
+    setTestPrintMsg("");
+    const printer = kind === "label" ? settings?.zebra_printer_name : settings?.a4_printer_name;
+    if (!printer) return setError(`Ustaw nazwę drukarki ${kind === "label" ? "Zebra" : "A4"} w danych nadawcy (Admin), żeby wykonać test.`);
+    setPrintBusy(true);
+    try {
+      if (kind === "label") await printRawToZebra(testLabelZpl(), printer);
+      else await printPdf(testDeliveryNotePdfBase64(), printer);
+      setTestPrintMsg(`Wysłano na drukarkę „${printer}” — sprawdź, czy wydruk wyszedł.`);
+    } catch (e: any) {
+      setError(e instanceof PrintAgentError ? e.message : e.message || "Nie udało się wykonać wydruku testowego.");
+    } finally {
+      setPrintBusy(false);
+    }
+  }
+
   // Packing slip Back Marketu: albo otwiera link w nowej karcie (dziś), albo (przełącznik) dociąga PDF przez
   // nasz serwerowy proxy (unika CORS na S3) i drukuje wprost na drukarkę A4 przez QZ Tray.
   async function handlePackingSlip(url: string) {
@@ -633,6 +654,13 @@ export default function ShippingView({
               Drukowanie bezpośrednie
             </button>
             {printBusy && <span className="text-xs text-inksoft">drukowanie…</span>}
+          </div>          {/* TYMCZASOWY test druku — do usunięcia po sprawdzeniu drukarek. Nic nie trafia do DHL ani marketplace'u. */}
+          <div className="border border-dashed border-line bg-white p-3 mb-4 flex flex-wrap items-center gap-3">
+            <span className="text-xs font-semibold text-inksoft">Test druku (tymczasowy):</span>
+            <button onClick={() => testPrint("label")} disabled={printBusy} className={btnGhost}>Drukuj testową etykietę (Zebra)</button>
+            <button onClick={() => testPrint("a4")} disabled={printBusy} className={btnGhost}>Drukuj testowy delivery note (A4)</button>
+            <span className="text-xs text-inksoft">Wysyła próbny wydruk prosto na drukarki przez QZ Tray — bez nadawania przesyłki i bez marketplace'u.</span>
+            {testPrintMsg && <span className="text-xs font-semibold text-teal w-full">{testPrintMsg}</span>}
           </div>
           {/* wynik nadania */}
           {done && (
