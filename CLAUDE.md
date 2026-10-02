@@ -946,6 +946,12 @@ edytowalne w dowolnym momencie przez cały cykl życia testu, **całkowicie niez
 przetestowane / przerwany, który dalej sam rządzi punktami i unikalnością aktywnego wpisu) — np. wpis może być
 "przetestowane" + "RMA" naraz, to nie sprzeczność. Żadne z tych dwóch pól nie jest wymagane do żadnego
 statusu — czysto informacyjne, podobnie jak "Części" w Serwisie.
+**Kolory kolumn (02.10.2026, na prośbę właściciela)** — Pracownik, Rodzaj testu i Wynik w liście "Ostatnie testy"
+mają kolorowe tło plakietki, tak jak Status. Pracownik: kolor osoby z `lib/userColors.ts` (`colorForUser`, ta
+sama mapa e-mail -> kolor co podświetlanie wierszy w Trade-in; osoba spoza mapy dostaje neutralną plakietkę).
+Rodzaj testu i Wynik: stałe pary tło/tekst w `TEST_KIND_COLORS`/`TEST_RESULT_COLORS` (`lib/workLog.ts`) —
+dodając nową wartość do `TEST_KINDS`/`TEST_RESULTS`, dopisz jej kolor, inaczej select zostanie bez tła.
+Pusty Wynik ("—") zostaje zwykłym białym polem. Hardkodowane heksy, niezależne od motywu (jak plakietki marketplace'ów).
 
 **Karta produktu** (`ProductCardDrawer.tsx`). Klik w numer seryjny w Testach i Serwisie (strzałka ↗
 przy polu) albo w Magazynie → Raw data otwiera panel. **W Trade-in (Wprowadzanie) ten odnośnik usunięty

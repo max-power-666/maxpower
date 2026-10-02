@@ -4,9 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
+import { colorForUser } from "@/lib/userColors";
 import InlineEditCell from "./InlineEditCell";
 import ProductCardDrawer from "./ProductCardDrawer";
-import { INTERVALS, TEST_STATUSES as STATUSES, TEST_KINDS, TEST_RESULTS, fmtDuration, rangeStart, type Interval } from "@/lib/workLog";
+import { INTERVALS, TEST_STATUSES as STATUSES, TEST_KINDS, TEST_RESULTS, TEST_KIND_COLORS, TEST_RESULT_COLORS, fmtDuration, rangeStart, type Interval } from "@/lib/workLog";
 
 // Rejestr testów urządzeń wg Regulaminu premiowania (§2, 12.10.2026, zaktualizowany 01.10.2026):
 // 15 pkt flat za prawidłowo przetestowane urządzenie (wartość ustawia default w bazie). Stare
@@ -285,7 +286,14 @@ export default function TestsView({
             {recent.map((r) => (
               <tr key={r.id} className="border-b border-line last:border-b-0 hover:bg-paper">
                 <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDateTime(r.started_at)}</td>
-                <td className="p-3">{displayNameForEmail(r.employee_email, members)}</td>
+                <td className="p-3">
+                  <span
+                    className="inline-block text-xs font-semibold px-2 py-1 rounded-full bg-paper text-ink"
+                    style={{ backgroundColor: colorForUser(r.employee_email), color: colorForUser(r.employee_email) ? "#1f2937" : undefined }}
+                  >
+                    {displayNameForEmail(r.employee_email, members)}
+                  </span>
+                </td>
                 <td className="p-3">
                   <button onClick={() => setOpenSerial(r.serial_number)} className="font-mono font-semibold text-teal hover:underline">{r.serial_number}</button>
                 </td>
@@ -293,7 +301,8 @@ export default function TestsView({
                   <select
                     value={r.test_kind}
                     onChange={(e) => saveTestKind(r, e.target.value as TestKindKey)}
-                    className="text-xs border border-line bg-white px-2 py-1 rounded"
+                    className="text-xs font-semibold px-2 py-1 rounded-full border-none"
+                    style={{ backgroundColor: TEST_KIND_COLORS[r.test_kind]?.bg, color: TEST_KIND_COLORS[r.test_kind]?.fg }}
                   >
                     {TEST_KINDS.map((t) => (
                       <option key={t.key} value={t.key}>{t.label}</option>
@@ -315,7 +324,8 @@ export default function TestsView({
                   <select
                     value={r.result ?? ""}
                     onChange={(e) => saveResult(r, e.target.value as TestResultKey | "")}
-                    className="text-xs border border-line bg-white px-2 py-1 rounded"
+                    className={`text-xs px-2 py-1 rounded-full ${r.result ? "font-semibold border-none" : "border border-line bg-white"}`}
+                    style={r.result ? { backgroundColor: TEST_RESULT_COLORS[r.result]?.bg, color: TEST_RESULT_COLORS[r.result]?.fg } : undefined}
                   >
                     <option value="">—</option>
                     {TEST_RESULTS.map((t) => (

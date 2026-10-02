@@ -96,3 +96,22 @@ export const INTAKE_STATUSES = [
 export function labelFor(list: readonly { key: string; label: string }[], key: string): string {
   return list.find((x) => x.key === key)?.label ?? key;
 }
+
+// Kolory plakietek w Testach (kolumny Rodzaj testu / Wynik, 02.10.2026) — para tło/tekst, jasne
+// pastele jak plakietki marketplace'ów (stała paleta niezależna od motywu).
+export const TEST_KIND_COLORS: Record<string, { bg: string; fg: string }> = {
+  po_dostawie: { bg: "#e3ecf9", fg: "#2a6bb5" },
+  po_serwisie: { bg: "#e6e6fb", fg: "#4c4fc4" },
+  ponowny_z_magazynu: { bg: "#e9ecef", fg: "#4b5563" },
+  olx: { bg: "#d6f1ee", fg: "#0f766e" },
+  allegro: { bg: "#fde8d7", fg: "#c2570c" },
+  vinted: { bg: "#fde3ec", fg: "#b4235f" },
+};
+
+export const TEST_RESULT_COLORS: Record<string, { bg: string; fg: string }> = {
+  sprawny: { bg: "#dff3e3", fg: "#1f7a3a" },
+  serwis: { bg: "#f0e3fd", fg: "#7a3fb5" },
+  rma: { bg: "#fde1e1", fg: "#b42318" },
+  do_poprawy: { bg: "#fef6d8", fg: "#8a6d00" },
+  outlet: { bg: "#dcf1fb", fg: "#0b6a8f" },
+};

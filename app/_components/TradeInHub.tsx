@@ -10,6 +10,7 @@ import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { INTAKE_STATUSES, INTERVALS, fmtDuration, rangeStart, type Interval } from "@/lib/workLog";
 import { escapeLike } from "@/lib/search";
 import { buybackStatusLabel, buybackStatusStyle } from "@/lib/buybackOrders";
+import { colorForUser } from "@/lib/userColors";
 
 // Zakładka Trade-in: domyślnie obsługa paczek przez pracowników (IntakeView — rejestr pracy
 // wg Regulaminu premiowania, jak Serwis), plus podstrona "Raw data" z pełną, zsynchronizowaną
@@ -50,16 +51,7 @@ const COMPLETE_REQUIRED_STATUSES: IntakeStatus[] = ["obsluzona", "kontroferta", 
 // przez właściciela po imieniu 01.10.2026) — przypisanie e-mail -> kolor na sztywno, nie wyliczane. Osoby
 // spoza listy (np. nowa osoba w zespole) dostają brak koloru (zwykłe tło wiersza), dopóki właściciel nie
 // poda koloru dla niej.
-const ROW_COLOR_BY_EMAIL: Record<string, string> = {
-  "zuzanna.recoo@gmail.com": "#fde3ec", // Zuzanna — jasny różowy
-  "jakubszy.recoo@gmail.com": "#e3f2fd", // Kuba Szymoniak — jasny niebieski
-  "jakubgola.recoo@gmail.com": "#f0e3fd", // Kuba Gola — jasny fioletowy
-  "adrian.recoo@gmail.com": "#fef6d8", // Adrian — jasny żółty
-};
-function rowColorForUser(email: string | null): string | undefined {
-  if (!email) return undefined;
-  return ROW_COLOR_BY_EMAIL[email.toLowerCase()];
-}
+const rowColorForUser = colorForUser;
 
 type IntakeEntry = {
   id: number;
