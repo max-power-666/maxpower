@@ -169,12 +169,17 @@ zespół ma tylko odczyt.
 cache. **SKU** nie istnieje w Fakturowni (tam serial = nazwa = kod), więc jest wyliczane z naszej bazy po numerze
 seryjnym: z Testów (`test_log.sku`, kolumna dodana tego samego dnia) albo z Trade-in (`buyback_order_intake.sku`), a gdy są
 oba — **wygrywa wpis wcześniejszy** (`test_log.started_at` vs `buyback_order_intake.entered_at`; decyzja właściciela).
-**Trzecie, rezerwowe źródło: tabela `serial_skus`** (numer seryjny -> SKU, `inventory.sql`) — jednorazowy import z arkusza
-właściciela z 02.10.2026 (~4,5 tys. historycznych sztuk; plik importu poza repo, bo to dane, nie schemat): pokazuje się
-TYLKO gdy ani Testy, ani Trade-in nie mają SKU dla sztuki (świeży wpis zespołu ma pierwszeństwo przed historycznym
-importem). Z importu pominięto placeholdery zamiast numeru ('-', 'TUTAJ', 'BRAK SN'), pominięto też 11 wierszy z SKU dosłownie `None` (puste wartości z eksportu, na prośbę właściciela) i zwinięto zdublowane numery z tym
-samym SKU i **wykluczono 9 numerów ze sprzecznymi SKU** (ten sam numer, różne SKU w arkuszu — do ręcznego rozstrzygnięcia);
-na dzień importu 551 z 1495 sztuk magazynu dostało SKU z tej tabeli (40 kategorii z SKU; podobne nazwy typu PS5D/PS5DE/PS5SD/PS5SDE, ID8/ID8C, IDP3129/IDP3129C, XO/XOS/XOX są poprawne i celowo osobne — potwierdził właściciel). Zapis do `serial_skus` tylko Admin (RLS) albo SQL Editor.
+**Trzecie, rezerwowe źródło: tabela `serial_skus`** (numer seryjny -> SKU, `inventory.sql`) — import z arkusza właściciela
+(plik importu poza repo, bo to dane, nie schemat): pokazuje się TYLKO gdy ani Testy, ani Trade-in nie mają SKU dla sztuki
+(świeży wpis zespołu ma pierwszeństwo przed importem). **Import wykonano dwa razy tego samego dnia (02.10.2026):** wersja 1
+(cały stary arkusz, ~4,5 tys. numerów, stary schemat SKU typu `PS4-500-B-2M`) została ZASTĄPIONA wersją 3 z nowego arkusza
+(nowy schemat SKU z kolorem, np. `PS4-500-BK-C`; ~15 tys. wierszy w pliku) **ograniczoną do numerów, które są w magazynie**
+(`fakturownia_stock_cache` w chwili generowania pliku) — 1071 przypisań. Plik importu najpierw kasuje wszystkie wiersze
+`source = 'import'`, więc kolejny import też zastępuje poprzedni, a wiersze dodane inaczej (`source <> 'import'`) zostają.
+Pominięto: placeholdery zamiast numeru ('-', 'TUTAJ', 'BRAK SN'), SKU dosłownie 'SKU'/'None' (puste wartości z eksportu),
+zwinięto zdublowane numery z tym samym SKU i **wykluczono 2 numery ze sprzecznymi SKU** (03274523235631167: PS4-500-WE-C/-D,
+128809753548: XO-1TB-BK-E/-F — do ręcznego rozstrzygnięcia). 422 sztuki z magazynu nie mają numeru w arkuszu (SKU dostaną z
+Testów/Trade-in albo wcale). Zapis do `serial_skus` tylko Admin (RLS) albo SQL Editor.
 **"Kategoria z SKU"** (`sku_category` w widoku, 02.10.2026; kolumna w Raw data i wiersz w karcie produktu) = pierwszy człon
 SKU przed pierwszym myślnikiem (XSX-1TB-BK-A -> XSX, PS4S-1TB-BK-AB -> PS4S, NS-32-V1-D -> NS); SKU bez myślnika -> cała
 wartość; brak SKU -> puste. Wyliczana w widoku (`split_part`), nie przechowywana — zmiana SKU od razu zmienia kategorię;
