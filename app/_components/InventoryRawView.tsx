@@ -19,6 +19,7 @@ type Row = {
   product_created_at: string | null;
   vat: string | null;
   sku: string | null;
+  sku_category: string | null;
 };
 
 const PAGE_SIZES = [25, 50, 100];
@@ -69,7 +70,7 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
       const from = (page - 1) * pageSize;
       let q = supabase
         .from("fakturownia_stock_with_sku")
-        .select("id, name, category_name, description, purchase_price_gross, product_created_at, vat, sku", { count: "exact" });
+        .select("id, name, category_name, description, purchase_price_gross, product_created_at, vat, sku, sku_category", { count: "exact" });
       if (search) q = q.ilike("name", `%${escapeLike(search)}%`);
       const { data, error: err, count } = await q
         .order("product_created_at", { ascending: false, nullsFirst: false })
@@ -152,6 +153,7 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
             <tr className="text-left text-xs text-inksoft border-b border-line">
               <th className="p-3">Numer seryjny</th>
               <th className="p-3">SKU</th>
+              <th className="p-3">Kategoria z SKU</th>
               <th className="p-3">Kategoria</th>
               <th className="p-3">Zamówienie</th>
               <th className="p-3 text-right">Cena zakupu brutto</th>
@@ -162,7 +164,7 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
           <tbody>
             {!loading && rows.length === 0 && (
               <tr>
-                <td colSpan={7} className="p-6 text-center text-inksoft text-sm">
+                <td colSpan={8} className="p-6 text-center text-inksoft text-sm">
                   {search ? "Nic nie znaleziono dla tego numeru." : "Brak produktów — kliknij „Odśwież”, żeby pobrać dane z Fakturowni."}
                 </td>
               </tr>
@@ -177,6 +179,7 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
                   )}
                 </td>
                 <td className="p-3 font-mono text-xs">{r.sku || "—"}</td>
+                <td className="p-3 font-mono text-xs font-semibold">{r.sku_category || "—"}</td>
                 <td className="p-3">{r.category_name}</td>
                 <td className="p-3 font-mono text-xs">{r.description || "—"}</td>
                 <td className="p-3 text-right font-mono">{fmtPLN(r.purchase_price_gross)}</td>

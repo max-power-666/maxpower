@@ -175,6 +175,10 @@ TYLKO gdy ani Testy, ani Trade-in nie mają SKU dla sztuki (świeży wpis zespo�
 importem). Z importu pominięto placeholdery zamiast numeru ('-', 'TUTAJ', 'BRAK SN'), zwinięto zdublowane numery z tym
 samym SKU i **wykluczono 9 numerów ze sprzecznymi SKU** (ten sam numer, różne SKU w arkuszu — do ręcznego rozstrzygnięcia);
 na dzień importu 551 z 1495 sztuk magazynu dostało SKU z tej tabeli. Zapis do `serial_skus` tylko Admin (RLS) albo SQL Editor.
+**"Kategoria z SKU"** (`sku_category` w widoku, 02.10.2026; kolumna w Raw data i wiersz w karcie produktu) = pierwszy człon
+SKU przed pierwszym myślnikiem (XSX-1TB-BK-A -> XSX, PS4S-1TB-BK-AB -> PS4S, NS-32-V1-D -> NS); SKU bez myślnika -> cała
+wartość; brak SKU -> puste. Wyliczana w widoku (`split_part`), nie przechowywana — zmiana SKU od razu zmienia kategorię;
+to INNE pole niż "Kategoria" z Fakturowni obok (`category_name`), nic ich ze sobą nie łączy.
 Wpisy z pustym SKU są pomijane (wcześniejszy, ale nieuzupełniony wpis nie zasłania późniejszego z SKU); numery
 porównywane bez rozróżniania wielkości liter i bez spacji na brzegach; dla sztuki bez żadnego wpisu SKU jest puste
 ("—"). **VAT** (`fakturownia_stock_cache.vat`, nullable tekst) ma być wpisywany RĘCZNIE przy dodawaniu produktu do

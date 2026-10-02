@@ -30,7 +30,12 @@ create policy "admin write serial_skus" on serial_skus for all using (is_admin()
 create index if not exists test_log_serial_norm_idx on test_log (lower(btrim(serial_number)));
 create index if not exists buyback_order_intake_serial_norm_idx on buyback_order_intake (lower(btrim(serial_number)));
 
+-- sku_category (02.10.2026) — "Kategoria z SKU" = pierwszy człon SKU przed pierwszym myślnikiem (XSX-1TB-BK-A -> XSX,
+-- PS4S-1TB-BK-AB -> PS4S, NS-32-V1-D -> NS); SKU bez myślnika -> cała wartość; brak SKU -> null. Kolumna dopisana NA KOŃCU
+-- widoku (create or replace view pozwala tylko dopisywać kolumny na końcu).
 create or replace view fakturownia_stock_with_sku as
+select v.*, nullif(btrim(split_part(v.sku, '-', 1)), '') as sku_category
+from (
 select
   c.id,
   c.category_id,
@@ -56,7 +61,8 @@ select
   ), (
     select b.sku from serial_skus b where lower(btrim(b.serial_number)) = lower(btrim(c.name)) limit 1
   )) as sku
-from fakturownia_stock_cache c;
+from fakturownia_stock_cache c
+) v;
 
 -- Widok czyta tabele czytelne dla każdego zalogowanego — nie dokłada nowej ekspozycji danych; grant jawny, bo PostgREST
 -- eksponuje widoki tak jak tabele.
