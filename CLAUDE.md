@@ -172,9 +172,9 @@ oba — **wygrywa wpis wcześniejszy** (`test_log.started_at` vs `buyback_order_
 **Trzecie, rezerwowe źródło: tabela `serial_skus`** (numer seryjny -> SKU, `inventory.sql`) — jednorazowy import z arkusza
 właściciela z 02.10.2026 (~4,5 tys. historycznych sztuk; plik importu poza repo, bo to dane, nie schemat): pokazuje się
 TYLKO gdy ani Testy, ani Trade-in nie mają SKU dla sztuki (świeży wpis zespołu ma pierwszeństwo przed historycznym
-importem). Z importu pominięto placeholdery zamiast numeru ('-', 'TUTAJ', 'BRAK SN'), zwinięto zdublowane numery z tym
+importem). Z importu pominięto placeholdery zamiast numeru ('-', 'TUTAJ', 'BRAK SN'), pominięto też 11 wierszy z SKU dosłownie `None` (puste wartości z eksportu, na prośbę właściciela) i zwinięto zdublowane numery z tym
 samym SKU i **wykluczono 9 numerów ze sprzecznymi SKU** (ten sam numer, różne SKU w arkuszu — do ręcznego rozstrzygnięcia);
-na dzień importu 551 z 1495 sztuk magazynu dostało SKU z tej tabeli. Zapis do `serial_skus` tylko Admin (RLS) albo SQL Editor.
+na dzień importu 551 z 1495 sztuk magazynu dostało SKU z tej tabeli (40 kategorii z SKU; podobne nazwy typu PS5D/PS5DE/PS5SD/PS5SDE, ID8/ID8C, IDP3129/IDP3129C, XO/XOS/XOX są poprawne i celowo osobne — potwierdził właściciel). Zapis do `serial_skus` tylko Admin (RLS) albo SQL Editor.
 **"Kategoria z SKU"** (`sku_category` w widoku, 02.10.2026; kolumna w Raw data i wiersz w karcie produktu) = pierwszy człon
 SKU przed pierwszym myślnikiem (XSX-1TB-BK-A -> XSX, PS4S-1TB-BK-AB -> PS4S, NS-32-V1-D -> NS); SKU bez myślnika -> cała
 wartość; brak SKU -> puste. Wyliczana w widoku (`split_part`), nie przechowywana — zmiana SKU od razu zmienia kategorię;
