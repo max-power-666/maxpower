@@ -186,7 +186,8 @@ wartość; brak SKU -> puste. Wyliczana w widoku (`split_part`), nie przechowywa
 to INNE pole niż "Kategoria" z Fakturowni obok (`category_name`), nic ich ze sobą nie łączy.
 Wpisy z pustym SKU są pomijane (wcześniejszy, ale nieuzupełniony wpis nie zasłania późniejszego z SKU); numery
 porównywane bez rozróżniania wielkości liter i bez spacji na brzegach; dla sztuki bez żadnego wpisu SKU jest puste
-("—"). **VAT** (`fakturownia_stock_cache.vat`, nullable tekst) ma być wpisywany RĘCZNIE przy dodawaniu produktu do
+("—"). **Filtr "Kategoria z SKU"** (03.10.2026, lista rozwijana nad listą Raw data, obok wyszukiwarki; działa łącznie z wyszukiwaniem po numerze seryjnym): opcje "Wszystkie" / "Bez SKU" / każda kategoria z licznikiem (np. "NS (249)"), lista kategorii wczytywana z widoku i odświeżana razem z listą; zmiana filtra wraca na stronę 1.
+**VAT** (`fakturownia_stock_cache.vat`, nullable tekst) ma być wpisywany RĘCZNIE przy dodawaniu produktu do
 magazynu — na razie nic go nie wypełnia (kolumna pokazuje "—"), synchronizacja z Fakturowni go nie rusza. Podsumowanie
 magazynu (kafelki, wykres kołowy) dalej czyta tabelę, nie widok — z wyjątkami: **drugi wykres obok pierwszego** (02.10.2026): oba pierścienie z tabelą mają teraz po pół szerokości
 (`CategoryBreakdown.tsx`, układ `xl:grid-cols-2`, na węższym ekranie jeden pod drugim) — pierwszy wg kategorii z Fakturowni,

@@ -23,6 +23,7 @@ type Row = {
 };
 
 const PAGE_SIZES = [25, 50, 100];
+const NO_SKU = "__bez_sku__";
 
 function fmtDate(iso: string | null) {
   if (!iso) return "—";
@@ -42,6 +43,9 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [reloadTick, setReloadTick] = useState(0);
+  // Filtr "Kategoria z SKU" (lista rozwijana): "" = wszystkie, NO_SKU = sztuki bez SKU, inaczej konkretna kategoria.
+  const [skuCategory, setSkuCategory] = useState("");
+  const [skuCategoryOptions, setSkuCategoryOptions] = useState<{ name: string; count: number }[]>([]);
   const [openSerial, setOpenSerial] = useState<string | null>(null);
 
   useEffect(() => {
@@ -62,6 +66,27 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
     };
   }, []);
 
+  // Lista kategorii z SKU do rozwijanej listy (z licznikami) — odświeżana razem z listą (Odśwież, synchronizacja).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const PAGE = 1000;
+      const counts = new Map<string, number>();
+      let from = 0;
+      while (true) {
+        const { data, error: err } = await supabase.from("fakturownia_stock_with_sku").select("sku_category").not("sku_category", "is", null).range(from, from + PAGE - 1);
+        if (err) return; // brak widoku itp. — filtr po prostu bez opcji, lista działa dalej
+        for (const r of (data as { sku_category: string }[]) || []) counts.set(r.sku_category, (counts.get(r.sku_category) || 0) + 1);
+        if (!data || data.length < PAGE) break;
+        from += PAGE;
+      }
+      if (!cancelled) setSkuCategoryOptions(Array.from(counts, ([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name, "pl")));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadTick, reloadKey]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -72,6 +97,8 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
         .from("fakturownia_stock_with_sku")
         .select("id, name, category_name, description, purchase_price_gross, product_created_at, vat, sku, sku_category", { count: "exact" });
       if (search) q = q.ilike("name", `%${escapeLike(search)}%`);
+      if (skuCategory === NO_SKU) q = q.is("sku_category", null);
+      else if (skuCategory) q = q.eq("sku_category", skuCategory);
       const { data, error: err, count } = await q
         .order("product_created_at", { ascending: false, nullsFirst: false })
         .order("id", { ascending: false })
@@ -90,7 +117,7 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
     return () => {
       cancelled = true;
     };
-  }, [page, pageSize, search, reloadTick, reloadKey]);
+  }, [page, pageSize, search, skuCategory, reloadTick, reloadKey]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const needsBackfill = !search && rows.length > 0 && rows.every((r) => r.name === null);
@@ -105,6 +132,21 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
             placeholder="Szukaj po numerze seryjnym"
             className="w-72 border border-line bg-white px-3 py-2 rounded text-sm font-mono"
           />
+          <label className="text-xs text-inksoft">Kategoria z SKU</label>
+          <select
+            value={skuCategory}
+            onChange={(e) => {
+              setSkuCategory(e.target.value);
+              setPage(1);
+            }}
+            className="border border-line bg-white px-2 py-1.5 rounded text-sm font-semibold font-mono"
+          >
+            <option value="">Wszystkie</option>
+            <option value={NO_SKU}>Bez SKU</option>
+            {skuCategoryOptions.map((o) => (
+              <option key={o.name} value={o.name}>{o.name} ({o.count})</option>
+            ))}
+          </select>
           <label className="text-xs text-inksoft">Pokaż</label>
           <select
             value={pageSize}
@@ -121,7 +163,7 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
         </div>
         <div className="flex items-center gap-3 text-xs text-inksoft">
           <span>
-            {total.toLocaleString("pl-PL")} {search ? "wyników" : "produktów"} · strona {Math.min(page, totalPages)} z {totalPages}
+            {total.toLocaleString("pl-PL")} {search || skuCategory ? "wyników" : "produktów"} · strona {Math.min(page, totalPages)} z {totalPages}
           </span>
           <button
             onClick={() => setPage((p) => Math.max(1, p - 1))}
@@ -165,7 +207,7 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
             {!loading && rows.length === 0 && (
               <tr>
                 <td colSpan={8} className="p-6 text-center text-inksoft text-sm">
-                  {search ? "Nic nie znaleziono dla tego numeru." : "Brak produktów — kliknij „Odśwież”, żeby pobrać dane z Fakturowni."}
+                  {search || skuCategory ? "Nic nie znaleziono dla tych kryteriów." : "Brak produktów — kliknij „Odśwież”, żeby pobrać dane z Fakturowni."}
                 </td>
               </tr>
             )}
