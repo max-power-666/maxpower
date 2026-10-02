@@ -928,6 +928,7 @@ dokłada kolejne puste pole zaraz pod tym, "-" usuwa TO pole; przy zerze częśc
 "+ część". Dodanie/usunięcie pola zapisuje całą tablicę od razu, sama treść pola dopiero przy wyjściu z
 niego/Enterem (`InlineEditCell` per pole, ten sam wzorzec zapisu co reszta kolumn edytowanych w wierszu).
 Nie wymagane do żadnego statusu — czysto informacyjne, nie wpływa na punkty ani na warunek "naprawiony".
+**Wyszukiwarka po numerze seryjnym** (02.10.2026) nad listą "Ostatnie naprawy" — `device_ref ilike` (`escapeLike`, debounce 300 ms, jak w Trade-in); bez niej lista to najświeższe 50 wpisów, przy wyszukiwaniu limit rośnie do 200, żeby trafić we wpis spoza najświeższych.
 
 **Testy** (`TestsView.tsx`, `test_log`). Rejestr testów urządzeń: pole numer seryjny +
 "Rozpocznij test". Jeden wiersz = jeden test: status (w_trakcie / przetestowane / przerwany),

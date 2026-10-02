@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
+import { escapeLike } from "@/lib/search";
 import InlineEditCell from "./InlineEditCell";
 import PartsCell from "./PartsCell";
 import ProductCardDrawer from "./ProductCardDrawer";
@@ -77,12 +78,20 @@ export default function ServiceView({
   const [recent, setRecent] = useState<LogRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  // Wyszukiwarka po numerze seryjnym (02.10.2026): bez niej lista to tylko najświeższe 50 wpisów, wyszukiwanie sięga całej tabeli.
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
 
   const [taskType, setTaskType] = useState<TaskKey>(SERVICE_TASKS[0].key);
   const [deviceRef, setDeviceRef] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
   const [openSerial, setOpenSerial] = useState<string | null>(null);
+
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(searchInput.trim()), 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
 
   useEffect(() => {
     load();
@@ -94,7 +103,7 @@ export default function ServiceView({
       supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [interval]);
+  }, [interval, search]);
 
   async function load() {
     setLoading(true);
@@ -106,11 +115,14 @@ export default function ServiceView({
           .select("employee_email, points")
           .eq("status", "naprawiony")
           .gte("finished_at", rangeStart(interval)),
-        supabase
-          .from("service_log")
-          .select("id, employee_email, task_type, points, device_ref, status, notes, started_at, finished_at, part_serials")
-          .order("started_at", { ascending: false })
-          .limit(50),
+        (() => {
+          let q = supabase
+            .from("service_log")
+            .select("id, employee_email, task_type, points, device_ref, status, notes, started_at, finished_at, part_serials");
+          if (search) q = q.ilike("device_ref", `%${escapeLike(search)}%`);
+          // Przy wyszukiwaniu limit rośnie — szukany wpis mógł dawno wypaść poza najświeższe 50.
+          return q.order("started_at", { ascending: false }).limit(search ? 200 : 50);
+        })(),
       ]);
       if (rangeErr) throw rangeErr;
       if (recentErr) throw recentErr;
@@ -261,7 +273,15 @@ export default function ServiceView({
         </button>
       </div>
 
-      <h2 className="text-xs font-semibold text-inksoft mb-2">OSTATNIE NAPRAWY</h2>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
+        <h2 className="text-xs font-semibold text-inksoft">OSTATNIE NAPRAWY</h2>
+        <input
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          placeholder="Szukaj po numerze seryjnym…"
+          className="border border-line bg-white px-3 py-1.5 rounded text-sm w-64"
+        />
+      </div>
       <div className="border border-line bg-white overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -280,7 +300,7 @@ export default function ServiceView({
           </thead>
           <tbody>
             {!loading && recent.length === 0 && (
-              <tr><td colSpan={8 + (isAdminOrManager ? 1 : 0) + (isAdmin ? 1 : 0)} className="p-6 text-center text-inksoft text-sm">Brak wpisów — rozpocznij pierwszą naprawę powyżej.</td></tr>
+              <tr><td colSpan={8 + (isAdminOrManager ? 1 : 0) + (isAdmin ? 1 : 0)} className="p-6 text-center text-inksoft text-sm">{search ? "Brak wyników." : "Brak wpisów — rozpocznij pierwszą naprawę powyżej."}</td></tr>
             )}
             {recent.map((r) => (
               <tr key={r.id} className="border-b border-line last:border-b-0 hover:bg-paper">
