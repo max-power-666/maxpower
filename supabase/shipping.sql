@@ -48,10 +48,8 @@ create table if not exists shipping_templates (
   created_by_email text,
   created_at timestamptz not null default now()
 );
--- Szablon startowy z przykładu: ps4 — 3 kg, 40x30x20 cm.
-insert into shipping_templates (name, weight_kg, length_cm, width_cm, height_cm, description)
-values ('ps4', 3, 40, 30, 20, 'Used game console')
-on conflict (name) do nothing;
+-- Szablonu startowego "ps4" tu już nie ma (02.10.2026): każde ponowne uruchomienie pliku dosiewało go z powrotem
+-- po ręcznym usunięciu. Szablony dodaje zespół w zakładce Wysyłka.
 
 create table if not exists shipments (
   id bigint generated always as identity primary key,
