@@ -19,7 +19,7 @@ create table if not exists service_log (
   task_type text not null,                   -- joycon_pair | ps4_controller | xbox_controller | ps5_controller | console_cleaning
   points numeric not null,                   -- migawka punktów wg typu czynności (gdyby regulamin się zmienił, stare wpisy zostają poprawne)
   device_ref text,                           -- numer seryjny / identyfikator urządzenia — Regulamin §2 ust. 5 wymaga wskazania urządzenia w ewidencji
-  status text not null default 'w_naprawie', -- w_naprawie | oczekuje_na_czesci | naprawiony | uszkodzony
+  status text not null default 'w_naprawie', -- w_naprawie | oczekuje_na_czesci | wstrzymane | naprawiony | uszkodzony
   notes text,                                -- uwagi, edytowane w wierszu listy
   part_serials text[],                       -- numery seryjne części wykorzystanych w naprawie; dowolna liczba (często 0)
   started_at timestamptz not null default now(),
@@ -47,6 +47,32 @@ alter table service_log add constraint service_log_employee_user_id_fkey foreign
 create index if not exists service_log_employee_idx on service_log (employee_user_id, started_at desc);
 create index if not exists service_log_started_idx on service_log (started_at desc);
 create index if not exists service_log_finished_idx on service_log (finished_at desc);
+
+-- Status "wstrzymane" zatrzymuje naliczany czas (02.10.2026, na prośbę właściciela). `paused_at` = od kiedy trwa
+-- wstrzymanie (null, gdy naprawa nie jest wstrzymana), `paused_seconds` = suma ZAKOŃCZONYCH wstrzymań. Czas netto
+-- naprawy = finished_at - started_at - paused_seconds. Liczy to trigger po stronie bazy (zegar serwera, nie przeglądarki),
+-- więc działa tak samo niezależnie od tego, skąd status zostanie zmieniony; przejście wstrzymane -> naprawiony/uszkodzony
+-- bezpośrednio też domyka wstrzymanie.
+alter table service_log add column if not exists paused_at timestamptz;
+alter table service_log add column if not exists paused_seconds integer not null default 0;
+
+create or replace function service_log_track_pause() returns trigger
+language plpgsql as $$
+begin
+  if new.status is distinct from old.status then
+    if new.status = 'wstrzymane' then
+      new.paused_at := now();
+    elsif old.status = 'wstrzymane' then
+      new.paused_seconds := coalesce(old.paused_seconds, 0) + greatest(0, round(extract(epoch from (now() - coalesce(old.paused_at, now()))))::int);
+      new.paused_at := null;
+    end if;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists service_log_track_pause_trg on service_log;
+create trigger service_log_track_pause_trg before update on service_log
+  for each row execute function service_log_track_pause();
 
 -- Rozpoczęcie naprawy wymaga numeru seryjnego/IMEI (01.10.2026, na prośbę właściciela) — tylko przy
 -- INSERT (rozpoczęciu), nie przy UPDATE: numer da się potem edytować/poprawić w wierszu listy (w tym

@@ -37,6 +37,7 @@ type StatusKey = (typeof STATUSES)[number]["key"];
 const STATUS_STYLE: Record<StatusKey, string> = {
   w_naprawie: "bg-ambersoft text-amber",
   oczekuje_na_czesci: "bg-[#e3ecf9] text-[#2a6bb5]",
+  wstrzymane: "bg-[#e9ecef] text-[#4b5563]",
   naprawiony: "bg-tealsoft text-teal",
   uszkodzony: "bg-rustsoft text-rust",
 };
@@ -52,6 +53,7 @@ type LogRow = {
   started_at: string;
   finished_at: string | null;
   part_serials: string[] | null;
+  paused_seconds: number;
 };
 
 function fmtDateTime(iso: string) {
@@ -123,7 +125,7 @@ export default function ServiceView({
         (() => {
           let q = supabase
             .from("service_log")
-            .select("id, employee_email, task_type, points, device_ref, status, notes, started_at, finished_at, part_serials");
+            .select("id, employee_email, task_type, points, device_ref, status, notes, started_at, finished_at, part_serials, paused_seconds");
           if (ownOnly) q = q.eq("employee_user_id", session.user.id);
           if (search) q = q.ilike("device_ref", `%${escapeLike(search)}%`);
           // Przy wyszukiwaniu limit rośnie — szukany wpis mógł dawno wypaść poza najświeższe 50.
@@ -340,7 +342,7 @@ export default function ServiceView({
                   </select>
                 </td>
                 <td className="p-3"><InlineEditCell value={r.notes} onSave={(n) => saveNotes(r, n)} multiline className="w-64" /></td>
-                {isAdminOrManager && <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDuration(r.started_at, r.finished_at)}</td>}
+                {isAdminOrManager && <td className="p-3 text-xs text-inksoft whitespace-nowrap">{r.status === "wstrzymane" ? "wstrzymane" : fmtDuration(r.started_at, r.finished_at, r.paused_seconds)}</td>}
                 <td className="p-3 text-right font-mono font-semibold">{r.status === "naprawiony" ? r.points : "—"}</td>
                 {isAdmin && (
                   <td className="p-3 text-right">

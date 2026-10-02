@@ -921,6 +921,14 @@ tak jak "W naprawie", `finished_at` zostaje `null` (`SERVICE_ACTIVE_STATUSES` w 
 statusów, które NIE kończą naprawy; `changeStatus` w `ServiceView.tsx` sprawdza przynależność do tej
 listy zamiast porównania tylko z "w_naprawie", żeby dodanie kolejnego aktywnego statusu w przyszłości nie
 wymagało zmiany logiki w dwóch miejscach). Nie liczy się do punktów (tylko "naprawiony" się liczy).
+**Status "Wstrzymane"** (02.10.2026, na prośbę właściciela) — **zatrzymuje naliczany czas**. Też należy do
+`SERVICE_ACTIVE_STATUSES` (nie kończy naprawy, `finished_at` zostaje `null`, bez punktów). Mechanizm w bazie
+(`service_log_track_pause` w `service.sql`, trigger `before update`, zegar serwera): `paused_at` ustawiane przy
+wejściu w "wstrzymane", a przy wyjściu (do dowolnego innego statusu, także wprost do naprawiony/uszkodzony) długość
+przerwy dolicza się do `paused_seconds` i `paused_at` się czyści. Czas netto = `finished_at - started_at -
+paused_seconds` (`fmtDuration(..., pausedSeconds)` w `lib/workLog.ts`); w kolumnie "Czas" (Admin/Manager) wiersz
+aktualnie wstrzymany pokazuje "wstrzymane". Kolumny czasu jest informacyjny, jak dotąd (punkty od niego nie zależą).
+Ten sam mechanizm NIE obejmuje "Oczekuje na części" — ten status czas dalej liczy (nie było takiej prośby).
 **Numer seryjny / IMEI jest wymagany, żeby ROZPOCZĄĆ naprawę** (01.10.2026, na prośbę właściciela) — pole w formularzu
 ma gwiazdkę, przycisk "Rozpocznij naprawę" jest zablokowany, dopóki pole jest puste, a pilnuje tego też trigger
 `service_log_require_device_ref` w bazie (serwer nie ufa przeglądarce). **Wymóg dotyczy tylko INSERT, nie UPDATE** —

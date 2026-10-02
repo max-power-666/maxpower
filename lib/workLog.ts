@@ -21,9 +21,10 @@ export function rangeStart(interval: Interval): string {
   return d.toISOString();
 }
 
-export function fmtDuration(startIso: string, endIso: string | null): string {
+// pausedSeconds (Serwis, status "wstrzymane") — suma wstrzymań odejmowana od czasu: wstrzymane = zegar stoi.
+export function fmtDuration(startIso: string, endIso: string | null, pausedSeconds = 0): string {
   if (!endIso) return "w trakcie";
-  const ms = Date.parse(endIso) - Date.parse(startIso);
+  const ms = Date.parse(endIso) - Date.parse(startIso) - Math.max(0, pausedSeconds) * 1000;
   const totalMin = Math.max(0, Math.round(ms / 60000));
   const h = Math.floor(totalMin / 60);
   const m = totalMin % 60;
@@ -50,13 +51,14 @@ export const SERVICE_TASKS = [
 export const SERVICE_STATUSES = [
   { key: "w_naprawie", label: "W naprawie" },
   { key: "oczekuje_na_czesci", label: "Oczekuje na części" },
+  { key: "wstrzymane", label: "Wstrzymane" },
   { key: "naprawiony", label: "Naprawiony" },
   { key: "uszkodzony", label: "Uszkodzony" },
 ] as const;
 
 // Statusy, które NIE są zakończeniem naprawy (finished_at zostaje null, praca jest tylko
 // wstrzymana, nie skończona) — "w_naprawie" i "oczekuje_na_czesci" (01.10.2026).
-export const SERVICE_ACTIVE_STATUSES: string[] = ["w_naprawie", "oczekuje_na_czesci"];
+export const SERVICE_ACTIVE_STATUSES: string[] = ["w_naprawie", "oczekuje_na_czesci", "wstrzymane"];
 
 export const TEST_STATUSES = [
   { key: "w_trakcie", label: "W trakcie" },
