@@ -123,6 +123,15 @@ export function dhlCharge(charges: unknown): { currencyType: string; priceCurren
   return Array.isArray(charges) ? charges.find((c: any) => c?.currencyType === "BILLC") ?? charges[0] ?? null : null;
 }
 
+// getPrice zwraca cenę BAZOWĄ i dopłatę paliwową jako PROCENT (nie kwotę) — cena do zapłaty to baza + procent od bazy
+// (jak "Cena netto" w panelu DHL24). Jedno miejsce dla formularza wyceny i dopisywania brakującej ceny.
+export function parcelQuoteTotal(base: number, fuelPct: number | null): number {
+  const surcharge = fuelPct ? Math.round(base * fuelPct) / 100 : 0;
+  return Math.round((base + surcharge) * 100) / 100;
+}
+
+// getPrice dla jednego produktu (EK albo PI). Gdy produkt nie jest dostępny na trasie, DHL zwraca błąd — oddajemy go jako wynik
+// (ok: false), żeby w tabeli było widać, że produkt jest niedostępny i dlaczego, zamiast przerywać całą wycenę.
 // Domyślna data nadania: dziś, jeśli dzień roboczy i przed południem (czas lokalny), w przeciwnym razie najbliższy dzień roboczy.
 export function defaultShippingDate(now: Date = new Date()): string {
   const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());

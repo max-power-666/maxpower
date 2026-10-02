@@ -4,7 +4,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { COUNTRY_NAMES, DHL_EU_COUNTRIES, isEconomySelect, type DhlMoney, type DhlProduct } from "@/lib/dhlExpress";
-import { base64ToBlobUrl, defaultShippingDate, dhlCharge, type ShipPrefill } from "@/lib/shipping";
+import { base64ToBlobUrl, defaultShippingDate, dhlCharge, parcelQuoteTotal, type ShipPrefill } from "@/lib/shipping";
 import { MARKETPLACES } from "@/lib/salesOrders";
 import { escapeLike } from "@/lib/search";
 import { printRawToZebra, printPdf, listPrinters, PrintAgentError } from "@/lib/printAgent";
@@ -329,7 +329,7 @@ export default function ShippingView({
           const base = q.price;
           const pct = q.fuelSurcharge;
           const surchargeAmount = base !== null && pct ? Math.round(base * pct) / 100 : 0;
-          const total = base !== null ? Math.round((base + surchargeAmount) * 100) / 100 : null;
+          const total = base !== null ? parcelQuoteTotal(base, pct) : null;
           return {
             code: q.product,
             name: `${q.name} (${q.product})`,
@@ -452,6 +452,16 @@ export default function ShippingView({
     const res = await fetch(endpoint, { method: "POST", headers: auth, body: JSON.stringify({ id: s.id, confirm: true }) });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return setError(data?.error || "Nie udało się anulować przesyłki.");
+    await loadShipments();
+  }
+
+  // Dopisuje brakującą cenę przesyłce DHL Parcel (np. nadanej ze starej, nieodświeżonej karty przeglądarki, która nie
+  // przekazała ceny z wyceny) — serwer pyta DHL o wycenę dla zapisanej trasy/paczki.
+  async function backfillPrice(s: ShipmentRow) {
+    setError("");
+    const res = await fetch("/api/shipping/dhl-parcel/backfill-price", { method: "POST", headers: auth, body: JSON.stringify({ id: s.id }) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return setError(data?.error || "Nie udało się pobrać ceny.");
     await loadShipments();
   }
 
@@ -844,12 +854,12 @@ Cena to wycena wg cennika konta (DHL Parcel: kwota NETTO w PLN, już z doliczon�
               <thead>
                 <tr className="text-left text-xs text-inksoft border-b border-line">
                   <th className="p-3">Nadano</th>
+                  <th className="p-3">Zamówienie</th>
                   <th className="p-3">Przewoźnik</th>
                   <th className="p-3">Numer przesyłki</th>
                   <th className="p-3">Odbiorca</th>
                   <th className="p-3">Produkt</th>
                   <th className="p-3 text-right">Cena</th>
-                  <th className="p-3">Zamówienie</th>
                   <th className="p-3">Nadał</th>
                   <th className="p-3"></th>
                 </tr>
@@ -864,13 +874,6 @@ Cena to wycena wg cennika konta (DHL Parcel: kwota NETTO w PLN, już z doliczon�
                         {fmtDateTime(s.created_at)}
                         {s.environment !== "production" && <div className="text-amber font-semibold">TEST</div>}
                       </td>
-                      <td className="p-3 text-xs whitespace-nowrap">{s.carrier === "dhl_parcel" ? "DHL Parcel" : s.carrier === "erli_paczkomat" ? "Erli Paczkomat" : "DHL Express"}{s.cancelled_at && <div className="text-rust font-semibold no-underline">ANULOWANA</div>}</td>
-                      <td className="p-3 font-mono whitespace-nowrap">
-                        {s.tracking_url ? <a href={s.tracking_url} target="_blank" rel="noreferrer" className="text-teal hover:underline">{s.tracking_number}</a> : s.tracking_number}
-                      </td>
-                      <td className="p-3 text-xs">{s.receiver?.name}<div className="text-inksoft">{s.receiver?.city}, {s.receiver?.countryCode}</div></td>
-                      <td className="p-3 text-xs whitespace-nowrap">{s.product_name || s.product_code}</td>
-                      <td className="p-3 text-right font-mono text-xs whitespace-nowrap">{charge ? fmtMoney({ price: charge.price, currency: charge.priceCurrency }) : "—"}</td>
                       <td className="p-3 text-xs font-mono">
                         {s.order_external_id && s.marketplace ? (
                           <button onClick={() => setOpenOrder({ marketplace: s.marketplace!, externalId: s.order_external_id! })} className="text-teal hover:underline">
@@ -885,6 +888,26 @@ Cena to wycena wg cennika konta (DHL Parcel: kwota NETTO w PLN, już z doliczon�
                             {!s.cancelled_at && (
                               <button onClick={() => retryMarketplaceSync(s)} className="ml-2 text-teal font-sans font-semibold no-underline hover:underline">Ponów</button>
                             )}
+                          </div>
+                        )}
+                      </td>
+                      <td className="p-3 text-xs whitespace-nowrap">{s.carrier === "dhl_parcel" ? "DHL Parcel" : s.carrier === "erli_paczkomat" ? "Erli Paczkomat" : "DHL Express"}{s.cancelled_at && <div className="text-rust font-semibold no-underline">ANULOWANA</div>}</td>
+                      <td className="p-3 font-mono whitespace-nowrap">
+                        {s.tracking_url ? <a href={s.tracking_url} target="_blank" rel="noreferrer" className="text-teal hover:underline">{s.tracking_number}</a> : s.tracking_number}
+                      </td>
+                      <td className="p-3 text-xs">{s.receiver?.name}<div className="text-inksoft">{s.receiver?.city}, {s.receiver?.countryCode}</div></td>
+                      <td className="p-3 text-xs whitespace-nowrap">{s.product_name || s.product_code}</td>
+                      <td className="p-3 text-right font-mono text-xs whitespace-nowrap">
+                        {charge ? fmtMoney({ price: charge.price, currency: charge.priceCurrency }) : "—"}
+                        {!charge && !s.cancelled_at && s.carrier === "dhl_parcel" && (
+                          <div>
+                            <button
+                              onClick={() => backfillPrice(s)}
+                              className="font-sans font-semibold text-teal hover:underline"
+                              title="Pobiera dzisiejszą wycenę DHL dla tej trasy i paczki i zapisuje ją jako cenę przesyłki"
+                            >
+                              Dolicz cenę
+                            </button>
                           </div>
                         )}
                       </td>

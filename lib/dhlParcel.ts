@@ -137,8 +137,6 @@ const pieceXml = (p: ParcelPackage) =>
 // Cenę doliczoną razem z dopłatą liczy dopiero UI (ShippingView.tsx) — tu zostaje surowa odpowiedź API.
 export type ParcelQuote = { product: string; ok: boolean; price: number | null; fuelSurcharge: number | null; error?: string };
 
-// getPrice dla jednego produktu (EK albo PI). Gdy produkt nie jest dostępny na trasie, DHL zwraca błąd — oddajemy go jako wynik
-// (ok: false), żeby w tabeli było widać, że produkt jest niedostępny i dlaczego, zamiast przerywać całą wycenę.
 export async function dhlParcelPrice(
   cfg: DhlParcelConfig,
   q: { product: string; shipper: ParcelAddress; receiver: ParcelAddress & { country: string }; packages: ParcelPackage[] }

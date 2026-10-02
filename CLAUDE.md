@@ -713,7 +713,15 @@ null`). Naprawione przekazaniem WYBRANEJ ceny (już policzonej przy wycenie, trz
 dla obu przewoźników) — `parseQuotedCharges` (`lib/shipmentInput.ts`) zamienia je na kształt `charges` już używany
 przez `dhlCharge()`. DHL Express dalej PRZEDKŁADA własną odpowiedź, gdyby kiedyś faktycznie coś zwróciła (`created.
 charges?.length ? created.charges : parseQuotedCharges(...)`); DHL Parcel zawsze bierze wycenę, bo DHL24 nigdy nic
-w tym polu nie zwraca. Dotyczy tylko przesyłek nadanych PO tej poprawce — starsze zostają z pustymi/`null` `charges`.
+w tym polu nie zwraca. Dotyczy tylko przesyłek nadanych PO tej poprawce — starsze zostają z pustymi/`null` `charges`. **Przesyłka nadana z nieodświeżonej karty przeglądarki nadal zapisze się bez ceny** (02.10.2026: cztery
+przesyłki Bartosza, mimo że ta sama poprawka działała już u Kingi i Olki — stary kod w otwartej karcie nie wysyła
+`billing`/`local`, a nowy serwer zapisuje wtedy `charges: []`). Dlatego w liście "Nadane przesyłki" przy pustej
+cenie DHL Parcel jest link **"Dolicz cenę"** (`backfillPrice` w `ShippingView.tsx` -> `POST /api/shipping/dhl-parcel/backfill-price`):
+serwer pyta DHL24 o wycenę (`getPrice`) dla ZAPISANEJ trasy i paczki i zapisuje ją w `charges` — to wycena z chwili
+kliknięcia, nie z chwili nadania; nie nadpisuje istniejącej ceny ani nie rusza anulowanych. Wzór ceny (baza + dopłata
+paliwowa jako procent) siedzi w `parcelQuoteTotal` (`lib/shipping.ts`, współdzielone z formularzem wyceny). Tylko
+DHL Parcel — dla DHL Express z pustymi `charges` odpowiednika nie ma. **Kolumna "Zamówienie" jest w tej liście
+pierwsza po dacie, przed "Przewoźnik"** (02.10.2026, na prośbę właściciela).
 
 **Koszt wysyłki na karcie zamówienia** (`SalesOrderCard.tsx`, sekcja "Dane wprowadzone przez pracownika") — nowe
 pole, **tylko dla zamówień ZAGRANICZNYCH** (`sales_orders.country_code` inny niż `"PL"`; brak kraju = pole się nie
