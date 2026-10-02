@@ -73,6 +73,8 @@ export default function ServiceView({
   isAdmin: boolean;
   isAdminOrManager: boolean;
 }) {
+  // Zwykły pracownik widzi tylko własne naprawy (02.10.2026); Admin i Manager — wszystkie.
+  const ownOnly = !isAdminOrManager;
   const [interval, setInterval] = useState<Interval>("today");
   const [rangeRows, setRangeRows] = useState<{ employee_email: string | null; points: number }[]>([]);
   const [recent, setRecent] = useState<LogRow[]>([]);
@@ -110,15 +112,19 @@ export default function ServiceView({
     setError("");
     try {
       const [{ data: rangeData, error: rangeErr }, { data: recentData, error: recentErr }] = await Promise.all([
-        supabase
-          .from("service_log")
-          .select("employee_email, points")
-          .eq("status", "naprawiony")
-          .gte("finished_at", rangeStart(interval)),
+        (() => {
+          const q = supabase
+            .from("service_log")
+            .select("employee_email, points")
+            .eq("status", "naprawiony")
+            .gte("finished_at", rangeStart(interval));
+          return ownOnly ? q.eq("employee_user_id", session.user.id) : q;
+        })(),
         (() => {
           let q = supabase
             .from("service_log")
             .select("id, employee_email, task_type, points, device_ref, status, notes, started_at, finished_at, part_serials");
+          if (ownOnly) q = q.eq("employee_user_id", session.user.id);
           if (search) q = q.ilike("device_ref", `%${escapeLike(search)}%`);
           // Przy wyszukiwaniu limit rośnie — szukany wpis mógł dawno wypaść poza najświeższe 50.
           return q.order("started_at", { ascending: false }).limit(search ? 200 : 50);
