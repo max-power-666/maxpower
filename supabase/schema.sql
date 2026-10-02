@@ -65,6 +65,10 @@ create table if not exists fakturownia_stock_cache (
 alter table fakturownia_stock_cache add column if not exists name text;
 alter table fakturownia_stock_cache add column if not exists description text;
 alter table fakturownia_stock_cache add column if not exists product_created_at timestamptz;
+-- Stawka VAT sztuki (02.10.2026) — wpisywana RĘCZNIE przy dodawaniu produktu do magazynu; na razie nic jej nie
+-- wypełnia (kolumna w Magazynie -> Raw data pokazuje "—"). Synchronizacja z Fakturowni jej nie ustawia ani nie
+-- nadpisuje (upsert zawiera tylko swoje kolumny).
+alter table fakturownia_stock_cache add column if not exists vat text;
 create index if not exists fakturownia_stock_cache_created_idx on fakturownia_stock_cache (product_created_at desc);
 
 -- Jeden wiersz: kiedy ostatnio zsynchronizowano dane z Fakturowni, i od jakiego

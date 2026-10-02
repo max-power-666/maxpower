@@ -37,7 +37,7 @@ numerach seryjnych, wielokanałowa synchronizacja stanów, naprawy, auto-wycena)
 - `supabase/*.sql` — schemat, każdy plik idempotentny: `schema.sql` (units, members,
   cache Fakturowni), `tradein.sql` (bidder), `buyback-orders.sql` (zamówienia + obsługa
   paczek), `backlog.sql` (zakładka Backlog), `shipping.sql` (Wysyłka: nadawca, szablony, przesyłki), `sales-orders.sql` (zamówienia sprzedaży Back Market, refurbed, Erli, Allegro, Octopia i Amazon, plus archiwum Apilo; tokeny OAuth), `service.sql` (rejestr napraw), `tests.sql` (rejestr testów), `invoices.sql` (zakładka Faktury: tabela faktur + widok `invoices_ready_orders`),
-  `overview.sql` (widok `sales_order_values` dla dashboardu Przeglądu), `nbp.sql` (zakładka NBP: kursy walut).
+  `overview.sql` (widok `sales_order_values` dla dashboardu Przeglądu), `nbp.sql` (zakładka NBP: kursy walut), `inventory.sql` (widok `fakturownia_stock_with_sku` dla Magazynu -> Raw data; po schema/buyback-orders/tests).
 - `scripts/import-buyback.mjs` — jednorazowy import ze starego programu Buyback Bidder.
 
 ## Zakładki i role
@@ -163,6 +163,17 @@ kolumny `name`, `description`, `product_created_at`, kategoria, cena zakupu) +
 `date_from`. Po dodaniu nowych kolumn `schema.sql` sam kasuje `last_synced_at`, więc następne
 "Odśwież" robi jednorazowy pełny skan i uzupełnia braki. Zapis tylko serwer (service_role);
 zespół ma tylko odczyt.
+
+**Raw data — kolumny SKU i VAT** (02.10.2026, na prośbę właściciela). Raw data czyta teraz widok
+`fakturownia_stock_with_sku` (`supabase/inventory.sql`, uruchamiać PO schema/buyback-orders/tests) zamiast samej tabeli
+cache. **SKU** nie istnieje w Fakturowni (tam serial = nazwa = kod), więc jest wyliczane z naszej bazy po numerze
+seryjnym: z Testów (`test_log.sku`, kolumna dodana tego samego dnia) albo z Trade-in (`buyback_order_intake.sku`), a gdy są
+oba — **wygrywa wpis wcześniejszy** (`test_log.started_at` vs `buyback_order_intake.entered_at`; decyzja właściciela).
+Wpisy z pustym SKU są pomijane (wcześniejszy, ale nieuzupełniony wpis nie zasłania późniejszego z SKU); numery
+porównywane bez rozróżniania wielkości liter i bez spacji na brzegach; dla sztuki bez żadnego wpisu SKU jest puste
+("—"). **VAT** (`fakturownia_stock_cache.vat`, nullable tekst) ma być wpisywany RĘCZNIE przy dodawaniu produktu do
+magazynu — na razie nic go nie wypełnia (kolumna pokazuje "—"), synchronizacja z Fakturowni go nie rusza. Podsumowanie
+magazynu (kafelki, wykres kołowy) dalej czyta tabelę, nie widok.
 
 Ręczna ewidencja sztuk w tabeli `units` została **wycofana z Magazynu** na prośbę właściciela
 i jej kod usunięto z `page.tsx` (lista, dodawanie, panel szczegółów, `CATEGORIES` z polami per
