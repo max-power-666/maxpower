@@ -183,7 +183,12 @@ Wpisy z pustym SKU są pomijane (wcześniejszy, ale nieuzupełniony wpis nie zas
 porównywane bez rozróżniania wielkości liter i bez spacji na brzegach; dla sztuki bez żadnego wpisu SKU jest puste
 ("—"). **VAT** (`fakturownia_stock_cache.vat`, nullable tekst) ma być wpisywany RĘCZNIE przy dodawaniu produktu do
 magazynu — na razie nic go nie wypełnia (kolumna pokazuje "—"), synchronizacja z Fakturowni go nie rusza. Podsumowanie
-magazynu (kafelki, wykres kołowy) dalej czyta tabelę, nie widok — z jednym wyjątkiem: pod kafelkiem "Dostępne produkty" jest linijka **"z SKU: N (X%) · bez SKU: M"** (02.10.2026; licznik z widoku `fakturownia_stock_with_sku`, `FakturowniaSummary.skuCount`; gdy widoku brak albo zapytanie padnie, linijka znika, reszta podsumowania działa).
+magazynu (kafelki, wykres kołowy) dalej czyta tabelę, nie widok — z wyjątkami: **drugi wykres obok pierwszego** (02.10.2026): oba pierścienie z tabelą mają teraz po pół szerokości
+(`CategoryBreakdown.tsx`, układ `xl:grid-cols-2`, na węższym ekranie jeden pod drugim) — pierwszy wg kategorii z Fakturowni,
+drugi **wg "kategorii z SKU"** (`fetchSkuBreakdown` w `page.tsx`, z widoku; sztuki bez SKU w osobnym, jasnoszarym wierszu
+"Bez SKU" zawsze na końcu; tabela ucięta do 10 największych kategorii + wiersz "Inne (k kat.)", bo kategorii z SKU jest ~40).
+Udziały obu wykresów liczone względem tej samej łącznej wartości. Gdy widoku brak (nie uruchomiono `inventory.sql`), zamiast
+drugiego wykresu jest krótka informacja. Oraz: pod kafelkiem "Dostępne produkty" jest linijka **"z SKU: N (X%) · bez SKU: M"** (02.10.2026; licznik z widoku `fakturownia_stock_with_sku`, `FakturowniaSummary.skuCount`; gdy widoku brak albo zapytanie padnie, linijka znika, reszta podsumowania działa).
 
 Ręczna ewidencja sztuk w tabeli `units` została **wycofana z Magazynu** na prośbę właściciela
 i jej kod usunięto z `page.tsx` (lista, dodawanie, panel szczegółów, `CATEGORIES` z polami per
