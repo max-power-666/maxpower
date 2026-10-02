@@ -921,6 +921,7 @@ tak jak "W naprawie", `finished_at` zostaje `null` (`SERVICE_ACTIVE_STATUSES` w 
 statusów, które NIE kończą naprawy; `changeStatus` w `ServiceView.tsx` sprawdza przynależność do tej
 listy zamiast porównania tylko z "w_naprawie", żeby dodanie kolejnego aktywnego statusu w przyszłości nie
 wymagało zmiany logiki w dwóch miejscach). Nie liczy się do punktów (tylko "naprawiony" się liczy).
+**Typ czynności "Poprawka"** (02.10.2026, na prośbę właściciela) — `correction` w `SERVICE_TASKS`, **0 punktów** (poza tabelą punktową regulaminu). Zwykły wpis jak każdy inny (numer seryjny, status, czas), tylko migawka punktów to 0, więc nie wpływa na podsumowanie punktacji; bez zmian w bazie (`task_type` to zwykły tekst).
 **Wiersz jest edytowalny tylko w statusie "W naprawie"** (02.10.2026, na prośbę właściciela — żeby nic nie zmienić przez
 przypadek): w każdym innym statusie (oczekuje na części, wstrzymane, naprawiony, uszkodzony) numer seryjny, części i
 uwagi są zwykłym tekstem (`readOnly` w `InlineEditCell`/`PartsCell`), a lista części bez przycisków +/−. **Zmiana

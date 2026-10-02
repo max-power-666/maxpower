@@ -46,6 +46,8 @@ export const SERVICE_TASKS = [
   { key: "ps5_controller", label: "Kontroler PS5 (DualSense)", points: 12 },
   { key: "console_cleaning", label: "Czyszczenie konsoli", points: 40 },
   { key: "difficult_console", label: "Trudne konsole", points: 60 },
+  // Poprawka (02.10.2026, na prośbę właściciela) — czynność bez punktów (0 pkt); poza tabelą z regulaminu.
+  { key: "correction", label: "Poprawka", points: 0 },
 ] as const;
 
 export const SERVICE_STATUSES = [
