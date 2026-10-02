@@ -101,7 +101,7 @@ export function labelFor(list: readonly { key: string; label: string }[], key: s
 // pastele jak plakietki marketplace'ów (stała paleta niezależna od motywu).
 export const TEST_KIND_COLORS: Record<string, { bg: string; fg: string }> = {
   po_dostawie: { bg: "#e3ecf9", fg: "#2a6bb5" },
-  po_serwisie: { bg: "#e6e6fb", fg: "#4c4fc4" },
+  po_serwisie: { bg: "#f5b301", fg: "#3b2a00" }, // celowo nasycony — odcina się od pastelowych pozostałych
   ponowny_z_magazynu: { bg: "#e9ecef", fg: "#4b5563" },
   olx: { bg: "#d6f1ee", fg: "#0f766e" },
   allegro: { bg: "#fde8d7", fg: "#c2570c" },

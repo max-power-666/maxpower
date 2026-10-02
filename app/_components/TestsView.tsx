@@ -30,6 +30,7 @@ type TestRow = {
   id: number;
   employee_email: string | null;
   serial_number: string;
+  sku: string | null;
   status: StatusKey;
   test_kind: TestKindKey;
   result: TestResultKey | null;
@@ -97,7 +98,7 @@ export default function TestsView({
           .gte("finished_at", rangeStart(interval)),
         supabase
           .from("test_log")
-          .select("id, employee_email, serial_number, status, test_kind, result, notes, started_at, finished_at, points")
+          .select("id, employee_email, serial_number, sku, status, test_kind, result, notes, started_at, finished_at, points")
           .order("started_at", { ascending: false })
           .limit(50),
       ]);
@@ -168,6 +169,27 @@ export default function TestsView({
   async function saveNotes(row: TestRow, notes: string | null) {
     const { error: err } = await supabase.from("test_log").update({ notes }).eq("id", row.id);
     if (err) setError(`Nie udało się zapisać uwag: ${err.message}`);
+  }
+
+  // Numer seryjny można poprawić po rozpoczęciu testu (02.10.2026). Kolumna jest NOT NULL, a indeks blokuje dwa trwające
+  // testy tego samego urządzenia — oba przypadki dostają czytelny komunikat zamiast surowego błędu bazy.
+  async function saveSerial(row: TestRow, next: string | null) {
+    const value = (next ?? "").trim().toUpperCase();
+    if (!value) return setError("Numer seryjny nie może być pusty.");
+    if (value === row.serial_number) return;
+    setError("");
+    const { error: err } = await supabase.from("test_log").update({ serial_number: value }).eq("id", row.id);
+    if (err) {
+      if (err.code === "23505" || err.message.includes("duplicate key")) {
+        return setError(`Urządzenie ${value} ma już trwający test (w trakcie) — numeru nie zmieniono.`);
+      }
+      setError(`Nie udało się zapisać numeru seryjnego: ${err.message}`);
+    }
+  }
+
+  async function saveSku(row: TestRow, sku: string | null) {
+    const { error: err } = await supabase.from("test_log").update({ sku }).eq("id", row.id);
+    if (err) setError(`Nie udało się zapisać SKU: ${err.message}`);
   }
 
   async function saveTestKind(row: TestRow, testKind: TestKindKey) {
@@ -270,6 +292,7 @@ export default function TestsView({
               <th className="p-3">Rozpoczęto</th>
               <th className="p-3">Pracownik</th>
               <th className="p-3">Numer seryjny</th>
+              <th className="p-3">SKU</th>
               <th className="p-3">Rodzaj testu</th>
               <th className="p-3">Status</th>
               <th className="p-3">Wynik</th>
@@ -281,7 +304,7 @@ export default function TestsView({
           </thead>
           <tbody>
             {!loading && recent.length === 0 && (
-              <tr><td colSpan={8 + (isAdminOrManager ? 1 : 0) + (isAdmin ? 1 : 0)} className="p-6 text-center text-inksoft text-sm">Brak testów — rozpocznij pierwszy powyżej.</td></tr>
+              <tr><td colSpan={9 + (isAdminOrManager ? 1 : 0) + (isAdmin ? 1 : 0)} className="p-6 text-center text-inksoft text-sm">Brak testów — rozpocznij pierwszy powyżej.</td></tr>
             )}
             {recent.map((r) => (
               <tr key={r.id} className="border-b border-line last:border-b-0 hover:bg-paper">
@@ -295,7 +318,18 @@ export default function TestsView({
                   </span>
                 </td>
                 <td className="p-3">
-                  <button onClick={() => setOpenSerial(r.serial_number)} className="font-mono font-semibold text-teal hover:underline">{r.serial_number}</button>
+                  <div className="flex items-center gap-1">
+                    <InlineEditCell
+                      value={r.serial_number}
+                      placeholder="Numer seryjny"
+                      className="w-36 font-mono font-semibold"
+                      onSave={(next) => saveSerial(r, next)}
+                    />
+                    <button onClick={() => setOpenSerial(r.serial_number)} title="Otwórz kartę produktu" className="text-teal shrink-0">↗</button>
+                  </div>
+                </td>
+                <td className="p-3">
+                  <InlineEditCell value={r.sku} placeholder="SKU" className="w-32 font-mono" onSave={(next) => saveSku(r, next)} />
                 </td>
                 <td className="p-3">
                   <select

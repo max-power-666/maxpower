@@ -918,8 +918,8 @@ wymagało zmiany logiki w dwóch miejscach). Nie liczy się do punktów (tylko "
 ma gwiazdkę, przycisk "Rozpocznij naprawę" jest zablokowany, dopóki pole jest puste, a pilnuje tego też trigger
 `service_log_require_device_ref` w bazie (serwer nie ufa przeglądarce). **Wymóg dotyczy tylko INSERT, nie UPDATE** —
 `device_ref` jest edytowalny w wierszu listy (`InlineEditCell`, obok przycisk "↗" do karty produktu, widoczny tylko
-gdy pole niepuste) i da się go później poprawić albo nawet wyczyścić bez blokady — inaczej niż w Testach, gdzie
-numer seryjny zostaje tylko do odczytu po rozpoczęciu testu. Dzięki temu stare wpisy sprzed tej zmiany (z pustym
+gdy pole niepuste) i da się go później poprawić albo nawet wyczyścić bez blokady — inaczej niż w Testach przed 02.10.2026, gdzie
+numer seryjny był tylko do odczytu po rozpoczęciu testu (dziś w Testach też jest edytowalny). Dzięki temu stare wpisy sprzed tej zmiany (z pustym
 `device_ref`) nadal da się normalnie edytować (status, uwagi, części) — trigger sprawdza tylko moment startu.
 **Kolumna "Części"** (30.09.2026, `part_serials text[]`) — numery seryjne części wykorzystanych w naprawie,
 dowolna liczba (często zero, czasem kilka). W odróżnieniu od Padów w Trade-in (pole "ilość" generuje tyle
@@ -955,6 +955,13 @@ edytowalne w dowolnym momencie przez cały cykl życia testu, **całkowicie niez
 przetestowane / przerwany, który dalej sam rządzi punktami i unikalnością aktywnego wpisu) — np. wpis może być
 "przetestowane" + "RMA" naraz, to nie sprzeczność. Żadne z tych dwóch pól nie jest wymagane do żadnego
 statusu — czysto informacyjne, podobnie jak "Części" w Serwisie.
+**Kolumna "SKU"** (02.10.2026, `test_log.sku`, nullable tekst, edytowalna w wierszu przez `InlineEditCell`, zaraz po
+Numerze seryjnym) — ręcznie wpisywana, jak SKU w Trade-in; nic jej nie waliduje i nie wypełnia automatycznie.
+**Numer seryjny jest teraz edytowalny w wierszu** (02.10.2026, wcześniej tylko do odczytu po rozpoczęciu testu —
+patrz porównanie z Serwisem w sekcji Serwis): zapis zamienia wartość na WIELKIE litery (jak przy rozpoczynaniu),
+pusta wartość jest odrzucana (kolumna NOT NULL), a zmiana na numer, który ma już trwający test, dostaje czytelny
+komunikat zamiast błędu bazy (indeks częściowy). Obok pola przycisk "↗" otwiera kartę produktu. Kolor "Po serwisie"
+w Rodzaju testu jest celowo nasycony (żółty), żeby odcinał się od pozostałych pasteli.
 **Kolory kolumn (02.10.2026, na prośbę właściciela)** — Pracownik, Rodzaj testu i Wynik w liście "Ostatnie testy"
 mają kolorowe tło plakietki, tak jak Status. Pracownik: kolor osoby z `lib/userColors.ts` (`colorForUser`, ta
 sama mapa e-mail -> kolor co podświetlanie wierszy w Trade-in; osoba spoza mapy dostaje neutralną plakietkę).

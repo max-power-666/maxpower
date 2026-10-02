@@ -37,6 +37,9 @@ alter table test_log add column if not exists test_kind text not null default 'p
 -- kolumna `status` wyżej) i od punktów — ustalany dopiero w trakcie/po teście, więc nullable,
 -- bez default (stare wiersze zostają bez wyniku, pokazane jako "—").
 alter table test_log add column if not exists result text;
+-- SKU (02.10.2026) — wpisywany ręcznie przez pracownika w wierszu listy testów, nullable, zwykły tekst
+-- (jak SKU w Trade-in); nie jest wymagany do żadnego statusu.
+alter table test_log add column if not exists sku text;
 -- ON DELETE SET NULL (30.09.2026) — patrz wyjaśnienie w schema.sql (members.user_id) i service.sql; employee_email
 -- jest już zapisany osobno, więc "kto to zrobił" zostaje widoczne mimo zerwania linku do konta.
 alter table test_log alter column employee_user_id drop not null;
