@@ -13,12 +13,16 @@ export default function InlineEditCell({
   placeholder = "Dodaj uwagę",
   className = "w-56",
   multiline = false,
+  readOnly = false,
 }: {
   value: string | null;
   onSave: (next: string | null) => void;
   placeholder?: string;
   className?: string;
   multiline?: boolean;
+  // Zablokowany wiersz (np. Serwis poza statusem "w naprawie", 02.10.2026): zwykły tekst zamiast pola, żeby nic
+  // nie dało się zmienić przez przypadek.
+  readOnly?: boolean;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
   const cancelled = useRef(false);
@@ -39,6 +43,14 @@ export default function InlineEditCell({
     textareaRef.current.style.height = "auto";
     textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
   }, [multiline, draft, current]);
+
+  if (readOnly) {
+    return (
+      <span className={`${className} inline-block px-2 py-1 text-sm text-inksoft whitespace-pre-wrap break-words align-top`}>
+        {current || "—"}
+      </span>
+    );
+  }
 
   if (multiline) {
     return (

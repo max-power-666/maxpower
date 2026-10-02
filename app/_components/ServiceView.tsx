@@ -309,7 +309,11 @@ export default function ServiceView({
             {!loading && recent.length === 0 && (
               <tr><td colSpan={8 + (isAdminOrManager ? 1 : 0) + (isAdmin ? 1 : 0)} className="p-6 text-center text-inksoft text-sm">{search ? "Brak wyników." : "Brak wpisów — rozpocznij pierwszą naprawę powyżej."}</td></tr>
             )}
-            {recent.map((r) => (
+            {recent.map((r) => {
+              // Wiersz edytowalny tylko w statusie "w naprawie" (02.10.2026) — żeby nic nie zmienić przez przypadek.
+              // Zmiana statusu zostaje zawsze dostępna (inaczej nie dałoby się wrócić do edycji ani zakończyć naprawy).
+              const locked = r.status !== "w_naprawie";
+              return (
               <tr key={r.id} className="border-b border-line last:border-b-0 hover:bg-paper">
                 <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDateTime(r.started_at)}</td>
                 <td className="p-3">{displayNameForEmail(r.employee_email, members)}</td>
@@ -320,6 +324,7 @@ export default function ServiceView({
                       value={r.device_ref}
                       placeholder="Numer seryjny / IMEI"
                       className="w-36 font-mono"
+                      readOnly={locked}
                       onSave={(next) => saveDeviceRef(r, next)}
                     />
                     {r.device_ref && (
@@ -328,7 +333,7 @@ export default function ServiceView({
                   </div>
                 </td>
                 <td className="p-3">
-                  <PartsCell values={r.part_serials} onSave={(next) => savePartSerials(r, next)} />
+                  <PartsCell values={r.part_serials} readOnly={locked} onSave={(next) => savePartSerials(r, next)} />
                 </td>
                 <td className="p-3">
                   <select
@@ -341,7 +346,7 @@ export default function ServiceView({
                     ))}
                   </select>
                 </td>
-                <td className="p-3"><InlineEditCell value={r.notes} onSave={(n) => saveNotes(r, n)} multiline className="w-64" /></td>
+                <td className="p-3"><InlineEditCell value={r.notes} onSave={(n) => saveNotes(r, n)} multiline readOnly={locked} className="w-64" /></td>
                 {isAdminOrManager && <td className="p-3 text-xs text-inksoft whitespace-nowrap">{r.status === "wstrzymane" ? "wstrzymane" : fmtDuration(r.started_at, r.finished_at, r.paused_seconds)}</td>}
                 <td className="p-3 text-right font-mono font-semibold">{r.status === "naprawiony" ? r.points : "—"}</td>
                 {isAdmin && (
@@ -352,7 +357,8 @@ export default function ServiceView({
                   </td>
                 )}
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

@@ -921,6 +921,11 @@ tak jak "W naprawie", `finished_at` zostaje `null` (`SERVICE_ACTIVE_STATUSES` w 
 statusów, które NIE kończą naprawy; `changeStatus` w `ServiceView.tsx` sprawdza przynależność do tej
 listy zamiast porównania tylko z "w_naprawie", żeby dodanie kolejnego aktywnego statusu w przyszłości nie
 wymagało zmiany logiki w dwóch miejscach). Nie liczy się do punktów (tylko "naprawiony" się liczy).
+**Wiersz jest edytowalny tylko w statusie "W naprawie"** (02.10.2026, na prośbę właściciela — żeby nic nie zmienić przez
+przypadek): w każdym innym statusie (oczekuje na części, wstrzymane, naprawiony, uszkodzony) numer seryjny, części i
+uwagi są zwykłym tekstem (`readOnly` w `InlineEditCell`/`PartsCell`), a lista części bez przycisków +/−. **Zmiana
+statusu zostaje zawsze dostępna** — inaczej nie dałoby się wrócić do "W naprawie" ani zakończyć naprawy. Tylko UI
+(RLS dalej pozwala na UPDATE każdemu zalogowanemu). Przycisk "↗" do karty produktu i "Usuń" (Admin) działają zawsze.
 **Status "Wstrzymane"** (02.10.2026, na prośbę właściciela) — **zatrzymuje naliczany czas**. Też należy do
 `SERVICE_ACTIVE_STATUSES` (nie kończy naprawy, `finished_at` zostaje `null`, bez punktów). Mechanizm w bazie
 (`service_log_track_pause` w `service.sql`, trigger `before update`, zegar serwera): `paused_at` ustawiane przy

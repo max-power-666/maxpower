@@ -10,9 +10,11 @@ import InlineEditCell from "./InlineEditCell";
 export default function PartsCell({
   values,
   onSave,
+  readOnly = false,
 }: {
   values: string[] | null;
   onSave: (next: string[]) => void;
+  readOnly?: boolean; // zablokowany wiersz — sama lista, bez przycisków i pól do edycji
 }) {
   const list = values ?? [];
 
@@ -28,6 +30,17 @@ export default function PartsCell({
   }
   function removeAt(i: number) {
     onSave(list.filter((_, idx) => idx !== i));
+  }
+
+  if (readOnly) {
+    if (list.length === 0) return <span className="px-2 py-1 text-sm text-inksoft">—</span>;
+    return (
+      <div className="flex flex-col gap-1">
+        {list.map((v, i) => (
+          <span key={i} className="px-2 py-1 text-sm font-mono text-inksoft">{v || "—"}</span>
+        ))}
+      </div>
+    );
   }
 
   if (list.length === 0) {
