@@ -98,7 +98,8 @@ function effectiveAccess(role: string, viewAccess: string[] | null | undefined, 
 }
 
 type FakturowniaCategorySummary = { name: string; count: number; value: number };
-type FakturowniaSummary = { totalCount: number; totalValue: number; categories: FakturowniaCategorySummary[] };
+// skuCount: ile z dostępnych sztuk ma SKU (widok fakturownia_stock_with_sku); null = nie udało się policzyć (np. nie uruchomiono inventory.sql).
+type FakturowniaSummary = { totalCount: number; totalValue: number; skuCount: number | null; categories: FakturowniaCategorySummary[] };
 
 type Unit = {
   id: string;
@@ -352,13 +353,17 @@ export default function Home() {
   async function loadFakturowniaSummaryFromDb() {
     let rows: { category_name: string; purchase_price_gross: number }[];
     let metaRow: { last_synced_at: string } | null;
+    let skuCount: number | null = null;
     try {
-      const [r, meta] = await Promise.all([
+      const [r, meta, skuRes] = await Promise.all([
         fetchAllStockCacheRows(),
         supabase.from("fakturownia_sync_meta").select("last_synced_at").eq("id", 1).maybeSingle().throwOnError(),
+        // Licznik "z SKU" jest dodatkiem do podsumowania — jego błąd (np. brak widoku) nie blokuje reszty.
+        supabase.from("fakturownia_stock_with_sku").select("id", { count: "exact", head: true }).not("sku", "is", null),
       ]);
       rows = r;
       metaRow = meta.data;
+      skuCount = skuRes.error ? null : skuRes.count ?? null;
     } catch (e: any) {
       setFakturowniaError(`Nie udało się wczytać podsumowania z bazy: ${e.message || e}`);
       return;
@@ -380,6 +385,7 @@ export default function Home() {
     setFakturowniaSummary({
       totalCount,
       totalValue,
+      skuCount,
       categories: Array.from(totals.values()).sort((a, b) => b.value - a.value),
     });
     setFakturowniaLastSynced((metaRow?.last_synced_at as string) ?? null);
@@ -620,6 +626,13 @@ function FakturowniaSummaryView({ summary }: { summary: FakturowniaSummary }) {
         <div className="bg-white p-5">
           <div className="text-xs text-inksoft mb-2">DOSTĘPNE PRODUKTY (stan = 1)</div>
           <div className="text-3xl font-bold font-mono">{summary.totalCount.toLocaleString("pl-PL")}</div>
+          {summary.skuCount !== null && (
+            <div className="text-xs text-inksoft mt-2">
+              z SKU: <span className="font-semibold text-ink">{summary.skuCount.toLocaleString("pl-PL")}</span>
+              {summary.totalCount > 0 && ` (${Math.round((summary.skuCount / summary.totalCount) * 100)}%)`}
+              {" · "}bez SKU: <span className="font-semibold text-ink">{(summary.totalCount - summary.skuCount).toLocaleString("pl-PL")}</span>
+            </div>
+          )}
         </div>
         <div className="bg-white p-5">
           <div className="text-xs text-inksoft mb-2">ŁĄCZNA WARTOŚĆ (ceny zakupu brutto)</div>

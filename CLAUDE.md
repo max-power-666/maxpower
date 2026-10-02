@@ -179,7 +179,7 @@ Wpisy z pustym SKU są pomijane (wcześniejszy, ale nieuzupełniony wpis nie zas
 porównywane bez rozróżniania wielkości liter i bez spacji na brzegach; dla sztuki bez żadnego wpisu SKU jest puste
 ("—"). **VAT** (`fakturownia_stock_cache.vat`, nullable tekst) ma być wpisywany RĘCZNIE przy dodawaniu produktu do
 magazynu — na razie nic go nie wypełnia (kolumna pokazuje "—"), synchronizacja z Fakturowni go nie rusza. Podsumowanie
-magazynu (kafelki, wykres kołowy) dalej czyta tabelę, nie widok.
+magazynu (kafelki, wykres kołowy) dalej czyta tabelę, nie widok — z jednym wyjątkiem: pod kafelkiem "Dostępne produkty" jest linijka **"z SKU: N (X%) · bez SKU: M"** (02.10.2026; licznik z widoku `fakturownia_stock_with_sku`, `FakturowniaSummary.skuCount`; gdy widoku brak albo zapytanie padnie, linijka znika, reszta podsumowania działa).
 
 Ręczna ewidencja sztuk w tabeli `units` została **wycofana z Magazynu** na prośbę właściciela
 i jej kod usunięto z `page.tsx` (lista, dodawanie, panel szczegółów, `CATEGORIES` z polami per
