@@ -169,6 +169,12 @@ zespół ma tylko odczyt.
 cache. **SKU** nie istnieje w Fakturowni (tam serial = nazwa = kod), więc jest wyliczane z naszej bazy po numerze
 seryjnym: z Testów (`test_log.sku`, kolumna dodana tego samego dnia) albo z Trade-in (`buyback_order_intake.sku`), a gdy są
 oba — **wygrywa wpis wcześniejszy** (`test_log.started_at` vs `buyback_order_intake.entered_at`; decyzja właściciela).
+**Trzecie, rezerwowe źródło: tabela `serial_skus`** (numer seryjny -> SKU, `inventory.sql`) — jednorazowy import z arkusza
+właściciela z 02.10.2026 (~4,5 tys. historycznych sztuk; plik importu poza repo, bo to dane, nie schemat): pokazuje się
+TYLKO gdy ani Testy, ani Trade-in nie mają SKU dla sztuki (świeży wpis zespołu ma pierwszeństwo przed historycznym
+importem). Z importu pominięto placeholdery zamiast numeru ('-', 'TUTAJ', 'BRAK SN'), zwinięto zdublowane numery z tym
+samym SKU i **wykluczono 9 numerów ze sprzecznymi SKU** (ten sam numer, różne SKU w arkuszu — do ręcznego rozstrzygnięcia);
+na dzień importu 551 z 1495 sztuk magazynu dostało SKU z tej tabeli. Zapis do `serial_skus` tylko Admin (RLS) albo SQL Editor.
 Wpisy z pustym SKU są pomijane (wcześniejszy, ale nieuzupełniony wpis nie zasłania późniejszego z SKU); numery
 porównywane bez rozróżniania wielkości liter i bez spacji na brzegach; dla sztuki bez żadnego wpisu SKU jest puste
 ("—"). **VAT** (`fakturownia_stock_cache.vat`, nullable tekst) ma być wpisywany RĘCZNIE przy dodawaniu produktu do
