@@ -17,6 +17,8 @@ type StockRow = {
   description: string | null;
   purchase_price_gross: number;
   product_created_at: string | null;
+  vat: string | null;
+  sku: string | null;
 };
 type TestRow = { employee_email: string | null; status: string; notes: string | null; started_at: string; finished_at: string | null };
 type ServiceRow = {
@@ -83,8 +85,8 @@ export default function ProductCardDrawer({
         const pattern = escapeLike(serial.trim());
         const [stockRes, testRes, serviceRes, intakeRes] = await Promise.all([
           supabase
-            .from("fakturownia_stock_cache")
-            .select("name, category_name, description, purchase_price_gross, product_created_at")
+            .from("fakturownia_stock_with_sku")
+            .select("name, category_name, description, purchase_price_gross, product_created_at, vat, sku")
             .ilike("name", pattern),
           supabase
             .from("test_log")
@@ -192,8 +194,10 @@ export default function ProductCardDrawer({
                 {stock.map((s, i) => (
                   <div key={i} className="border border-line bg-white mb-2">
                     <Row label="Kategoria" value={s.category_name} />
+                    <Row label="SKU" value={s.sku} mono />
                     <Row label="Zamówienie" value={s.description} mono />
                     <Row label="Cena zakupu brutto" value={fmtMoney(s.purchase_price_gross, "zł")} />
+                    <Row label="VAT" value={s.vat} />
                     <Row label="Dodano" value={s.product_created_at ? fmtDateTime(s.product_created_at) : null} />
                   </div>
                 ))}

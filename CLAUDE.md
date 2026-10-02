@@ -1010,7 +1010,7 @@ Pusty Wynik ("—") zostaje zwykłym białym polem. Hardkodowane heksy, niezale�
 **Karta produktu** (`ProductCardDrawer.tsx`). Klik w numer seryjny w Testach i Serwisie (strzałka ↗
 przy polu) albo w Magazynie → Raw data otwiera panel. **W Trade-in (Wprowadzanie) ten odnośnik usunięty
 30.09.2026** na prośbę właściciela — niepotrzebny obok kolumny Numer seryjny. Nie ma własnej tabeli: składa się na żywo z
-`fakturownia_stock_cache` (magazyn), `buyback_orders` (zamówienie z opisu sztuki lub z obsługi paczki),
+`fakturownia_stock_with_sku` (magazyn, widok z `inventory.sql` — ta sama co w Magazynie -> Raw data, więc **sekcja "Magazyn (Fakturownia)" pokazuje też SKU i VAT**, 02.10.2026; widoczne tylko dla sztuk, które są w magazynie), `buyback_orders` (zamówienie z opisu sztuki lub z obsługi paczki),
 `test_log`, `service_log` (po `device_ref`) i `history` z `buyback_order_intake`. **Log** to te zdarzenia
 w kolejności czasu ("Test rozpoczęty przez…", "Serwis (…) zakończony: Naprawiony", zmiany w Trade-in).
 Numery łączy bez rozróżniania wielkości liter, ale muszą być wpisane identycznie w każdym module.
