@@ -192,7 +192,13 @@ oba — **wygrywa wpis wcześniejszy** (`test_log.started_at` vs `buyback_order_
 Pominięto: placeholdery zamiast numeru ('-', 'TUTAJ', 'BRAK SN'), SKU dosłownie 'SKU'/'None' (puste wartości z eksportu),
 zwinięto zdublowane numery z tym samym SKU i **wykluczono 2 numery ze sprzecznymi SKU** (03274523235631167: PS4-500-WE-C/-D,
 128809753548: XO-1TB-BK-E/-F — do ręcznego rozstrzygnięcia). 422 sztuki z magazynu nie mają numeru w arkuszu (SKU dostaną z
-Testów/Trade-in albo wcale). Zapis do `serial_skus` tylko Admin (RLS) albo SQL Editor.
+Testów/Trade-in albo wcale). **Drugi import uzupełniający (03.10.2026, plik `imeisku.numbers`, ~22 tys. wierszy IMEI;SKU):** dla sztuk, które nadal nie miały żadnego SKU (421 w chwili importu).
+Numer może powtarzać się w pliku — **wygrywa NAJNOWSZY zapis, czyli najwyższy wiersz** (wiersz 1 = najstarszy; dla 20 z 140 dopasowanych numerów SKU w historii się zmieniało).
+Dopasowano 140 numerów, 281 sztuk nadal bez SKU (ich numerów nie ma w pliku; lista w pliku CSV przekazanym właścicielowi). Wiersze z tego importu mają `source = 'import_imeisku'`,
+są dopisywane z `on conflict do nothing` (NIGDY nie nadpisują istniejącego przypisania) i **nie giną przy ponownym uruchomieniu importu głównego** (ten kasuje tylko
+`source = 'import'`). Przy okazji sprawdzone: wśród sztuk, które już miały SKU, 75 z 163 występujących w pliku ma w nim INNE SKU niż nasze (np. nasze `PS4-500-BK-C`, w pliku `PS4-500-BK-A`) —
+plik NIE nadpisuje naszych SKU, bo miał uzupełniać braki (rozstrzygnięcie, które SKU jest właściwe, zostaje po stronie właściciela).
+Zapis do `serial_skus` tylko Admin (RLS) albo SQL Editor.
 **"Kategoria z SKU"** (`sku_category` w widoku, 02.10.2026; kolumna w Raw data i wiersz w karcie produktu) = pierwszy człon
 SKU przed pierwszym myślnikiem (XSX-1TB-BK-A -> XSX, PS4S-1TB-BK-AB -> PS4S, NS-32-V1-D -> NS); SKU bez myślnika -> cała
 wartość; brak SKU -> puste. Wyliczana w widoku (`split_part`), nie przechowywana — zmiana SKU od razu zmienia kategorię;
