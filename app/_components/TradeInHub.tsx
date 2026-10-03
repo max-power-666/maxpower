@@ -7,6 +7,7 @@ import TradeInOrdersView from "./TradeInOrdersView";
 import InlineEditCell from "./InlineEditCell";
 import PadSerialsCell, { MAX_PADS } from "./PadSerialsCell";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
+import { computeTradeInCosts, TRADEIN_CATEGORY_LABELS, TRADEIN_COMMISSION_RATE } from "@/lib/buybackCosts";
 import { INTAKE_STATUSES, INTERVALS, fmtDuration, rangeStart, type Interval } from "@/lib/workLog";
 import { escapeLike } from "@/lib/search";
 import { buybackStatusLabel, buybackStatusStyle } from "@/lib/buybackOrders";
@@ -773,6 +774,17 @@ function OrderCardDrawer({
 
   const address = order?.return_address;
 
+  // Koszty dodatkowe Trade-in wg regulaminu Back Market (prowizja + logistyka) — liczone z ceny po kontrofercie, patrz lib/buybackCosts.ts.
+  const costs = order
+    ? computeTradeInCosts({
+        originalPrice: order.original_price,
+        counterOfferPrice: order.counter_offer_price,
+        currency: order.counter_offer_price_currency ?? order.original_price_currency,
+        title: order.product_title,
+        sku: order.sku,
+      })
+    : null;
+
   return (
     <div className="fixed inset-0 bg-black/30 flex justify-end z-50" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="w-full max-w-lg bg-paper h-full overflow-y-auto p-6 border-l border-line">
@@ -901,6 +913,26 @@ function OrderCardDrawer({
             <div className="border border-line bg-white mb-6">
               <Row label="Cena początkowa" value={fmtMoney(order.original_price, order.original_price_currency)} />
               <Row label="Kontroferta" value={fmtMoney(order.counter_offer_price, order.counter_offer_price_currency)} />
+              {costs && (
+                <>
+                  <Row label="Cena do wyliczeń (po kontrofercie)" value={fmtMoney(costs.base, order.counter_offer_price_currency ?? order.original_price_currency)} />
+                  <Row label={`Prowizja Back Market (${Math.round(TRADEIN_COMMISSION_RATE * 100)}%)`} value={fmtMoney(costs.commission, order.original_price_currency)} />
+                  <Row
+                    label={`Logistyka Trade-in${costs.category ? ` (${TRADEIN_CATEGORY_LABELS[costs.category]}, magazyn w Polsce)` : ""}`}
+                    value={costs.logistics === null ? "— (brak kategorii/waluty)" : fmtMoney(costs.logistics, "EUR")}
+                  />
+                  <Row label="Koszty dodatkowe razem" value={costs.extra === null ? "—" : fmtMoney(costs.extra, order.original_price_currency)} />
+                  <Row label="Koszt całkowity (cena + koszty dodatkowe)" value={costs.total === null ? "—" : fmtMoney(costs.total, order.original_price_currency)} />
+                  <div className="px-3 py-2 text-[11px] text-inksoft border-b border-line">
+                    {order.status === "CANCELED"
+                      ? "Zamówienie anulowane — koszty nie zostaną naliczone."
+                      : ["VALIDATED", "PAID", "MONEY_TRANSFERED"].includes(order.status)
+                        ? "Naliczone przez Back Market przy wypłacie dla klienta."
+                        : "Szacunek — Back Market nalicza je dopiero przy wypłacie dla klienta."}{" "}
+                    Wg Regulaminu BM (marzec 2026, art. 15.1), kwoty netto (bez VAT); to nie faktura.
+                  </div>
+                </>
+              )}
               <Row label="Numer przesyłki" value={order.tracking_number} mono />
               <Row label="Przewoźnik" value={order.shipper} />
               {order.transfer_certificate_link && (

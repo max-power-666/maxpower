@@ -336,6 +336,21 @@ dostaje `members` z `page.tsx` (do skróconych imion).
   ten sam co "Kontroferta" w naszym statusie obsługi — inny system, to samo pojęcie biznesowe) = COUNTER_PROPOSAL,
   rust = wstrzymane/anulowane (SUSPENDED/CANCELED), amber = reszta normalnego przebiegu (NEW/PENDING/TO_SEND/
   SENT/RECEIVED).
+- **Koszty dodatkowe zakupu Trade-in** (03.10.2026, na prośbę właściciela; karta zamówienia Trade-in, sekcja "Cena i przesyłka"; `lib/buybackCosts.ts`).
+  Wg Regulaminu Back Market "EU Sellers T&Cs" (marzec 2026), część IV, art. 15.1 "Trade-in": **(1) prowizja 10% (netto)** od całkowitej kwoty zapłaconej przez
+  Refurbishera (z podatkami i przesyłką) — u nas od ceny dla klienta, a gdy była kontroferta, **od ceny PO kontrofercie** (decyzja właściciela; bez kontroferty
+  od ceny początkowej: `counter_offer_price ?? original_price`); **(2) opłata logistyczna Trade-in** — stała, w EUR, zależna od KRAJU MAGAZYNU sprzedawcy i
+  kategorii: magazyn w Polsce = "inne kraje" → **smartfony i audio 12,90 €, MacBooki i konsole 15,90 €, tablety 13,90 €** (FR/ES/DE mają 11,90/14,90/13,90 —
+  `TRADEIN_LOGISTICS_REGION` przestawia region jedną stałą). **Koszt całkowity = cena + prowizja + logistyka**; karta pokazuje: cenę do wyliczeń, prowizję,
+  logistykę (z kategorią), koszty dodatkowe razem i koszt całkowity. **Kwoty netto — regulamin podaje je "excl. tax", VAT nie jest doliczany** (czy i jak BM
+  fakturuje VAT od tych opłat, to sprawa księgowości, nie kodu). Back Market pobiera opłaty przy WYPŁACIE dla klienta (po odebraniu i zwalidowaniu paczki, art. 16.2) i
+  wystawia fakturę zbiorczą raz w miesiącu, więc w karcie jest podpis: "naliczone" (VALIDATED/PAID/MONEY_TRANSFERED), "szacunek" (reszta) albo "anulowane — nie
+  zostaną naliczone" (CANCELED); **to szacunek z regulaminu, nie faktura**. Kategoria wg regulaminu z NAZWY produktu BM (`product_title`: PlayStation/Xbox/Nintendo/Steam Deck/ROG Ally/Onexplayer/
+  Anbernic/Meta Quest/MacBook -> konsole i MacBooki; iPad/Galaxy Tab -> tablety; iPhone/Galaxy S/Pixel/Oppo/AirPods/Bose/Marshall... -> smartfony i audio), a gdy
+  nazwa nic nie mówi — z prefiksu SKU (SKU bywa puste albo "None"); sprawdzone na 17 568 zamówieniach z bazy: 100% sklasyfikowane. **Założenie:** konsole przenośne i gogle VR
+  (Meta Quest) liczone jak konsole (regulamin ich nie wymienia; stawka "MacBooki i konsole" jest też stawką laptopów). Nieznana kategoria albo waluta inna niż EUR -> prowizja jest, a
+  logistyka/suma pokazują "—" (nie zgadujemy). **Poza zakresem:** opłata 7,50 € za "Trade-in Chargeback" (tylko gdy płatność Refurbishera zostanie odrzucona) i stawki
+  prowizji od SPRZEDAŻY (11%/12% itd.) — to osobny temat. Regulamin może się zmienić z 1-miesięcznym wyprzedzeniem (art. 15.1) — przy zmianie zaktualizować stałe w pliku.
 - Numer zamówienia jest linkiem do **karty zamówienia** (panel boczny): dane z API + dane
   pracownika (numer seryjny, SKU, pady, uwagi — edytowalne) + numerowany log zmian.
   Na górze karty link "Otwórz w Back Market" → `https://www.backmarket.fr/bo-seller/buyback/orders/{numer}`
