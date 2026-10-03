@@ -217,6 +217,16 @@ max ~2 min; kursor to `last_attempt_at < run.started_at`. `in_progress_since` pi
 przywrócenia cen po ubitej funkcji. Historia cen tylko przy zmianie ceny. Stary program na
 Macu jest wyłączony; bidder działa na produkcji, włącznik: `buyback_settings.enabled`.
 
+**Log zmian ceny maksymalnej** (03.10.2026, na prośbę właściciela; karta SKU w Bidderze — `SkuDrawer` w `TradeInView.tsx`, sekcja "Log zmian
+ceny maksymalnej" nad historią cen): kto, kiedy i z jakiej na jaką cenę zmienił max (`€85 → €90`, "brak" = pusta cena). Wypełnia go **trigger
+w bazie** (`buyback_log_max_price_change` na `buyback_skus`, `tradein.sql`, tabela `buyback_max_price_log`) przy każdej realnej zmianie `max_price` —
+z UI, z SQL Editora i z serwera — więc nie da się go ominąć kodem aplikacji; nie loguje zapisów bez zmiany wartości ani zmian innych kolumn (np.
+`ignored`) i loguje też wyczyszczenie ceny oraz nowy SKU z już ustawioną ceną. Autor z JWT (`auth.jwt()->>'email'`, w razie braku z `members` po
+`auth.uid()`); zmiany spoza aplikacji (service_role, SQL Editor, import) nie mają autora i w UI widać "poza aplikacją". Tabela logu jest tylko do odczytu
+dla zalogowanych (zapisuje wyłącznie trigger jako security definer; brak polityk insert/update/delete). Log działa od momentu uruchomienia aktualizacji
+`tradein.sql` — wcześniejszych zmian nie odtworzy (np. dwie zmiany cen PS4P z 02.10.2026, zrobione bezpośrednio w bazie, w nim nie ma). `TradeInView`
+dostaje `members` z `page.tsx` (do skróconych imion).
+
 **Trade-in** (zakładka Trade-in, `TradeInHub.tsx`) — dwa podwidoki:
 - *Raw data* (`TradeInOrdersView.tsx`): podgląd zsynchronizowanych zamówień BuyBack (`buyback_orders`, sync co 15 min
   z `GET /ws/buyback/v1/orders`: pełny skan od 1 stycznia przez `creationDate` w porcjach z kursorem,

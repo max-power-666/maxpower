@@ -594,7 +594,7 @@ export default function Home() {
 
           {view === "tests" && <TestsView session={session} members={members} isAdmin={role === "Admin"} isAdminOrManager={role === "Admin" || role === "Manager"} />}
 
-          {view === "tradein" && <TradeInView session={session} />}
+          {view === "tradein" && <TradeInView session={session} members={members} />}
 
           {view === "shipping" && (
             <ShippingView session={session} isAdmin={role === "Admin"} members={members} prefill={shipPrefill} onPrefillUsed={() => setShipPrefill(null)} />

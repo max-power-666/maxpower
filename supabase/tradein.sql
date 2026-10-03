@@ -109,3 +109,46 @@ begin
   begin alter publication supabase_realtime add table buyback_runs; exception when duplicate_object then null; end;
   begin alter publication supabase_realtime add table buyback_settings; exception when duplicate_object then null; end;
 end $$;
+
+-- Log zmian ceny maksymalnej (03.10.2026, na prośbę właściciela): kto, kiedy i z jakiej na jaką cenę zmienił max dla SKU —
+-- widoczny w karcie SKU w Biddera. Wypełnia go TRIGGER na buyback_skus (każda zmiana max_price, niezależnie od tego, skąd
+-- przyszła: UI, SQL Editor, serwer), więc nie da się go ominąć ani zapomnieć o nim w kodzie. Autor z JWT (auth.jwt()->>'email'),
+-- a gdy go brak w tokenie — z members po auth.uid(); zmiany spoza aplikacji (service_role, SQL Editor) nie mają autora
+-- (changed_by_email = null, w UI "poza aplikacją"). Tabela bez polityk zapisu: zapisuje tylko trigger (security definer).
+create table if not exists buyback_max_price_log (
+  id bigint generated always as identity primary key,
+  sku text not null,
+  old_price numeric,                          -- null = wcześniej brak ceny max
+  new_price numeric,                          -- null = cenę max wyczyszczono
+  changed_by_user_id uuid references auth.users(id) on delete set null,
+  changed_by_email text,
+  changed_at timestamptz not null default now()
+);
+create index if not exists buyback_max_price_log_sku_idx on buyback_max_price_log (sku, changed_at desc);
+alter table buyback_max_price_log enable row level security;
+drop policy if exists "authenticated read buyback_max_price_log" on buyback_max_price_log;
+create policy "authenticated read buyback_max_price_log" on buyback_max_price_log
+  for select using (auth.role() = 'authenticated');
+
+create or replace function buyback_log_max_price_change() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if tg_op = 'INSERT' then
+    if new.max_price is null then return new; end if;
+  elsif new.max_price is not distinct from old.max_price then
+    return new;
+  end if;
+  insert into buyback_max_price_log (sku, old_price, new_price, changed_by_user_id, changed_by_email)
+  values (
+    new.sku,
+    case when tg_op = 'UPDATE' then old.max_price else null end,
+    new.max_price,
+    auth.uid(),
+    coalesce(auth.jwt() ->> 'email', (select m.email from members m where m.user_id = auth.uid()))
+  );
+  return new;
+end $$;
+
+drop trigger if exists buyback_skus_log_max_price on buyback_skus;
+create trigger buyback_skus_log_max_price after insert or update of max_price on buyback_skus
+  for each row execute function buyback_log_max_price_change();

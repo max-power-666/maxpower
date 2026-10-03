@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
+import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 
 // Zakładka Trade-in: panel biddera cen skupu Back Market (dawny program "Buyback Bidder").
 // Sam bidder działa na serwerze (lib/buyback.ts, cron Vercela) — tu tylko czytamy
@@ -57,7 +58,7 @@ const btnPrimary = "bg-ink text-paper px-4 py-2 rounded text-sm font-semibold di
 const pill = (active: boolean) =>
   `px-3 py-1.5 rounded-full text-sm font-semibold border ${active ? "bg-ink text-paper border-ink" : "bg-white border-line"}`;
 
-export default function TradeInView({ session }: { session: Session }) {
+export default function TradeInView({ session, members }: { session: Session; members: MemberLite[] }) {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [skus, setSkus] = useState<Sku[]>([]);
   const [runs, setRuns] = useState<Run[]>([]);
@@ -341,7 +342,7 @@ export default function TradeInView({ session }: { session: Session }) {
 
       {sub === "runs" && <RunsView runs={runs} />}
 
-      {openSku && <SkuDrawer sku={openSku} session={session} onClose={() => setOpenSku(null)} />}
+      {openSku && <SkuDrawer sku={openSku} session={session} members={members} onClose={() => setOpenSku(null)} />}
     </div>
   );
 }
@@ -438,6 +439,8 @@ function RunsView({ runs }: { runs: Run[] }) {
 
 /* ---------------- panel SKU: konkurencja + historia ---------------- */
 
+type MaxLogRow = { old_price: number | null; new_price: number | null; changed_by_email: string | null; changed_at: string };
+
 const RANGES = [
   { k: "1d", label: "24 h", ms: 86_400_000 },
   { k: "7d", label: "7 dni", ms: 7 * 86_400_000 },
@@ -445,13 +448,15 @@ const RANGES = [
   { k: "all", label: "Wszystko", ms: 0 },
 ];
 
-function SkuDrawer({ sku, session, onClose }: { sku: Sku; session: Session; onClose: () => void }) {
+function SkuDrawer({ sku, session, members, onClose }: { sku: Sku; session: Session; members: MemberLite[]; onClose: () => void }) {
   const [competitors, setCompetitors] = useState<Competitor[] | null>(null);
   const [compError, setCompError] = useState("");
   const [compLoading, setCompLoading] = useState(false);
   const [compAt, setCompAt] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryRow[]>([]);
   const [range, setRange] = useState("7d");
+  // Log zmian ceny maksymalnej (kto i kiedy) — wypełnia go trigger w bazie (tradein.sql), tu tylko odczyt.
+  const [maxLog, setMaxLog] = useState<MaxLogRow[] | null>(null);
 
   async function loadCompetitors() {
     setCompLoading(true);
@@ -480,6 +485,13 @@ function SkuDrawer({ sku, session, onClose }: { sku: Sku; session: Session; onCl
       .order("at")
       .limit(5000)
       .then(({ data }) => setHistory((data as HistoryRow[]) || []));
+    supabase
+      .from("buyback_max_price_log")
+      .select("old_price, new_price, changed_by_email, changed_at")
+      .eq("sku", sku.sku)
+      .order("changed_at", { ascending: false })
+      .limit(200)
+      .then(({ data, error }) => setMaxLog(error ? null : ((data as MaxLogRow[]) || []))); // brak tabeli (nie uruchomiono tradein.sql) — bez sekcji
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sku.sku]);
 
@@ -541,6 +553,37 @@ function SkuDrawer({ sku, session, onClose }: { sku: Sku; session: Session; onCl
         <p className="text-xs text-inksoft mb-6">
           Podgląd tylko czyta dane. „Cena do wygrania” liczy się względem naszej aktualnej oferty.
         </p>
+
+        {maxLog !== null && (
+          <div className="mb-6">
+            <h3 className="text-xs font-semibold text-inksoft mb-2">LOG ZMIAN CENY MAKSYMALNEJ</h3>
+            <div className="border border-line bg-white max-h-56 overflow-y-auto">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-white">
+                  <tr className="text-left text-xs text-inksoft border-b border-line">
+                    <th className="p-2 pl-3">Kiedy</th>
+                    <th className="p-2">Kto</th>
+                    <th className="p-2 pr-3 text-right">Cena max</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {maxLog.length === 0 && (
+                    <tr><td colSpan={3} className="p-4 text-center text-inksoft text-xs">Brak zarejestrowanych zmian (log działa od momentu uruchomienia aktualizacji bazy).</td></tr>
+                  )}
+                  {maxLog.map((l, i) => (
+                    <tr key={i} className="border-b border-line last:border-b-0">
+                      <td className="p-2 pl-3 text-xs text-inksoft whitespace-nowrap">{fmtDateTime(l.changed_at)}</td>
+                      <td className="p-2 text-xs">{l.changed_by_email ? displayNameForEmail(l.changed_by_email, members) : <span className="text-inksoft">poza aplikacją</span>}</td>
+                      <td className="p-2 pr-3 text-right font-mono whitespace-nowrap">
+                        <span className="text-inksoft">{l.old_price === null ? "brak" : fmtPrice(l.old_price)}</span> → <span className="font-semibold">{l.new_price === null ? "brak" : fmtPrice(l.new_price)}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-xs font-semibold text-inksoft">HISTORIA NASZYCH CEN</h3>
