@@ -103,10 +103,10 @@ export async function GET(request: Request) {
 
     // WSZYSTKIE produkty (także sprzedane) do fakturownia_purchases — historia cen zakupu do liczenia marży (zakładka Marża); cache wyżej
     // trzyma tylko sztuki ze stanem 1 i kasuje sprzedane, więc po sprzedaży cena zakupu inaczej by przepadła.
-    // Tylko produkty utworzone od 01.01.2025 (decyzja właściciela: starsze nie są potrzebne do marży). Sam skan Fakturowni dalej obejmuje cały katalog —
+    // Produkty utworzone od 01.01.2025 (decyzja właściciela: starsze sprzedane nie są potrzebne do marży) ORAZ wszystkie sztuki ze stanem 1 — filtr "Wszystkie" w Magazynie ma zawsze zawierać "Dostępne". Sam skan Fakturowni dalej obejmuje cały katalog —
     // cache magazynu (stan 1) musi widzieć też starsze sztuki, które wciąż leżą w magazynie.
     const purchases = products
-      .filter((p) => !p.created_at || String(p.created_at).slice(0, 10) >= PURCHASES_FROM)
+      .filter((p) => Number(p.stock_level) === 1 || !p.created_at || String(p.created_at).slice(0, 10) >= PURCHASES_FROM)
       .map((p) => ({
       id: p.id,
       name: p.name ?? null,

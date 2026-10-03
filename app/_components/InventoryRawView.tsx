@@ -21,6 +21,7 @@ type Row = {
   sku: string | null;
   sku_category: string | null;
   sku_class: string | null;
+  stock_level?: number | string | null;
 };
 
 const PAGE_SIZES = [25, 50, 100];
@@ -52,6 +53,11 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
   const [skuClass, setSkuClass] = useState("");
   // Podsumowanie CAŁEGO wyniku filtra (nie tylko bieżącej strony): liczba sztuk, suma i średnia cena zakupu.
   const [summary, setSummary] = useState<{ count: number; sum: number } | null>(null);
+  // Zakres listy: "Dostępne" (stan 1, fakturownia_stock_with_sku — jak dotąd) albo "Wszystkie" (też sprzedane, od 01.01.2025 + wszystkie dostępne,
+  // fakturownia_products_with_sku z margin.sql). allCount = null, gdy tego widoku nie ma (nie uruchomiono margin.sql) — wtedy bez przełącznika.
+  const [scope, setScope] = useState<"available" | "all">("available");
+  const [counts, setCounts] = useState<{ available: number | null; all: number | null }>({ available: null, all: null });
+  const VIEW = scope === "all" ? "fakturownia_products_with_sku" : "fakturownia_stock_with_sku";
   const [skuPairs, setSkuPairs] = useState<{ c: string | null; k: string | null }[]>([]);
   const [openSerial, setOpenSerial] = useState<string | null>(null);
 
@@ -73,6 +79,21 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
     };
   }, []);
 
+  // Liczniki na przyciskach zakresu (head count — bez pobierania wierszy).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [a, w] = await Promise.all([
+        supabase.from("fakturownia_stock_with_sku").select("id", { count: "exact", head: true }),
+        supabase.from("fakturownia_products_with_sku").select("id", { count: "exact", head: true }),
+      ]);
+      if (!cancelled) setCounts({ available: a.error ? null : a.count ?? 0, all: w.error ? null : w.count ?? 0 });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadTick, reloadKey]);
+
   // Pary (kategoria z SKU, klasa) wszystkich sztuk — do rozwijanych list z licznikami; odświeżane razem z listą.
   useEffect(() => {
     let cancelled = false;
@@ -81,7 +102,7 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
       const pairs: { c: string | null; k: string | null }[] = [];
       let from = 0;
       while (true) {
-        const { data, error: err } = await supabase.from("fakturownia_stock_with_sku").select("sku_category, sku_class").range(from, from + PAGE - 1);
+        const { data, error: err } = await supabase.from(VIEW).select("sku_category, sku_class").range(from, from + PAGE - 1);
         if (err) return; // brak widoku itp. — filtry po prostu bez opcji, lista działa dalej
         for (const r of (data as { sku_category: string | null; sku_class: string | null }[]) || []) pairs.push({ c: r.sku_category, k: r.sku_class });
         if (!data || data.length < PAGE) break;
@@ -92,7 +113,7 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
     return () => {
       cancelled = true;
     };
-  }, [reloadTick, reloadKey]);
+  }, [scope, reloadTick, reloadKey]);
 
   const matchesClass = (k: string | null) => (skuClass === "" ? true : skuClass === NO_CLASS ? k === null : k === skuClass);
   const matchesCategory = (c: string | null) => (skuCategory === "" ? true : skuCategory === NO_SKU ? c === null : c === skuCategory);
@@ -130,7 +151,7 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
       let count = 0;
       let sum = 0;
       for (let from = 0; ; from += PAGE) {
-        let q = supabase.from("fakturownia_stock_with_sku").select("purchase_price_gross");
+        let q = supabase.from(VIEW).select("purchase_price_gross");
         if (search) q = q.ilike("name", `%${escapeLike(search)}%`);
         if (skuCategory === NO_SKU) q = q.is("sku_category", null);
         else if (skuCategory) q = q.eq("sku_category", skuCategory);
@@ -152,7 +173,7 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
     return () => {
       cancelled = true;
     };
-  }, [search, skuCategory, skuClass, reloadTick, reloadKey]);
+  }, [scope, search, skuCategory, skuClass, reloadTick, reloadKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -161,8 +182,8 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
       setError("");
       const from = (page - 1) * pageSize;
       let q = supabase
-        .from("fakturownia_stock_with_sku")
-        .select("id, name, category_name, description, purchase_price_gross, product_created_at, vat, sku, sku_category, sku_class", { count: "exact" });
+        .from(VIEW)
+        .select(`id, name, category_name, description, purchase_price_gross, product_created_at, vat, sku, sku_category, sku_class${scope === "all" ? ", stock_level" : ""}`, { count: "exact" });
       if (search) q = q.ilike("name", `%${escapeLike(search)}%`);
       if (skuCategory === NO_SKU) q = q.is("sku_category", null);
       else if (skuCategory) q = q.eq("sku_category", skuCategory);
@@ -178,7 +199,7 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
         if (err.code === "PGRST103" && page > 1) setPage(1);
         else setError(`Nie udało się wczytać listy: ${err.message}`);
       } else {
-        setRows((data as Row[]) || []);
+        setRows((data as unknown as Row[]) || []);
         setTotal(count ?? 0);
       }
       setLoading(false);
@@ -186,7 +207,7 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
     return () => {
       cancelled = true;
     };
-  }, [page, pageSize, search, skuCategory, skuClass, reloadTick, reloadKey]);
+  }, [scope, page, pageSize, search, skuCategory, skuClass, reloadTick, reloadKey]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const needsBackfill = !search && rows.length > 0 && rows.every((r) => r.name === null);
@@ -194,7 +215,28 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          {counts.all !== null && (
+            <div className="flex items-center gap-2">
+              {([
+                ["available", "Dostępne", counts.available],
+                ["all", "Wszystkie", counts.all],
+              ] as const).map(([k, label, n]) => (
+                <button
+                  key={k}
+                  onClick={() => {
+                    setScope(k);
+                    setSkuCategory("");
+                    setSkuClass("");
+                    setPage(1);
+                  }}
+                  className={`px-3 py-1.5 rounded-full text-sm font-semibold border ${scope === k ? "bg-ink text-paper border-ink" : "bg-white border-line"}`}
+                >
+                  {label} {n !== null && <span className="font-mono opacity-70">{n.toLocaleString("pl-PL")}</span>}
+                </button>
+              ))}
+            </div>
+          )}
           <input
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
@@ -286,12 +328,13 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
               <th className="p-3 text-right">Cena zakupu</th>
               <th className="p-3">VAT</th>
               <th className="p-3">Dodano</th>
+              {scope === "all" && <th className="p-3">Stan</th>}
             </tr>
           </thead>
           <tbody>
             {!loading && rows.length === 0 && (
               <tr>
-                <td colSpan={9} className="p-6 text-center text-inksoft text-sm">
+                <td colSpan={scope === "all" ? 10 : 9} className="p-6 text-center text-inksoft text-sm">
                   {search || skuCategory || skuClass ? "Nic nie znaleziono dla tych kryteriów." : "Brak produktów — kliknij „Odśwież”, żeby pobrać dane z Fakturowni."}
                 </td>
               </tr>
@@ -313,6 +356,15 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
                 <td className="p-3 text-right font-mono">{fmtPLN(r.purchase_price_gross)}</td>
                 <td className="p-3 text-xs">{r.vat || "—"}</td>
                 <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDate(r.product_created_at)}</td>
+                {scope === "all" && (
+                  <td className="p-3 text-xs">
+                    {Number(r.stock_level) === 1 ? (
+                      <span className="font-semibold px-2 py-1 rounded-full bg-tealsoft text-teal">dostępne</span>
+                    ) : (
+                      <span className="font-semibold px-2 py-1 rounded-full bg-paper text-inksoft border border-line">niedostępne</span>
+                    )}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>

@@ -216,6 +216,12 @@ każe łączyć sprzedaż z magazynem po `sku_base`, nie po surowym SKU.
 myślniku, ale tylko gdy składa się wyłącznie z liter (NS-32-V1-D -> D, NS-32-V2-BC -> BC, NS-32-V1-C -> C, NS-32-V2-B -> B, APM-A -> A);
 inaczej puste — SKU bez myślnika albo ze starego schematu, gdzie ostatni człon to liczba pad-ów ("PS4-500-B-2M"; "2M" nie jest klasą), nie
 dostają fałszywej klasy. Wyliczana w widoku jak kategoria z SKU, widoczna też w `ai.stock` dla asystenta AI.
+**Przełącznik zakresu "Dostępne" / "Wszystkie"** (03.10.2026, dwa przyciski z licznikami nad listą Raw data): "Dostępne" (domyślnie) to dotychczasowa lista sztuk ze stanem 1
+(`fakturownia_stock_with_sku`), "Wszystkie" to także produkty niedostępne/sprzedane — widok `fakturownia_products_with_sku` (`margin.sql`) nad historią zakupów (`fakturownia_purchases`: produkty utworzone
+od 01.01.2025 PLUS wszystkie sztuki ze stanem 1, więc "Wszystkie" zawsze zawiera "Dostępne"). Widok liczy SKU/kategorię z SKU/klasę tak samo jak widok "Dostępne" (test porównuje oba) i dodaje `stock_level`/`available`;
+w trybie "Wszystkie" jest kolumna **"Stan"** (dostępne/niedostępne). Zmiana zakresu czyści filtry kategorii i klasy, a wyszukiwanie, filtry i pasek podsumowania liczą się na wybranym zakresie. VAT tylko dla sztuk w cache (dla sprzedanych puste).
+Podsumowanie magazynu (kafelki, wykres, koszty) dalej dotyczy WYŁĄCZNIE dostępnych. Przełącznik pojawia się dopiero po `margin.sql` (bez widoku zostaje samo "Dostępne"), a "Wszystkie" jest puste do pierwszej pełnej synchronizacji z Fakturownią.
+`fakturownia_purchases` jest czytelna dla każdego zalogowanego (te same dane są już widoczne w cache), zapis tylko serwer.
 **Filtry "Kategoria z SKU" i "Klasa"** (03.10.2026, dwie listy rozwijane nad Raw data, obok wyszukiwarki po numerze seryjnym; **działają JEDNOCZEŚNIE**, razem z
 wyszukiwaniem — AND): opcje "Wszystkie" / "Bez SKU" (kategoria) albo "Bez klasy" / każda wartość z licznikiem (np. "NS (249)", "B (310)"). **Liczniki są
 wzajemnie zależne:** po wybraniu kategorii lista klas pokazuje tylko klasy sztuk z tej kategorii (i odwrotnie), a wybrana wartość zostaje na liście nawet przy

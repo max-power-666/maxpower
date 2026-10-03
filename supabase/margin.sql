@@ -1,6 +1,6 @@
 -- Magazyn ERP — zakładka Marża (03.10.2026): dane do liczenia marży na sprzedanych sztukach z numerem seryjnym.
 -- Uruchom w Supabase: Dashboard -> SQL Editor -> New query -> wklej CAŁY plik -> Run. Idempotentny.
--- Wymaga wcześniej: schema.sql, sales-orders.sql, shipping.sql, buyback-orders.sql, nbp.sql (+ is_admin_or_manager() z shipping.sql).
+-- Wymaga wcześniej: schema.sql, sales-orders.sql, shipping.sql, buyback-orders.sql, nbp.sql, tests.sql, inventory.sql (+ is_admin_or_manager() z shipping.sql).
 --
 -- 1) fakturownia_purchases — WSZYSTKIE produkty z Fakturowni (także sprzedane, stan 0), bo fakturownia_stock_cache trzyma tylko sztuki ze
 --    stanem 1 i kasuje sprzedane, a do marży potrzebna jest cena zakupu sprzedanej sztuki. Wypełnia ją synchronizacja
@@ -22,8 +22,11 @@ create table if not exists fakturownia_purchases (
 );
 create index if not exists fakturownia_purchases_name_idx on fakturownia_purchases (lower(btrim(name)));
 alter table fakturownia_purchases enable row level security;
+-- Odczyt dla każdego zalogowanego — te same dane (numer seryjny, cena zakupu) są już czytelne dla wszystkich w fakturownia_stock_cache;
+-- potrzebne też do widoku "Wszystkie" w Magazynie -> Raw data (rola Magazyn).
 drop policy if exists "admin manager read fakturownia_purchases" on fakturownia_purchases;
-create policy "admin manager read fakturownia_purchases" on fakturownia_purchases for select using (is_admin_or_manager());
+drop policy if exists "authenticated read fakturownia_purchases" on fakturownia_purchases;
+create policy "authenticated read fakturownia_purchases" on fakturownia_purchases for select using (auth.role() = 'authenticated');
 
 -- Jednorazowy pełny skan, gdy tabela jest jeszcze pusta (ten sam wzorzec co przy nowych kolumnach cache w schema.sql).
 insert into fakturownia_sync_meta (id) values (1) on conflict (id) do nothing;
@@ -134,3 +137,42 @@ where nullif(btrim(it.serial_number), '') is not null;
 
 revoke all on margin_items from public, anon, authenticated;
 grant select on margin_items to service_role;
+
+-- 4) fakturownia_products_with_sku — WSZYSTKIE produkty z Fakturowni (filtr "Wszystkie" w Magazynie -> Raw data; "Dostępne" to nadal
+--    fakturownia_stock_with_sku). Te same kolumny co tamten widok (SKU z Testów/Trade-in/importu, kategoria z SKU, klasa — to samo wyliczenie,
+--    test w repo porównuje oba widoki dla sztuk w magazynie) + stock_level i available. VAT tylko z cache (dla sprzedanych puste).
+create or replace view fakturownia_products_with_sku as
+select v.*,
+       nullif(btrim(split_part(v.sku, '-', 1)), '') as sku_category,
+       case when v.sku ~ '-[A-Za-z]+$' then substring(v.sku from '[A-Za-z]+$') end as sku_class
+from (
+  select
+    p.id,
+    p.category_name,
+    p.purchase_price_gross,
+    p.name,
+    p.description,
+    p.product_created_at,
+    c.vat,
+    p.stock_level,
+    (p.stock_level = 1) as available,
+    coalesce((
+      select x.sku
+      from (
+        select btrim(t.sku) as sku, t.started_at as at
+          from test_log t
+          where lower(btrim(t.serial_number)) = lower(btrim(p.name)) and btrim(coalesce(t.sku, '')) <> ''
+        union all
+        select btrim(i.sku) as sku, i.entered_at as at
+          from buyback_order_intake i
+          where lower(btrim(i.serial_number)) = lower(btrim(p.name)) and btrim(coalesce(i.sku, '')) <> ''
+      ) x
+      order by x.at asc
+      limit 1
+    ), (
+      select b.sku from serial_skus b where lower(btrim(b.serial_number)) = lower(btrim(p.name)) limit 1
+    )) as sku
+  from fakturownia_purchases p
+  left join fakturownia_stock_cache c on c.id = p.id
+) v;
+grant select on fakturownia_products_with_sku to authenticated;
