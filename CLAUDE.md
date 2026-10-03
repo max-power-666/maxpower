@@ -25,19 +25,19 @@ numerach seryjnych, wielokanałowa synchronizacja stanów, naprawy, auto-wycena)
 - `app/page.tsx` — jeden duży client component: logowanie, nawigacja, role, zakładki
   Przegląd / Magazyn / Zespół. Większe moduły są osobno w `app/_components/`:
   `ServiceView.tsx` (Serwis), `TestsView.tsx` (Testy), `ProductCardDrawer.tsx` (karta produktu), `TradeInHub.tsx` + `TradeInOrdersView.tsx` (Trade-in),
-  `TradeInView.tsx` (Bidder), `SalesOrdersHub.tsx` (Zamówienia, karta zamówienia w `SalesOrderCard.tsx`), `ErliParcelPanel.tsx` (nadawanie Paczkomatów InPost 24/7 przez Erli, osadzony na karcie zamówienia Erli), `ShippingView.tsx` (Wysyłka DHL), `InvoicesView.tsx` (Faktury), `NbpView.tsx` (kursy NBP), `OverviewSalesDashboard.tsx` (dashboard sprzedaży na Przeglądzie).
+  `TradeInView.tsx` (Bidder), `SalesOrdersHub.tsx` (Zamówienia, karta zamówienia w `SalesOrderCard.tsx`), `ErliParcelPanel.tsx` (nadawanie Paczkomatów InPost 24/7 przez Erli, osadzony na karcie zamówienia Erli), `ShippingView.tsx` (Wysyłka DHL), `InvoicesView.tsx` (Faktury), `NbpView.tsx` (kursy NBP), `OverviewSalesDashboard.tsx` (dashboard sprzedaży na Przeglądzie), `AiView.tsx` + `Markdown.tsx` (zakładka AI), `CategoryBreakdown.tsx` (wykresy kategorii w Magazynie).
 - `app/api/*/route.ts` — endpointy serwerowe (sekrety tylko tu, nigdy w przeglądarce):
-  `fakturownia/sync`, `tradein/bidder`, `tradein/competitors`, `tradein/orders-sync`, `tradein/validate`, `orders/bm-sync`, `orders/refurbed-sync`, `orders/erli-sync`, `orders/allegro-sync`, `orders/allegro-auth`, `orders/allegro-callback`, `orders/octopia-sync`, `orders/amazon-sync`, `orders/validate`, `orders/bm-refresh`, `orders/erli-refresh`, `shipping/dhl-express/{check,create}`, `shipping/dhl-parcel/{check,create,label,cancel}`, `shipping/erli/{create,label,cancel}`, `shipping/sync-marketplace`, `shipping/render-zpl`, `shipping/fetch-remote-pdf`, `shipping/qz-sign`, `invoices/{create,prefill}`, `nbp/sync`, `overview/sales-stats`.
+  `fakturownia/sync`, `tradein/bidder`, `tradein/competitors`, `tradein/orders-sync`, `tradein/validate`, `orders/bm-sync`, `orders/refurbed-sync`, `orders/erli-sync`, `orders/allegro-sync`, `orders/allegro-auth`, `orders/allegro-callback`, `orders/octopia-sync`, `orders/amazon-sync`, `orders/validate`, `orders/bm-refresh`, `orders/erli-refresh`, `shipping/dhl-express/{check,create}`, `shipping/dhl-parcel/{check,create,label,cancel}`, `shipping/erli/{create,label,cancel}`, `shipping/sync-marketplace`, `shipping/render-zpl`, `shipping/fetch-remote-pdf`, `shipping/qz-sign`, `invoices/{create,prefill}`, `nbp/sync`, `overview/sales-stats`, `ai/ask`.
 - `lib/` — `supabaseClient.ts`, `buyback.ts` (logika biddera + `isAuthorized`),
   `displayName.ts` (skrócone imię: "Maksymilian J."), `workLog.ts` (interwały Dziś/7/30 dni,
   liczenie czasu i **etykiety typów czynności/statusów** — jedno źródło dla list i karty produktu),
   `search.ts` (`escapeLike` do wyszukiwania po numerze seryjnym), `scanOrders.ts` (stronicowany skan
   zamówień Back Market z budżetem czasu i kursorem), `invoices.ts` (wystawianie faktur w Fakturowni, stawka VAT, prefill nabywcy),
-  `nbp.ts` (kursy NBP: pobieranie, kurs z dnia poprzedniego, przeliczanie na PLN), `overview.ts` (bucketing dzienny/kanałowy na Przeglądzie).
+  `nbp.ts` (kursy NBP: pobieranie, kurs z dnia poprzedniego, przeliczanie na PLN), `overview.ts` (bucketing dzienny/kanałowy na Przeglądzie), `aiAgent.ts` (pętla agenta Claude z narzędziem run_sql), `aiSchema.ts` (prompt systemowy = słownik danych asystenta AI).
 - `supabase/*.sql` — schemat, każdy plik idempotentny: `schema.sql` (units, members,
   cache Fakturowni), `tradein.sql` (bidder), `buyback-orders.sql` (zamówienia + obsługa
   paczek), `backlog.sql` (zakładka Backlog), `shipping.sql` (Wysyłka: nadawca, szablony, przesyłki), `sales-orders.sql` (zamówienia sprzedaży Back Market, refurbed, Erli, Allegro, Octopia i Amazon, plus archiwum Apilo; tokeny OAuth), `service.sql` (rejestr napraw), `tests.sql` (rejestr testów), `invoices.sql` (zakładka Faktury: tabela faktur + widok `invoices_ready_orders`),
-  `overview.sql` (widok `sales_order_values` dla dashboardu Przeglądu), `nbp.sql` (zakładka NBP: kursy walut), `inventory.sql` (widok `fakturownia_stock_with_sku` dla Magazynu -> Raw data; po schema/buyback-orders/tests).
+  `overview.sql` (widok `sales_order_values` dla dashboardu Przeglądu), `nbp.sql` (zakładka NBP: kursy walut), `inventory.sql` (widok `fakturownia_stock_with_sku` dla Magazynu -> Raw data; po schema/buyback-orders/tests), `ai.sql` (zakładka AI: widoki `ai.*`, rola `ai_reader`, funkcja `ai_query`, dziennik `ai_log`; po wszystkich powyższych).
 - `scripts/import-buyback.mjs` — jednorazowy import ze starego programu Buyback Bidder.
 
 ## Zakładki i role
@@ -63,6 +63,7 @@ Rola jest zwykłym tekstem w `members.role` — dodanie roli nie wymaga SQL.
 | Wysyłka | `shipping` | Admin, Manager, Zamówienia |
 | Faktury | `invoices` | Admin, Manager, Zamówienia |
 | NBP | `nbp` | Admin, Manager |
+| AI | `ai` | tylko Admin (03.10.2026; serwer też wpuszcza tylko Admina) |
 | RCP | `rcp` | wszyscy (każda rola) |
 | Zwroty | `returns` | wszyscy (każda rola) |
 | Zespół | `team` | Admin (edycja), Manager (tylko odczyt) |
@@ -935,6 +936,34 @@ brutto / Status dokumentu) — na wyraźną prośbę właściciela.
   pierwszej wersji tego modułu — właściciel powinien przetestować pierwsze kilka faktur na produkcji ostrożnie, najlepiej
   na mało istotnym zamówieniu, i porównać wynik w panelu Fakturowni z oczekiwaniem).
 
+**AI — asystent do pytań o dane** (zakładka `ai`, `AiView.tsx`, `lib/aiAgent.ts`, `lib/aiSchema.ts`, `ai.sql`, `app/api/ai/ask`; 03.10.2026,
+na prośbę właściciela). Okno, w którym wpisuje się polecenie po polsku (np. "wygeneruj raport sprzedaży za poprzedni miesiąc"), a model
+Claude sam układa zapytania SQL do bazy i pisze odpowiedź (markdown: podsumowanie, tabele, "Uwagi i założenia"). **Dostęp: tylko Admin**
+(decyzja właściciela "na tym etapie") — wymusza to serwer (`requireRole(["Admin"])`), nie tylko ukrycie zakładki (Admin może jej nie
+nadać nikomu innemu; nadanie zakładki innej osobie w Zespole NIE da jej dostępu do API). **Zakres pierwszej wersji: sprzedaż, zamówienia, magazyn.**
+**Wybrane podejście: dowolne zapytania SQL tylko do odczytu** (świadomie zamiast gotowych narzędzi per raport) — dlatego bezpieczeństwo
+siedzi w bazie, nie w prompcie (`supabase/ai.sql`, cztery warstwy): (1) model widzi WYŁĄCZNIE widoki schematu `ai` — `ai.orders`,
+`ai.order_items`, `ai.stock`, `ai.nbp_rates` — bez danych osobowych (adresy, nazwiska, e-maile, surowe odpowiedzi API, faktury z nabywcami,
+tokeny, członkowie zespołu, historia zmian z e-mailami); (2) zapytanie wykonuje `ai_query(q)` jako rola `ai_reader` (nologin, tylko SELECT na
+tych widokach) — funkcja jest zwykłym `security invoker` i przełącza rolę lokalnie (`SET ROLE` jest zabroniony w `security definer`; sprawdzone
+testem); (3) transakcja READ ONLY, 15 s, 500 wierszy, tylko `SELECT`/`WITH`, jedna instrukcja (bez średników w środku); (4) `ai_query`
+wolno wołać tylko `service_role`. Aliasy w opakowaniu to `__q`/`__t` — zwykłe `t`/`q` kolidowały z kolumnami zapytania i `jsonb_agg(t)`
+zwracało kolumnę zamiast wiersza (znalezione testem). **Reguły liczenia siedzą w widokach, nie w prompcie**, żeby liczby zgadzały się z
+Przeglądem: `is_counted` i `stage` to SQL-owe LUSTRO `isCountedOrder`/`statusBucket` z `lib/salesOrders.ts` (zmiana list statusów w TS wymaga
+zmiany w `ai.sql` — test w repo porównuje oba po wszystkich statusach), `value_pln`/`price_pln` przeliczone kursem NBP z dnia poprzedniego (data
+zamówienia w UTC jak w `overview/sales-stats`), `order_day_pl` = dzień wg Europe/Warsaw do grupowania. Prompt (`aiSchema.ts`) zawiera słownik
+widoków, dzisiejszą datę wg Warszawy, zasady okresów ("ostatnie 30 dni" = 30 pełnych dni przed dzisiaj) i styl odpowiedzi; każda liczba ma
+pochodzić z wyniku zapytania, a zamówienia bez ceny/kursu mają być policzone osobno i wymienione. **Przebieg:** `ai/ask` (maxDuration 300) woła
+Anthropic Messages API zwykłym `fetch` (bez SDK; `ANTHROPIC_API_KEY`, model `AI_MODEL` albo `claude-sonnet-5-5`; prompt z `cache_control`),
+pętla narzędzia `run_sql` do 12 kroków, błędy SQL wracają do modelu, który zwykle poprawia zapytanie. Cała rozmowa idzie w body (serwer nie
+trzyma stanu; odświeżenie strony czyści rozmowę, a model przy pytaniach uzupełniających odpytuje bazę od nowa). Pod każdą odpowiedzią
+"Użyte zapytania do bazy (n)" do weryfikacji liczb oraz zużycie tokenów. **Każde pytanie ląduje w `ai_log`** (kto, pytanie, odpowiedź,
+zapytania, model, tokeny, błąd) — audyt i kontrola kosztów; odczyt tylko Admin, zapis tylko serwer. **Świadomie NIE zrobione:** zapisywanie
+raportów/eksport do pliku (jest "Kopiuj"), streaming odpowiedzi, trwała historia rozmów, dostęp dla innych ról, zakres Zespół/Faktury/Wysyłki
+(wymaga dodania kolejnych widoków `ai.*` BEZ danych osobowych), wykresy w odpowiedziach. Brak marży per zamówienie — nie mamy kosztów zakupu per
+zamówienie ani prowizji marketplace'ów, prompt każe tego nie wymyślać. Nie testowane na żywym API Anthropic (brak klucza w środowisku
+asystenta) — pętla zweryfikowana na atrapie `fetch`, warstwa SQL w PGlite (odmowa dostępu do `members`/tabel/zapisu/średników).
+
 **RCP** (`RcpView.tsx`) — rejestracja czasu pracy; **na razie tylko pusta zakładka-szkielet**, widoczna dla wszystkich ról. Docelowo z niej ma wyjść ewidencja godzin
 potrzebna do wydajności (punkty na godzinę) i premii z regulaminu (plan rozwoju, punkt 8).
 
@@ -1207,7 +1236,7 @@ skrzynka firmowa...). Bez tego magic linki będą się od czasu do czasu blokowa
 
 `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`,
 `CRON_SECRET`, `FAKTUROWNIA_DOMAIN` (sama subdomena, np. `recoo`), `FAKTUROWNIA_API_TOKEN`,
-`BACKMARKET_AUTH`, `BACKMARKET_LANG`, `BACKMARKET_UA`, `BACKMARKET_BASE_URL`, `REFURBED_API_TOKEN` (z supplier.refurbed.com; bez niego sync refurbed jest pomijany; nieużywany wygasa po 2 miesiącach), `REFURBED_UA`, `ERLI_API_KEY` (panel Erli: Metoda integracji > Własna integracja po API; bez niego sync Erli jest pomijany), `ERLI_UA`, `ALLEGRO_CLIENT_ID`, `ALLEGRO_CLIENT_SECRET` (aplikacja z apps.developer.allegro.pl), `ALLEGRO_REDIRECT_URI` (opcjonalny, sztywny adres przekierowania), `DHL_PARCEL_USERNAME` (klucz APIv2 z panelu DHL24), `DHL_PARCEL_PASSWORD`, `DHL_PARCEL_SAP` (numer klienta SAP, 7 cyfr; tylko w env), `DHL_EXPRESS_API_KEY`, `DHL_EXPRESS_API_SECRET`, `DHL_EXPRESS_ACCOUNT` (numer konta nadawcy DHL Express — tylko w env, nie w repo), `DHL_EXPRESS_ENV` (`test` domyślnie / `production`), `DHL_EXPRESS_LABEL_TEMPLATE` (opcjonalnie, domyślnie `ECOM26_64_001`), `ALLEGRO_UA` (**wymagany**, bez wartości domyślnej: User-Agent z generatora w panelu aplikacji — Allegro blokuje klucz przy nieprawidłowym; bez niego sync Allegro jest pomijany)`, `OCTOPIA_CLIENT_ID`, `OCTOPIA_CLIENT_SECRET`, `OCTOPIA_SELLER_ID` (marketplace'y typu Cdiscount; bez nich sync Octopia jest pomijany), `AMAZON_CLIENT_ID`, `AMAZON_CLIENT_SECRET`, `AMAZON_REFRESH_TOKEN` (bezpośrednia integracja SP-API, patrz niżej), `AMAZON_MARKETPLACE_IDS` (opcjonalnie), `AMAZON_ENDPOINT`/`AMAZON_USER_AGENT` (opcjonalnie), `QZ_TRAY_PRIVATE_KEY`
+`BACKMARKET_AUTH`, `BACKMARKET_LANG`, `BACKMARKET_UA`, `BACKMARKET_BASE_URL`, `REFURBED_API_TOKEN` (z supplier.refurbed.com; bez niego sync refurbed jest pomijany; nieużywany wygasa po 2 miesiącach), `REFURBED_UA`, `ERLI_API_KEY` (panel Erli: Metoda integracji > Własna integracja po API; bez niego sync Erli jest pomijany), `ERLI_UA`, `ALLEGRO_CLIENT_ID`, `ALLEGRO_CLIENT_SECRET` (aplikacja z apps.developer.allegro.pl), `ALLEGRO_REDIRECT_URI` (opcjonalny, sztywny adres przekierowania), `DHL_PARCEL_USERNAME` (klucz APIv2 z panelu DHL24), `DHL_PARCEL_PASSWORD`, `DHL_PARCEL_SAP` (numer klienta SAP, 7 cyfr; tylko w env), `DHL_EXPRESS_API_KEY`, `DHL_EXPRESS_API_SECRET`, `DHL_EXPRESS_ACCOUNT` (numer konta nadawcy DHL Express — tylko w env, nie w repo), `DHL_EXPRESS_ENV` (`test` domyślnie / `production`), `DHL_EXPRESS_LABEL_TEMPLATE` (opcjonalnie, domyślnie `ECOM26_64_001`), `ALLEGRO_UA` (**wymagany**, bez wartości domyślnej: User-Agent z generatora w panelu aplikacji — Allegro blokuje klucz przy nieprawidłowym; bez niego sync Allegro jest pomijany)`, `OCTOPIA_CLIENT_ID`, `OCTOPIA_CLIENT_SECRET`, `OCTOPIA_SELLER_ID` (marketplace'y typu Cdiscount; bez nich sync Octopia jest pomijany), `AMAZON_CLIENT_ID`, `AMAZON_CLIENT_SECRET`, `AMAZON_REFRESH_TOKEN` (bezpośrednia integracja SP-API, patrz niżej), `AMAZON_MARKETPLACE_IDS` (opcjonalnie), `AMAZON_ENDPOINT`/`AMAZON_USER_AGENT` (opcjonalnie), `ANTHROPIC_API_KEY` (asystent AI, zakładka AI — bez niego route `ai/ask` zwraca czytelny błąd; klucz z console.anthropic.com), `AI_MODEL` (opcjonalnie, domyślnie `claude-sonnet-5-5`), `QZ_TRAY_PRIVATE_KEY`
 (klucz prywatny PEM do podpisywania żądań drukowania bezpośredniego — patrz sekcja Wysyłka; wklej wielolinijkowo,
 kod sam usuwa literalne `\n`, gdyby jakiś krok po drodze spłaszczył PEM do jednej linii).
 Zmiana zmiennej na Vercelu wymaga nowego deployu. W Supabase (Authentication → URL
@@ -1263,3 +1292,4 @@ Configuration) musi być aktualny adres produkcyjny, inaczej magic link nie zadz
     per kraj nabywcy (dziś jedna stała stawka)
 13. ✅ Przegląd: dashboard sprzedaży (kafelki Dziś/30 dni, wykres dzienny, udział kanałów) + NBP: kursy walut do
     przeliczania na PLN (01.10.2026)
+14. 🟡 AI: asystent do pytań o dane (Admin, sprzedaż/zamówienia/magazyn) zrobiony · ⬜ pozostałe role, zakresy Zespół/Faktury/Wysyłki, zapis raportów, streaming

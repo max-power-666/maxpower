@@ -9,6 +9,7 @@ import SalesOrdersHub from "./_components/SalesOrdersHub";
 import BacklogView from "./_components/BacklogView";
 import ShippingView from "./_components/ShippingView";
 import InvoicesView from "./_components/InvoicesView";
+import AiView from "./_components/AiView";
 import NbpView from "./_components/NbpView";
 import CategoryBreakdown, { FAKTUROWNIA_PALETTE } from "./_components/CategoryBreakdown";
 import OverviewSalesDashboard from "./_components/OverviewSalesDashboard";
@@ -26,7 +27,7 @@ import { displayNameForEmail } from "@/lib/displayName";
 const ROLES = ["Admin", "Manager", "Magazyn", "Zamówienia", "Serwis", "Testy", "Bidder", "Trade-in", "Sklep"];
 
 type ViewKey =
-  | "overview" | "inventory" | "sales" | "team" | "service" | "tests" | "tradein" | "orders" | "backlog" | "shipping" | "invoices" | "nbp" | "rcp" | "returns"
+  | "overview" | "inventory" | "sales" | "team" | "service" | "tests" | "tradein" | "orders" | "backlog" | "shipping" | "invoices" | "nbp" | "ai" | "rcp" | "returns"
   // Recoo Sklep (backoffice sklepu, przełącznik w pasku bocznym):
   | "shop_products" | "shop_stock";
 
@@ -49,6 +50,7 @@ const TABS: { key: ViewKey; label: string; space?: Space }[] = [
   { key: "shipping", label: "Wysyłka" },
   { key: "invoices", label: "Faktury" },
   { key: "nbp", label: "NBP" },
+  { key: "ai", label: "AI" },
   { key: "rcp", label: "RCP" },
   { key: "returns", label: "Zwroty" },
   { key: "shop_products", label: "Produkty", space: "shop" },
@@ -72,7 +74,8 @@ const TABS: { key: ViewKey; label: string; space?: Space }[] = [
 // Admin wciąż może przywrócić komuś dostęp do Przeglądu ręcznie, w Zespole (view_access) — to nie jest
 // twardo zablokowane, tylko inny domyślny zestaw wg roli, jak każda inna zakładka.
 const ROLE_ACCESS: Record<string, ViewKey[]> = {
-  Admin: ["overview", "inventory", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "nbp", "rcp", "returns", "shop_products", "shop_stock"],
+  // "ai" (asystent AI, 03.10.2026) — na tym etapie TYLKO Admin (także serwer: app/api/ai/ask); Manager go nie ma.
+  Admin: ["overview", "inventory", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "nbp", "ai", "rcp", "returns", "shop_products", "shop_stock"],
   Manager: ["overview", "inventory", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "nbp", "rcp", "returns", "shop_products", "shop_stock"], // wszystko; Zespół tylko do odczytu, usuwa tylko Admin
   Magazyn: ["inventory", "backlog", "rcp", "returns"],
   Zamówienia: ["sales", "shipping", "invoices", "backlog", "rcp", "returns"],
@@ -600,6 +603,8 @@ export default function Home() {
           {view === "invoices" && <InvoicesView session={session} members={members} />}
 
           {view === "nbp" && <NbpView session={session} />}
+
+          {view === "ai" && <AiView session={session} />}
 
           {view === "rcp" && <RcpView />}
 
