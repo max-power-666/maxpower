@@ -50,7 +50,7 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
   // Filtr "Klasa" (lista rozwijana), łączny z kategorią: oba działają jednocześnie (AND), a liczniki w każdej liście
   // uwzględniają wybór w drugiej (np. po wybraniu kategorii NS lista klas pokazuje tylko klasy sztuk z NS).
   const [skuClass, setSkuClass] = useState("");
-  // Podsumowanie CAŁEGO wyniku filtra (nie tylko bieżącej strony): liczba sztuk, suma i średnia cena zakupu brutto.
+  // Podsumowanie CAŁEGO wyniku filtra (nie tylko bieżącej strony): liczba sztuk, suma i średnia cena zakupu.
   const [summary, setSummary] = useState<{ count: number; sum: number } | null>(null);
   const [skuPairs, setSkuPairs] = useState<{ c: string | null; k: string | null }[]>([]);
   const [openSerial, setOpenSerial] = useState<string | null>(null);
@@ -283,7 +283,7 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
               <th className="p-3">Klasa</th>
               <th className="p-3">Kategoria</th>
               <th className="p-3">Zamówienie</th>
-              <th className="p-3 text-right">Cena zakupu brutto</th>
+              <th className="p-3 text-right">Cena zakupu</th>
               <th className="p-3">VAT</th>
               <th className="p-3">Dodano</th>
             </tr>
@@ -325,7 +325,7 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
           <span>Sztuk: <span className="font-mono font-semibold">{summary.count.toLocaleString("pl-PL")}</span></span>
           <span>Suma cen zakupu: <span className="font-mono font-semibold">{fmtPLN(summary.sum)}</span></span>
           <span>
-            Średnia cena zakupu brutto:{" "}
+            Średnia cena zakupu:{" "}
             <span className="font-mono font-semibold">{summary.count > 0 ? fmtPLN(summary.sum / summary.count) : "—"}</span>
           </span>
         </div>

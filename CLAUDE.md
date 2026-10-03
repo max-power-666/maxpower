@@ -153,7 +153,7 @@ Manager (zakładka techniczna/konfiguracyjna, nie codzienna operacyjna — inacz
   wrażliwe), zapis WYŁĄCZNIE przez serwer (service_role, zero polityk insert/update — jak `oauth_tokens`).
 
 **Magazyn.** Zakładka ma dwa podwidoki: *Podsumowanie* (liczba sztuk ze `stock_level = 1`, wartość
-wg **ceny zakupu brutto** — `price_gross` jest w Fakturowni puste dla prawie wszystkich sztuk —
+wg **ceny zakupu** (w UI bez dopisku "brutto" od 03.10.2026 — to nadal `purchase_price_gross` z Fakturowni, czyli cena brutto) — `price_gross` jest w Fakturowni puste dla prawie wszystkich sztuk —
 i wykres kołowy per kategoria, top 5 + "Inne") oraz *Raw data* (`InventoryRawView.tsx`): lista
 sztuk ze stronicowaniem po stronie serwera (25/50/100) i wyszukiwaniem po numerze seryjnym.
 W Fakturowni numer seryjny to nazwa produktu (= kod), a `description` to numer zamówienia
@@ -220,7 +220,7 @@ wyszukiwaniem — AND): opcje "Wszystkie" / "Bez SKU" (kategoria) albo "Bez klas
 wzajemnie zależne:** po wybraniu kategorii lista klas pokazuje tylko klasy sztuk z tej kategorii (i odwrotnie), a wybrana wartość zostaje na liście nawet przy
 zerowym wyniku. Listy budowane z par (kategoria z SKU, klasa) wszystkich sztuk wczytywanych z widoku i odświeżanych razem z listą; zmiana filtra wraca na stronę 1.
 W tabeli Raw data jest też kolumna **"Klasa"** (zaraz po "Kategoria z SKU").
-**Podsumowanie pod tabelą Raw data** (03.10.2026): pasek z liczbą sztuk, sumą cen zakupu i **średnią ceną zakupu brutto** dla CAŁEGO wyniku bieżących filtrów
+**Podsumowanie pod tabelą Raw data** (03.10.2026): pasek z liczbą sztuk, sumą cen zakupu i **średnią ceną zakupu** dla CAŁEGO wyniku bieżących filtrów
 (wyszukiwanie + kategoria z SKU + klasa), a nie tylko dla widocznej strony. Liczone w przeglądarce z cen wszystkich pasujących sztuk (osobne zapytanie
 paginowane po 1000, bez agregatów PostgREST), przeliczane tylko przy zmianie filtrów/odświeżeniu — nie przy zmianie strony. Pusty wynik pokazuje "—".
 **VAT** (`fakturownia_stock_cache.vat`, nullable tekst) ma być wpisywany RĘCZNIE przy dodawaniu produktu do

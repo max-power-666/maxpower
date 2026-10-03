@@ -691,7 +691,7 @@ function FakturowniaSummaryView({ summary }: { summary: FakturowniaSummary }) {
           )}
         </div>
         <div className="bg-white p-5">
-          <div className="text-xs text-inksoft mb-2">ŁĄCZNA WARTOŚĆ (ceny zakupu brutto)</div>
+          <div className="text-xs text-inksoft mb-2">ŁĄCZNA WARTOŚĆ (ceny zakupu)</div>
           <div className="text-3xl font-bold font-mono">{fmtPLN(summary.totalValue)}</div>
         </div>
         {summary.costs && (

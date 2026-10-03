@@ -200,7 +200,7 @@ export default function ProductCardDrawer({
                     <Row label="Kategoria z SKU" value={s.sku_category} mono />
                     <Row label="Klasa" value={s.sku_class} mono />
                     <Row label="Zamówienie" value={s.description} mono />
-                    <Row label="Cena zakupu brutto" value={fmtMoney(s.purchase_price_gross, "zł")} />
+                    <Row label="Cena zakupu" value={fmtMoney(s.purchase_price_gross, "zł")} />
                     <Row label="VAT" value={s.vat} />
                     <Row label="Dodano" value={s.product_created_at ? fmtDateTime(s.product_created_at) : null} />
                   </div>
