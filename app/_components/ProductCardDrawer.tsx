@@ -4,6 +4,9 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { escapeLike } from "@/lib/search";
+import { computeTradeInCosts, PCC_RATE, PCC_THRESHOLD_PLN } from "@/lib/buybackCosts";
+import { rateBeforeDate, type NbpRate } from "@/lib/nbp";
+import { TRADEIN_PAID_STATUSES } from "@/lib/stockCosts";
 import { SERVICE_STATUSES, SERVICE_TASKS, TEST_STATUSES, labelFor } from "@/lib/workLog";
 
 // Karta produktu po numerze seryjnym. Nie ma własnej tabeli — składa się z tego, co system już wie
@@ -43,6 +46,11 @@ type OrderRow = {
   product_title: string | null;
   original_price: number | null;
   original_price_currency: string | null;
+  counter_offer_price: number | null;
+  counter_offer_price_currency: string | null;
+  payment_date: string | null;
+  creation_date: string | null;
+  sku: string | null;
 };
 type Event = { at: string; text: string; details?: string[] };
 
@@ -74,6 +82,31 @@ export default function ProductCardDrawer({
 }) {
   const [stock, setStock] = useState<StockRow[]>([]);
   const [orders, setOrders] = useState<OrderRow[]>([]);
+  // Kursy EUR (NBP) — do przeliczenia wartości zakupu z Trade-in na PLN (podstawa PCC)
+  const [eurRates, setEurRates] = useState<NbpRate[]>([]);
+  useEffect(() => {
+    supabase.from("nbp_rates").select("currency, rate_date, mid").eq("currency", "EUR").limit(1000).then(({ data }) => {
+      setEurRates(((data as { currency: string; rate_date: string; mid: number | string }[]) || []).map((r) => ({ currency: r.currency, rateDate: r.rate_date, mid: Number(r.mid) })));
+    });
+  }, []);
+
+  // PCC sztuki: tylko zakup z Trade-in (od osoby prywatnej) — zamówienie BM wskazane w opisie sztuki; wypłacone; 2% całej wartości w PLN, gdy > 1000 zł.
+  function pccText(description: string | null): string {
+    const o = orders.find((x) => x.order_public_id === (description || "").trim());
+    if (!o) return "— (zakup nie z Trade-in)";
+    if (!TRADEIN_PAID_STATUSES.includes(o.status)) return "— (zamówienie jeszcze niewypłacone)";
+    const d = (o.payment_date || o.creation_date || "").slice(0, 10);
+    const c = computeTradeInCosts({
+      originalPrice: o.original_price,
+      counterOfferPrice: o.counter_offer_price,
+      currency: o.counter_offer_price_currency ?? o.original_price_currency,
+      title: o.product_title,
+      sku: o.sku,
+      eurRate: d ? rateBeforeDate(eurRates, d) : null,
+    });
+    if (!c || c.pccPln === null || c.valuePln === null) return "— (brak kursu NBP)";
+    return `${c.pccPln.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} zł (wartość ${c.valuePln.toLocaleString("pl-PL", { maximumFractionDigits: 0 })} zł)`;
+  }
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -114,7 +147,7 @@ export default function ProductCardDrawer({
         if (orderIds.length > 0) {
           const { data, error: orderErr } = await supabase
             .from("buyback_orders")
-            .select("order_public_id, status, market, product_title, original_price, original_price_currency")
+            .select("order_public_id, status, market, product_title, original_price, original_price_currency, counter_offer_price, counter_offer_price_currency, payment_date, creation_date, sku")
             .in("order_public_id", orderIds);
           if (orderErr) throw orderErr;
           orderRows = (data as OrderRow[]) || [];
@@ -201,6 +234,7 @@ export default function ProductCardDrawer({
                     <Row label="Klasa" value={s.sku_class} mono />
                     <Row label="Zamówienie" value={s.description} mono />
                     <Row label="Cena zakupu" value={fmtMoney(s.purchase_price_gross, "zł")} />
+                    <Row label={`PCC (${Math.round(PCC_RATE * 100)}% od wartości > ${PCC_THRESHOLD_PLN.toLocaleString("pl-PL")} zł)`} value={pccText(s.description)} />
                     <Row label="VAT" value={s.vat} />
                     <Row label="Dodano" value={s.product_created_at ? fmtDateTime(s.product_created_at) : null} />
                   </div>

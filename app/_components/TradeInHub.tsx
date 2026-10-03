@@ -7,7 +7,8 @@ import TradeInOrdersView from "./TradeInOrdersView";
 import InlineEditCell from "./InlineEditCell";
 import PadSerialsCell, { MAX_PADS } from "./PadSerialsCell";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
-import { computeTradeInCosts, TRADEIN_CATEGORY_LABELS, TRADEIN_COMMISSION_RATE } from "@/lib/buybackCosts";
+import { computeTradeInCosts, TRADEIN_CATEGORY_LABELS, TRADEIN_COMMISSION_RATE, PCC_RATE, PCC_THRESHOLD_PLN } from "@/lib/buybackCosts";
+import { rateBeforeDate, type NbpRate } from "@/lib/nbp";
 import { INTAKE_STATUSES, INTERVALS, fmtDuration, rangeStart, type Interval } from "@/lib/workLog";
 import { escapeLike } from "@/lib/search";
 import { buybackStatusLabel, buybackStatusStyle } from "@/lib/buybackOrders";
@@ -677,6 +678,13 @@ function OrderCardDrawer({
   onClose: () => void;
 }) {
   const [order, setOrder] = useState<OrderDetail | null>(null);
+  // Kursy EUR (NBP) do przeliczenia wartości zakupu na PLN — podstawa PCC; wczytywane raz przy otwarciu karty.
+  const [eurRates, setEurRates] = useState<NbpRate[]>([]);
+  useEffect(() => {
+    supabase.from("nbp_rates").select("currency, rate_date, mid").eq("currency", "EUR").limit(1000).then(({ data }) => {
+      setEurRates(((data as { currency: string; rate_date: string; mid: number | string }[]) || []).map((r) => ({ currency: r.currency, rateDate: r.rate_date, mid: Number(r.mid) })));
+    });
+  }, []);
   const [intake, setIntake] = useState<IntakeEntry | null>(null);
   const [error, setError] = useState("");
 
@@ -782,6 +790,11 @@ function OrderCardDrawer({
         currency: order.counter_offer_price_currency ?? order.original_price_currency,
         title: order.product_title,
         sku: order.sku,
+        // kurs NBP z dnia poprzedniego względem wypłaty (a bez daty wypłaty — względem utworzenia zamówienia); bez kursu nie liczymy PCC
+        eurRate: (() => {
+          const d = (order.payment_date || order.creation_date || "").slice(0, 10);
+          return d ? rateBeforeDate(eurRates, d) : null;
+        })(),
       })
     : null;
 
@@ -921,6 +934,14 @@ function OrderCardDrawer({
                     label={`Logistyka Trade-in${costs.category ? ` (${TRADEIN_CATEGORY_LABELS[costs.category]}, magazyn w Polsce)` : ""}`}
                     value={costs.logistics === null ? "— (brak kategorii/waluty)" : fmtMoney(costs.logistics, "EUR")}
                   />
+                  <Row
+                    label={`PCC — ${Math.round(PCC_RATE * 100)}% od wartości > ${PCC_THRESHOLD_PLN.toLocaleString("pl-PL")} zł`}
+                    value={
+                      costs.pccPln === null
+                        ? "— (brak kursu NBP)"
+                        : `${costs.pccPln.toLocaleString("pl-PL", { minimumFractionDigits: 2 })} zł${costs.pccEur ? ` (${fmtMoney(costs.pccEur, "EUR")})` : ""} · wartość ${costs.valuePln!.toLocaleString("pl-PL", { maximumFractionDigits: 0 })} zł`
+                    }
+                  />
                   <Row label="Koszty dodatkowe razem" value={costs.extra === null ? "—" : fmtMoney(costs.extra, order.original_price_currency)} />
                   <Row label="Koszt całkowity (cena + koszty dodatkowe)" value={costs.total === null ? "—" : fmtMoney(costs.total, order.original_price_currency)} />
                   <div className="px-3 py-2 text-[11px] text-inksoft border-b border-line">
@@ -929,7 +950,7 @@ function OrderCardDrawer({
                       : ["VALIDATED", "PAID", "MONEY_TRANSFERED"].includes(order.status)
                         ? "Naliczone przez Back Market przy wypłacie dla klienta."
                         : "Szacunek — Back Market nalicza je dopiero przy wypłacie dla klienta."}{" "}
-                    Wg Regulaminu BM (marzec 2026, art. 15.1), kwoty netto (bez VAT); to nie faktura.
+                    Prowizja i logistyka wg Regulaminu BM (marzec 2026, art. 15.1), kwoty netto (bez VAT); PCC: 2% całej wartości zakupu w PLN (kurs NBP z dnia poprzedniego), gdy przekracza 1000 zł. To nie faktura.
                   </div>
                 </>
               )}

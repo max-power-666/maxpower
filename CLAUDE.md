@@ -170,7 +170,7 @@ zespół ma tylko odczyt.
 "Koszty dodatkowe" (lista linii kosztów z opisem, ile zamówień/sztuk objęto) i kafelek **"Łączna wartość + koszty"** (ceny zakupu + suma kosztów). **DZIŚ jedyny
 koszt to Trade-in** (prowizja BM 10% + logistyka wg regulaminu, patrz sekcja Trade-in -> koszty dodatkowe, `lib/buybackCosts.ts`); z czasem dojdą koszty części, podatek PCC
 (zakup powyżej 1000 zł) itd. — **każdy składnik to osobna linia `CostLine`** (`lib/stockCosts.ts`), sumowana do "wartości z kosztami", więc dodanie składnika to nowa funkcja
-zwracająca `CostLine` dopisana w `fetchStockCosts` (`page.tsx`), bez przebudowy reszty. Mechanizm Trade-in: sztuka w magazynie wskazuje zamówienie w `description` (numer BM,
+zwracająca `CostLine` dopisana w `fetchStockCosts` (`page.tsx`), bez przebudowy reszty. Koszty Trade-in w tym kafelku obejmują prowizję BM, logistykę **i PCC**. Mechanizm Trade-in: sztuka w magazynie wskazuje zamówienie w `description` (numer BM,
 np. FR-26392-JMMYS; pozostałe opisy — faktury "VAT marża" itp. — nie pasują do wzorca i nie mają kosztu Trade-in), dopasowanie do `buyback_orders` (paczkami po 60 id, pamięć
 podręczna na sesję), liczone tylko zamówienia WYPŁACONE (VALIDATED/PAID/MONEY_TRANSFERED — BM pobiera opłaty przy wypłacie), **jedno zamówienie RAZ** nawet gdy wskazuje je kilka
 sztuk. EUR -> PLN **kursem NBP z dnia poprzedniego względem wypłaty** (a bez daty wypłaty — względem utworzenia zamówienia), tą samą zasadą co reszta aplikacji; zamówienia bez
@@ -374,7 +374,14 @@ dostaje `members` z `page.tsx` (do skróconych imion).
   Anbernic/Meta Quest/MacBook -> konsole i MacBooki; iPad/Galaxy Tab -> tablety; iPhone/Galaxy S/Pixel/Oppo/AirPods/Bose/Marshall... -> smartfony i audio), a gdy
   nazwa nic nie mówi — z prefiksu SKU (SKU bywa puste albo "None"); sprawdzone na 17 568 zamówieniach z bazy: 100% sklasyfikowane. **Założenie:** konsole przenośne i gogle VR
   (Meta Quest) liczone jak konsole (regulamin ich nie wymienia; stawka "MacBooki i konsole" jest też stawką laptopów). Nieznana kategoria albo waluta inna niż EUR -> prowizja jest, a
-  logistyka/suma pokazują "—" (nie zgadujemy). **Poza zakresem:** opłata 7,50 € za "Trade-in Chargeback" (tylko gdy płatność Refurbishera zostanie odrzucona) i stawki
+  logistyka/suma pokazują "—" (nie zgadujemy). **PCC (03.10.2026, na prośbę właściciela)** — podatek od czynności cywilnoprawnych przy zakupie używanej rzeczy od OSOBY PRYWATNEJ, **wchodzi do kosztów dodatkowych**: wartość do 1000 zł włącznie — zwolniona;
+powyżej 1000 zł — **2% CAŁEJ wartości** (nie tylko nadwyżki; np. 1001 zł -> 20,02 zł, 1500 zł -> 30 zł, 3000 zł -> 60 zł; `pccFromValuePln` w `lib/buybackCosts.ts`). **Wartość = cena zapłacona klientowi (po kontrofercie) przeliczona
+na PLN kursem NBP z dnia poprzedniego względem wypłaty** (ten sam kurs co reszta kosztów; praktycznie równa cenie zakupu w zł z Fakturowni). PCC liczymy TYLKO dla zakupów z Trade-in (od osób prywatnych), nigdy dla sztuk od
+firm (np. faktury "VAT marża") i tylko dla wypłaconych zamówień; bez kursu NBP PCC jest "—" (nie zgadujemy). `computeTradeInCosts` przyjmuje `eurRate` (PLN za EUR) i zwraca `valuePln`/`pccPln`/`pccEur`; PCC w EUR jest dokładane do
+"Koszty dodatkowe razem" i "Koszt całkowity" na karcie zamówienia Trade-in (wiersz "PCC — 2% od wartości > 1 000 zł": kwota w zł, w nawiasie EUR i wartość w zł); `tradeInOrderCostPln` (koszty w PLN) dolicza PCC wprost
+w PLN, więc **trafia ono też do kafelka kosztów Magazynu i do kolumny "Koszty dodatkowe" w zakładce Marża**. **W karcie produktu** (sekcja "Magazyn (Fakturownia)", pod "Cena zakupu") jest wiersz **"PCC"** z kwotą w zł i wartością
+zakupu w zł albo wyjaśnieniem ("— (zakup nie z Trade-in)", "— (zamówienie jeszcze niewypłacone)", "— (brak kursu NBP)"). Na dzień wdrożenia: 52 z 937 zamówień w magazynie przekracza próg, PCC łącznie ≈ 1 718 zł.
+**Poza zakresem:** opłata 7,50 € za "Trade-in Chargeback" (tylko gdy płatność Refurbishera zostanie odrzucona) i stawki
   prowizji od SPRZEDAŻY (11%/12% itd.) — to osobny temat. Regulamin może się zmienić z 1-miesięcznym wyprzedzeniem (art. 15.1) — przy zmianie zaktualizować stałe w pliku.
 - Numer zamówienia jest linkiem do **karty zamówienia** (panel boczny): dane z API + dane
   pracownika (numer seryjny, SKU, pady, uwagi — edytowalne) + numerowany log zmian.
@@ -1080,7 +1087,7 @@ pod tabelą podsumowanie całego wyniku filtra (sprzedaż, zakup, koszty, marża
 **Wzór (decyzja właściciela):** Marża = cena sprzedaży (PLN, brutto) − cena zakupu − **VAT od marży** − wysyłka − koszty dodatkowe − prowizja − serwis, gdzie **VAT od marży = (cena sprzedaży − cena zakupu, BEZ kosztów dodatkowych) × 23/123**, nigdy ujemny.
 Źródła: **cena sprzedaży** — `sales_order_items.price` przeliczona kursem NBP z dnia poprzedniego względem daty zamówienia; **cena zakupu** — cena zakupu sztuki z Fakturowni po numerze seryjnym
 (bez rozróżniania wielkości liter; przy odkupie tego samego numeru bierzemy zakup SPRZED zamówienia); **wysyłka** — cena DHL z wyceny zapisana przy nadaniu (jak na karcie zamówienia), a gdy jej nie ma, ręczny `shipping_cost`;
-**koszty dodatkowe** — Trade-in (prowizja BM + logistyka wg regulaminu, `lib/buybackCosts.ts`) po numerze zamówienia z opisu sztuki w Fakturowni; sztuka spoza Trade-in ma 0; **serwis** — kolumna zawsze pusta ("—"),
+**koszty dodatkowe** — Trade-in (prowizja BM + logistyka wg regulaminu + PCC, `lib/buybackCosts.ts`) po numerze zamówienia z opisu sztuki w Fakturowni; sztuka spoza Trade-in ma 0; **serwis** — kolumna zawsze pusta ("—"),
 koszty serwisu wejdą do marży po wprowadzeniu kosztów części (decyzja właściciela). Koszty poziomu ZAMÓWIENIA (wysyłka, opłaty z faktury BM) dzielone na pozycje proporcjonalnie do ceny pozycji.
 **Brakujące składniki:** marża nie jest liczona (— i flaga), gdy brak ceny sprzedaży/kursu NBP albo ceny zakupu; brak wysyłki/prowizji liczy się jako 0, ALE wiersz dostaje ⚠ z listą braków (najechanie), a podsumowanie liczy takie pozycje i podaje ich liczbę.
 **Fakturownia: historia zakupów.** `fakturownia_stock_cache` trzyma tylko sztuki ze stanem 1 i KASUJE sprzedane, więc cena zakupu sprzedanej sztuki przepadała. Synchronizacja (`fakturownia/sync`) zapisuje teraz WSZYSTKIE produkty także do
