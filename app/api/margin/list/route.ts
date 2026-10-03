@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { requireRole } from "@/lib/serverAuth";
 import { isCountedOrder } from "@/lib/salesOrders";
-import { computeMargin, deriveBmRates, MARGIN_MARKETPLACES, type BmLine, type MarginDbRow, type MarginResult } from "@/lib/margin";
+import { computeMargin, deriveBmRates, inPeriod, periodRange, MARGIN_MARKETPLACES, type BmLine, type MarginDbRow, type MarginResult } from "@/lib/margin";
 import type { NbpRate } from "@/lib/nbp";
 
 // Zakładka Marża (03.10.2026) — lista sprzedanych sztuk z numerem seryjnym z marżą. Tylko Admin i Manager (ceny zakupu, prowizje).
@@ -33,6 +33,7 @@ export async function GET(request: Request) {
   const pageSize = [25, 50, 100].includes(Number(url.searchParams.get("pageSize"))) ? Number(url.searchParams.get("pageSize")) : 50;
   const search = (url.searchParams.get("search") || "").trim().toLowerCase();
   const marketplace = url.searchParams.get("marketplace") || "";
+  const range = periodRange(url.searchParams.get("period") || "all"); // all (null) | current | previous — miesiące kalendarzowe wg czasu polskiego
 
   try {
     const [rowsRaw, rateRows, lines] = await Promise.all([
@@ -49,6 +50,7 @@ export async function GET(request: Request) {
     // tylko zamówienia, które liczą się jako sprzedaż (bez anulowanych/zwróconych/nieopłaconych — ten sam isCountedOrder co Przegląd)
     let results: MarginResult[] = rowsRaw.filter((r) => isCountedOrder(r.marketplace, r.status)).map((r) => computeMargin(r, ctx));
     if (marketplace) results = results.filter((r) => r.marketplace === marketplace);
+    if (range) results = results.filter((r) => inPeriod(r.orderDate, range));
     if (search) results = results.filter((r) => [r.serial, r.orderId, r.sku, r.productName].some((v) => (v || "").toLowerCase().includes(search)));
     results.sort((a, b) => (b.orderDate || "").localeCompare(a.orderDate || ""));
 

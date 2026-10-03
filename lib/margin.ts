@@ -8,7 +8,7 @@
 //
 // Koszty poziomu ZAMÓWIENIA (wysyłka, opłaty z faktury BM) dzielimy na pozycje proporcjonalnie do ceny pozycji.
 
-import { rateBeforeDate, rateInfoBeforeDate, type NbpRate } from "./nbp";
+import { rateBeforeDate, rateInfoBeforeDate, warsawDate, type NbpRate } from "./nbp";
 import { tradeInOrderCostPln, type BuybackOrderLite } from "./stockCosts";
 import { tradeInCategory, TRADEIN_CATEGORY_LABELS, type TradeInCategory } from "./buybackCosts";
 
@@ -387,4 +387,30 @@ export function computeMargin(row: MarginDbRow, ctx: MarginContext): MarginResul
     flags,
     details,
   };
+}
+
+// Filtr okresu na liście Marży (03.10.2026): "current" = bieżący miesiąc kalendarzowy, "previous" = ubiegły; granice wg czasu polskiego (data zamówienia też
+// liczona w czasie polskim — zamówienie z 1. dnia miesiąca o 00:30 wpada do tego miesiąca, nie do poprzedniego jak w UTC). "all"/nieznane = bez filtra (null).
+export type MarginPeriod = "all" | "current" | "previous";
+export function periodRange(period: string, now: Date = new Date()): { from: string; to: string } | null {
+  if (period !== "current" && period !== "previous") return null;
+  const today = warsawDate(now.toISOString()); // YYYY-MM-DD w Warszawie
+  let y = Number(today.slice(0, 4));
+  let m = Number(today.slice(5, 7));
+  if (period === "previous") {
+    m -= 1;
+    if (m === 0) {
+      m = 12;
+      y -= 1;
+    }
+  }
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate(); // ostatni dzień miesiąca (dzień 0 następnego)
+  const mm = String(m).padStart(2, "0");
+  return { from: `${y}-${mm}-01`, to: `${y}-${mm}-${String(last).padStart(2, "0")}` };
+}
+
+export function inPeriod(orderDateIso: string | null, range: { from: string; to: string } | null): boolean {
+  if (!range) return true;
+  const d = warsawDate(orderDateIso);
+  return d !== "" && d >= range.from && d <= range.to;
 }

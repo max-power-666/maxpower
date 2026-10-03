@@ -12,6 +12,17 @@ import type { BmRates, MarginResult } from "@/lib/margin";
 
 type Totals = { count: number; withMargin: number; sale: number; purchase: number; vat: number; shipping: number; extra: number; commission: number; margin: number; incomplete: number };
 const PAGE_SIZES = [25, 50, 100];
+// Filtr okresu: miesiące kalendarzowe wg czasu polskiego (granice liczy serwer); w podpowiedzi nazwy miesięcy.
+const monthName = (offset: number) => {
+  const now = new Date();
+  const d = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+  return d.toLocaleDateString("pl-PL", { month: "long", year: "numeric" });
+};
+const PERIODS: { key: "all" | "current" | "previous"; label: string; hint: string }[] = [
+  { key: "all", label: "Cały okres", hint: "Wszystkie sprzedane sztuki" },
+  { key: "current", label: "Bieżący miesiąc", hint: monthName(0) },
+  { key: "previous", label: "Ubiegły miesiąc", hint: monthName(-1) },
+];
 const FILTERS = [
   { key: "", label: "Wszystkie" },
   { key: "backmarket", label: "Back Market" },
@@ -34,6 +45,7 @@ export default function MarginView({ session, members }: { session: Session; mem
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [marketplace, setMarketplace] = useState("");
+  const [period, setPeriod] = useState<"all" | "current" | "previous">("all");
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
@@ -58,7 +70,7 @@ export default function MarginView({ session, members }: { session: Session; mem
     setLoading(true);
     setError("");
     try {
-      const qs = new URLSearchParams({ page: String(page), pageSize: String(pageSize), search, marketplace });
+      const qs = new URLSearchParams({ page: String(page), pageSize: String(pageSize), search, marketplace, period });
       const res = await fetch(`/api/margin/list?${qs}`, { headers: auth });
       const data = await res.json().catch(() => ({}));
       if (mySeq !== seq.current) return;
@@ -79,7 +91,7 @@ export default function MarginView({ session, members }: { session: Session; mem
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, pageSize, search, marketplace]);
+  }, [page, pageSize, search, marketplace, period]);
 
   // Pełna synchronizacja z Fakturownią (ten sam route co "Odśwież" w Magazynie): zapisuje też produkty sprzedane (stan 0), od 01.01.2025 — to z nich
   // bierze się cena zakupu w tej zakładce. Pierwszy raz trwa ok. minuty (cały katalog).
@@ -170,6 +182,10 @@ export default function MarginView({ session, members }: { session: Session; mem
           {FILTERS.map((f) => (
             <button key={f.key} onClick={() => { setMarketplace(f.key); setPage(1); }} className={pill(marketplace === f.key)}>{f.label}</button>
           ))}
+          <span className="w-px h-6 bg-line mx-1" />
+          {PERIODS.map((p) => (
+            <button key={p.key} onClick={() => { setPeriod(p.key); setPage(1); }} className={pill(period === p.key)} title={p.hint}>{p.label}</button>
+          ))}
           <input
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
@@ -213,7 +229,7 @@ export default function MarginView({ session, members }: { session: Session; mem
           </thead>
           <tbody>
             {!loading && rows.length === 0 && (
-              <tr><td colSpan={15} className="p-6 text-center text-inksoft text-sm">{search || marketplace ? "Brak wyników." : "Brak sprzedanych sztuk z numerem seryjnym (Back Market i refurbed)."}</td></tr>
+              <tr><td colSpan={15} className="p-6 text-center text-inksoft text-sm">{search || marketplace || period !== "all" ? "Brak wyników." : "Brak sprzedanych sztuk z numerem seryjnym (Back Market i refurbed)."}</td></tr>
             )}
             {rows.map((r) => {
               const rowKey = `${r.marketplace}:${r.orderId}:${r.itemKey}`;
