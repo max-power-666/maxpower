@@ -187,7 +187,13 @@ wartość; brak SKU -> puste. Wyliczana w widoku (`split_part`), nie przechowywa
 to INNE pole niż "Kategoria" z Fakturowni obok (`category_name`), nic ich ze sobą nie łączy.
 Wpisy z pustym SKU są pomijane (wcześniejszy, ale nieuzupełniony wpis nie zasłania późniejszego z SKU); numery
 porównywane bez rozróżniania wielkości liter i bez spacji na brzegach; dla sztuki bez żadnego wpisu SKU jest puste
-("—"). **"Klasa"** (`sku_class` w widoku, 03.10.2026; wiersz "Klasa" w karcie produktu, sekcja Magazyn) = OSTATNI człon SKU po ostatnim
+("—"). **Dwa kształty SKU (doprecyzowanie właściciela, 03.10.2026):** SKU w MAGAZYNIE (Trade-in, Testy, import) ma postać `XSX-1TB-BK-B`
+(KATEGORIA-POJEMNOŚĆ-KOLOR-KLASA), a SKU Z ZAMÓWIENIA (marketplace, Bidder) ma dodatkowo na końcu liczbę kontrolerów: `XSX-1TB-BK-B-1M`
+(0M bez kontrolera, 1M jeden, 2M dwa) — to to samo urządzenie, tylko z informacją o zestawie. Dlatego reguła klasy poniżej ("ostatni człon z samych
+liter") jest poprawna dla SKU magazynowych i nie wymaga zmiany; SKU z zamówienia nie dostaje klasy z `sku_class` magazynu. Dla asystenta AI
+`ai.order_items` ma `sku_base` (SKU bez końcówki `-nM`, pasuje do SKU z `ai.stock`), `sku_controllers` i `sku_class` (z `sku_base`), a prompt
+każe łączyć sprzedaż z magazynem po `sku_base`, nie po surowym SKU.
+**"Klasa"** (`sku_class` w widoku, 03.10.2026; wiersz "Klasa" w karcie produktu, sekcja Magazyn) = OSTATNI człon SKU po ostatnim
 myślniku, ale tylko gdy składa się wyłącznie z liter (NS-32-V1-D -> D, NS-32-V2-BC -> BC, NS-32-V1-C -> C, NS-32-V2-B -> B, APM-A -> A);
 inaczej puste — SKU bez myślnika albo ze starego schematu, gdzie ostatni człon to liczba pad-ów ("PS4-500-B-2M"; "2M" nie jest klasą), nie
 dostają fałszywej klasy. Wyliczana w widoku jak kategoria z SKU, widoczna też w `ai.stock` dla asystenta AI.

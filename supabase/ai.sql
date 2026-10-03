@@ -120,8 +120,15 @@ select
     when i.price is null then null
     when upper(coalesce(i.currency, o.currency, 'PLN')) = 'PLN' then i.price
     else i.price * fx.mid
-  end as price_pln
+  end as price_pln,
+  -- SKU Z ZAMÓWIENIA ma na końcu liczbę kontrolerów ("XSX-1TB-BK-B-1M": 1M = 1 kontroler, 0M = bez, 2M = dwa), a SKU w magazynie
+  -- (Trade-in, Testy) jej nie ma ("XSX-1TB-BK-B"). sku_base = SKU bez tej końcówki (to, co pasuje do SKU z ai.stock),
+  -- sku_controllers = liczba kontrolerów z końcówki (null, gdy jej brak), sku_class = klasa (ostatni człon z liter sku_base).
+  b.base as sku_base,
+  nullif(substring(i.sku from '-(\d+)M$'), '')::int as sku_controllers,
+  case when b.base ~ '-[A-Za-z]+$' then substring(b.base from '[A-Za-z]+$') end as sku_class
 from sales_order_items i
+left join lateral (select regexp_replace(i.sku, '-\d+M$', '') as base) b on true
 join ai.orders o on o.marketplace = i.marketplace and o.order_id = i.external_id
 left join lateral (
   select r.mid from nbp_rates r

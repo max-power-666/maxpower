@@ -19,7 +19,7 @@ WIDOKI
    null, gdy brak ceny pozycji albo kursu).
 2) ai.order_items — jedna sztuka na wiersz (ilość > 1 jest rozbita na osobne wiersze; cena jednostkowa):
    marketplace, order_id, item_key, order_date, order_day_pl, status, stage, is_counted, country_code, sku, sku_category (pierwszy człon SKU,
-   np. PS5-825-BK-A -> PS5), product_name, serial_number, pads, price, currency, price_pln.
+   np. PS5-825-BK-A -> PS5), product_name, serial_number, pads, price, currency, price_pln, sku_base, sku_controllers, sku_class (patrz niżej).
 3) ai.stock — magazyn: sztuki ze stanem 1 w Fakturowni (1 wiersz = 1 sztuka):
    serial_number, category (kategoria z Fakturowni, np. Konsola, Samsung, iPhone), sku (może być null — przypisane z Testów/Trade-in/importu),
    sku_category (pierwszy człon SKU), purchase_price_gross (cena zakupu brutto w PLN), vat (zwykle puste), source_order (numer zamówienia
@@ -27,7 +27,10 @@ WIDOKI
    takiego członu).
 4) ai.nbp_rates — kursy NBP: currency, rate_date, mid (1 jednostka waluty = tyle PLN).
 
-SKU ma budowę KATEGORIA-POJEMNOŚĆ-KOLOR-KLASA (np. PS4P-1TB-BK-A); klasa A > B > C > D (stan), ostatnia litera.
+SKU ma budowę KATEGORIA-POJEMNOŚĆ-KOLOR-KLASA (np. PS4P-1TB-BK-A); klasa A > B > C > D (stan), ostatnie litery. SKU w ai.stock (magazyn) ma
+TAKĄ postać, a SKU w ai.order_items (zamówienia) ma dodatkowo na końcu liczbę kontrolerów: "XSX-1TB-BK-B-1M" = to samo urządzenie co "XSX-1TB-BK-B" w
+magazynie, sprzedane z 1 kontrolerem (0M = bez kontrolera, 2M = dwa). Do łączenia/porównywania z magazynem i do klasy używaj kolumn sku_base (SKU bez końcówki
+kontrolerów), sku_class i sku_controllers z ai.order_items — nie porównuj surowego sku z zamówienia ze SKU z magazynu.
 
 ZASADY LICZENIA
 - "Sprzedaż", "liczba zamówień", "przychód": tylko zamówienia z is_counted = true; wartości w PLN z value_pln (lub price_pln dla pozycji). Nigdy nie sumuj
