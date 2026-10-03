@@ -217,6 +217,15 @@ max ~2 min; kursor to `last_attempt_at < run.started_at`. `in_progress_since` pi
 przywrócenia cen po ubitej funkcji. Historia cen tylko przy zmianie ceny. Stary program na
 Macu jest wyłączony; bidder działa na produkcji, włącznik: `buyback_settings.enabled`.
 
+**Hurtowa zmiana ceny max** (03.10.2026, na prośbę właściciela; zakładka Bidder -> Ceny SKU): kolumna checkboxów po lewej (nagłówek =
+zaznacz/odznacz WSZYSTKIE WIDOCZNE wiersze, ze stanem "częściowo"), a po zaznaczeniu pojawia się pasek z polem "Zmień cenę max o" (kwota w €,
+ujemna obniża, np. `5` albo `-10`) i przyciskiem "Zastosuj". **Zmiana jest o wartość (nowa = obecna + delta), nie ustawieniem jednej ceny.**
+Zaznaczenie obejmuje tylko widoczne wiersze i **czyści się przy zmianie wyszukiwania/filtra**, żeby hurtowa zmiana nie dotknęła SKU, których już
+nie widać. Logika planu w `lib/bulkPrice.ts` (testowana): pomija SKU bez ceny max (nie ma do czego dodać), takie, którym wyszłoby <= 0 (0 znaczy
+"brak ceny max"), i takie z niezapisaną edycją w wierszu. Przed zapisem `confirm` z liczbą SKU, przykładem (`SKU: €65 → €70`) i listą pominiętych —
+to ceny na żywym Back Markecie (Bidder użyje ich w najbliższym przebiegu). Każdy zapis ma warunek na starą cenę (`eq("max_price", stara)`): jeśli ktoś
+w międzyczasie zmienił SKU, ta pozycja jest pomijana i raportowana, a nie nadpisywana. Zapisy idą po 8 równolegle jako zwykłe UPDATE-y, więc każdy
+trafia do logu zmian ceny max z autorem (trigger w bazie, patrz niżej). Bez zmian w bazie.
 **Log zmian ceny maksymalnej** (03.10.2026, na prośbę właściciela; karta SKU w Bidderze — `SkuDrawer` w `TradeInView.tsx`, sekcja "Log zmian
 ceny maksymalnej" nad historią cen): kto, kiedy i z jakiej na jaką cenę zmienił max (`€85 → €90`, "brak" = pusta cena). Wypełnia go **trigger
 w bazie** (`buyback_log_max_price_change` na `buyback_skus`, `tradein.sql`, tabela `buyback_max_price_log`) przy każdej realnej zmianie `max_price` —

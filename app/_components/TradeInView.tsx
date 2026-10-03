@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
+import { parseDelta, planBulkChange } from "@/lib/bulkPrice";
 
 // Zakładka Trade-in: panel biddera cen skupu Back Market (dawny program "Buyback Bidder").
 // Sam bidder działa na serwerze (lib/buyback.ts, cron Vercela) — tu tylko czytamy
@@ -70,6 +71,15 @@ export default function TradeInView({ session, members }: { session: Session; me
   const [runBusy, setRunBusy] = useState(false);
   const [openSku, setOpenSku] = useState<Sku | null>(null);
   const [loadError, setLoadError] = useState("");
+  // Hurtowa zmiana ceny max (03.10.2026): zaznaczone SKU (tylko z aktualnie widocznych wierszy) + wartość, o którą zmieniamy.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkDelta, setBulkDelta] = useState("");
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  // Zmiana wyszukiwania/filtra czyści zaznaczenie — inaczej hurtowa zmiana mogłaby dotknąć SKU, których już nie widać.
+  useEffect(() => {
+    setSelected(new Set());
+  }, [search, filter]);
 
   useEffect(() => {
     loadAll();
@@ -162,6 +172,39 @@ export default function TradeInView({ session, members }: { session: Session; me
     setSkus((prev) => prev.map((s) => (s.sku === sku ? { ...s, max_price: value } : s)));
     setDrafts(({ [sku]: _, ...rest }) => rest);
     flash(`Zapisano ${sku}.`);
+  }
+
+  // Hurtowa zmiana: nowa cena max = obecna + delta (delta może być ujemna). Pomijamy SKU bez ceny max (nie ma do czego dodać),
+  // takie, którym wyszłoby <= 0, i takie z niezapisaną edycją w wierszu. Każdy zapis ma warunek na starą cenę — jeśli ktoś w
+  // międzyczasie zmienił SKU, ta pozycja nie zostanie nadpisana. Zmiany trafiają do logu cen max (trigger w bazie).
+  async function applyBulk() {
+    const delta = parseDelta(bulkDelta);
+    if (delta === null) return flash("Wpisz wartość zmiany (np. 5 albo -10).");
+    const picked = visible.filter((s) => selected.has(s.sku));
+    const { plan, noMax, tooLow, unsaved } = planBulkChange(picked, delta, drafts);
+    if (plan.length === 0) return flash(`Nic do zmiany (bez ceny max: ${noMax}, wynik ≤ 0: ${tooLow}, niezapisana edycja: ${unsaved}).`);
+    const sign = delta > 0 ? "+" : "−";
+    const skipped = [noMax && `${noMax} bez ceny max`, tooLow && `${tooLow} z wynikiem ≤ 0`, unsaved && `${unsaved} z niezapisaną edycją`].filter(Boolean).join(", ");
+    if (!confirm(`Zmienić cenę max o ${sign}€${Math.abs(delta)} dla ${plan.length} SKU?\n\nPrzykład: ${plan[0].sku}: €${plan[0].from} → €${plan[0].to}${skipped ? `\nPominięte: ${skipped}.` : ""}\n\nBidder zacznie używać nowych cen w najbliższym przebiegu (do ${settings?.interval_minutes ?? 15} min) — to ceny na żywym Back Markecie.`)) return;
+    setBulkBusy(true);
+    const done = new Map<string, number>();
+    let conflicts = 0, failed = 0;
+    for (let i = 0; i < plan.length; i += 8) {
+      await Promise.all(
+        plan.slice(i, i + 8).map(async (p) => {
+          const { data, error } = await supabase.from("buyback_skus").update({ max_price: p.to, updated_at: new Date().toISOString() }).eq("sku", p.sku).eq("max_price", p.from).select("sku");
+          if (error) failed++;
+          else if (!data || data.length === 0) conflicts++;
+          else done.set(p.sku, p.to);
+        })
+      );
+    }
+    setSkus((prev) => prev.map((s) => (done.has(s.sku) ? { ...s, max_price: done.get(s.sku)! } : s)));
+    setDrafts((prev) => Object.fromEntries(Object.entries(prev).filter(([k]) => !done.has(k))));
+    setSelected(new Set());
+    setBulkDelta("");
+    setBulkBusy(false);
+    flash(`Zmieniono ${done.size} z ${plan.length} SKU${conflicts ? `, ${conflicts} zmienione w międzyczasie przez kogoś innego (pominięte)` : ""}${failed ? `, ${failed} błędów zapisu` : ""}.`);
   }
 
   async function toggleIgnored(s: Sku) {
@@ -271,10 +314,43 @@ export default function TradeInView({ session, members }: { session: Session; me
             ))}
           </div>
 
+          {selected.size > 0 && (
+            <div className="flex flex-wrap items-center gap-3 mb-3 border border-line bg-white px-4 py-3">
+              <span className="text-sm font-semibold">Zaznaczono: {selected.size}</span>
+              <label className="text-xs text-inksoft">Zmień cenę max o</label>
+              <input
+                inputMode="decimal"
+                value={bulkDelta}
+                onChange={(e) => setBulkDelta(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && !bulkBusy && applyBulk()}
+                placeholder="np. 5 lub -10"
+                className="w-28 border border-line bg-white px-2 py-1 rounded font-mono text-sm"
+              />
+              <span className="text-xs text-inksoft">€ (wartość ujemna obniża)</span>
+              <button onClick={applyBulk} disabled={bulkBusy || parseDelta(bulkDelta) === null} className="text-sm font-semibold px-3 py-1.5 rounded bg-ink text-paper disabled:opacity-50">
+                {bulkBusy ? "Zapisywanie…" : "Zastosuj"}
+              </button>
+              <button onClick={() => setSelected(new Set())} disabled={bulkBusy} className="text-xs font-semibold text-teal hover:underline disabled:opacity-50">Odznacz</button>
+            </div>
+          )}
+
           <div className="border border-line bg-white overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs text-inksoft border-b border-line">
+                  <th className="p-3 w-8">
+                    <input
+                      type="checkbox"
+                      aria-label="Zaznacz wszystkie widoczne"
+                      className="accent-ink"
+                      disabled={visible.length === 0}
+                      checked={visible.length > 0 && visible.every((s) => selected.has(s.sku))}
+                      ref={(el) => {
+                        if (el) el.indeterminate = visible.some((s) => selected.has(s.sku)) && !visible.every((s) => selected.has(s.sku));
+                      }}
+                      onChange={(e) => setSelected(e.target.checked ? new Set(visible.map((s) => s.sku)) : new Set())}
+                    />
+                  </th>
                   <th className="p-3">SKU</th>
                   <th className="p-3">Cena max</th>
                   {MARKETS.map((m) => (
@@ -287,16 +363,32 @@ export default function TradeInView({ session, members }: { session: Session; me
               </thead>
               <tbody>
                 {skus.length === 0 && (
-                  <tr><td colSpan={9} className="p-6 text-center text-inksoft text-sm">Brak SKU — zaimportuj katalog skryptem scripts/import-buyback.mjs.</td></tr>
+                  <tr><td colSpan={10} className="p-6 text-center text-inksoft text-sm">Brak SKU — zaimportuj katalog skryptem scripts/import-buyback.mjs.</td></tr>
                 )}
                 {skus.length > 0 && visible.length === 0 && (
-                  <tr><td colSpan={9} className="p-6 text-center text-inksoft text-sm">Nic nie pasuje do filtra.</td></tr>
+                  <tr><td colSpan={10} className="p-6 text-center text-inksoft text-sm">Nic nie pasuje do filtra.</td></tr>
                 )}
                 {visible.map((s) => {
                   const draft = drafts[s.sku];
                   const dirty = draft !== undefined && draft !== String(s.max_price ?? "");
                   return (
                     <tr key={s.sku} className={`border-b border-line last:border-b-0 hover:bg-paper ${s.ignored ? "text-inksoft" : ""}`}>
+                      <td className="p-3">
+                        <input
+                          type="checkbox"
+                          aria-label={`Zaznacz ${s.sku}`}
+                          className="accent-ink"
+                          checked={selected.has(s.sku)}
+                          onChange={() =>
+                            setSelected((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(s.sku)) next.delete(s.sku);
+                              else next.add(s.sku);
+                              return next;
+                            })
+                          }
+                        />
+                      </td>
                       <td className="p-3">
                         <button onClick={() => setOpenSku(s)} className="font-mono font-semibold hover:underline">{s.sku}</button>
                       </td>
