@@ -8,9 +8,11 @@ import Markdown from "./Markdown";
 
 // Asystent AI (03.10.2026, tylko Admin): okno, w którym wpisujesz polecenie po polsku (np. "wygeneruj raport sprzedaży za
 // poprzedni miesiąc"); serwer (app/api/ai/ask) daje modelowi dostęp tylko do odczytu wybranych widoków (supabase/ai.sql).
-// Rozmowa żyje w stanie przeglądarki (odświeżenie ją czyści); każde pytanie zapisuje się w ai_log po stronie serwera.
+// Rozmowy zapisuje serwer (ai_conversations — historia po lewej, każdy Admin widzi tylko własne); dodatkowo każde pytanie
+// trafia do ai_log (audyt kosztów).
 
 type Trace = { sql: string; rows?: number; error?: string };
+type ConversationRow = { id: string; title: string; updated_at: string; cost_usd: number | string };
 type Usage = { input: number; output: number; cacheWrite?: number; cacheRead?: number };
 type Msg = { role: "user" | "assistant"; content: string; queries?: Trace[]; usage?: Usage; costUsd?: number | null; model?: string };
 
@@ -28,6 +30,9 @@ export default function AiView({ session }: { session: Session }) {
   const [loading, setLoading] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState("");
+  // Historia rozmów: lista po lewej + otwarta rozmowa (null = nowa, jeszcze niezapisana).
+  const [conversations, setConversations] = useState<ConversationRow[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   // Licznik kosztów (szacunek wg cennika z lib/aiPricing.ts; faktyczne rozliczenie jest w konsoli Anthropic): suma tej
   // rozmowy + suma z dziennika ai_log od początku bieżącego miesiąca (odczyt ai_log ma tylko Admin — RLS).
@@ -54,7 +59,38 @@ export default function AiView({ session }: { session: Session }) {
 
   useEffect(() => {
     loadMonthly();
+    loadConversations();
   }, []);
+
+  async function loadConversations() {
+    const { data, error: err } = await supabase.from("ai_conversations").select("id, title, updated_at, cost_usd").order("updated_at", { ascending: false }).limit(200);
+    if (!err) setConversations((data as ConversationRow[]) || []); // brak tabeli (nie uruchomiono ai.sql) — po prostu bez historii
+  }
+
+  async function openConversation(id: string) {
+    if (loading || id === activeId) return;
+    setError("");
+    const { data, error: err } = await supabase.from("ai_conversations").select("messages").eq("id", id).maybeSingle();
+    if (err || !data) return setError(`Nie udało się otworzyć rozmowy: ${err?.message ?? "nie znaleziono"}`);
+    setMessages(((data.messages as any[]) || []).map((m) => ({ role: m.role, content: m.content, queries: m.queries, usage: m.usage, costUsd: m.costUsd, model: m.model })));
+    setActiveId(id);
+  }
+
+  function newConversation() {
+    if (loading) return;
+    setMessages([]);
+    setActiveId(null);
+    setError("");
+  }
+
+  async function deleteConversation(c: ConversationRow) {
+    if (loading) return;
+    if (!confirm(`Usunąć rozmowę „${c.title}”? Tej operacji nie można cofnąć.`)) return;
+    const { error: err } = await supabase.from("ai_conversations").delete().eq("id", c.id);
+    if (err) return setError(`Nie udało się usunąć rozmowy: ${err.message}`);
+    if (c.id === activeId) newConversation();
+    loadConversations();
+  }
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -79,12 +115,14 @@ export default function AiView({ session }: { session: Session }) {
       const res = await fetch("/api/ai/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
-        body: JSON.stringify({ messages: next.map((m) => ({ role: m.role, content: m.content })) }),
+        body: JSON.stringify({ messages: next.map((m) => ({ role: m.role, content: m.content })), conversationId: activeId }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || `Błąd serwera (${res.status}).`);
       setMessages([...next, { role: "assistant", content: data.answer, queries: data.queries, usage: data.usage, costUsd: data.costUsd, model: data.model }]);
+      if (data.conversationId) setActiveId(data.conversationId);
       loadMonthly();
+      loadConversations();
     } catch (e: any) {
       setError(e.message || "Nie udało się uzyskać odpowiedzi.");
     } finally {
@@ -93,13 +131,36 @@ export default function AiView({ session }: { session: Session }) {
   }
 
   return (
-    <div className="max-w-4xl">
+    <div className="flex flex-col lg:flex-row gap-6 items-start">
+      <aside className="w-full lg:w-72 shrink-0 border border-line bg-white">
+        <div className="flex items-center justify-between px-3 py-2 border-b border-line">
+          <span className="text-xs font-semibold text-inksoft">HISTORIA ROZMÓW</span>
+          <button onClick={newConversation} disabled={loading} className="text-xs font-semibold text-teal hover:underline disabled:opacity-50">+ Nowa</button>
+        </div>
+        <div className="max-h-[70vh] overflow-y-auto">
+          {conversations.length === 0 && <p className="p-3 text-xs text-inksoft">Brak zapisanych rozmów — pierwsza zapisze się po pierwszej odpowiedzi.</p>}
+          {conversations.map((c) => (
+            <div key={c.id} className={`group flex items-start gap-2 px-3 py-2 border-b border-line last:border-b-0 ${c.id === activeId ? "bg-paper" : "hover:bg-paper"}`}>
+              <button onClick={() => openConversation(c.id)} disabled={loading} className="flex-1 text-left min-w-0 disabled:opacity-60">
+                <div className={`text-sm truncate ${c.id === activeId ? "font-semibold" : ""}`} title={c.title}>{c.title}</div>
+                <div className="text-[11px] text-inksoft">
+                  {new Date(c.updated_at).toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                  {Number(c.cost_usd) > 0 && ` · ${fmtUsd(Number(c.cost_usd))}`}
+                </div>
+              </button>
+              <button onClick={() => deleteConversation(c)} disabled={loading} title="Usuń rozmowę" className="text-rust text-xs font-bold opacity-0 group-hover:opacity-100 focus:opacity-100 shrink-0">✕</button>
+            </div>
+          ))}
+        </div>
+      </aside>
+
+      <div className="flex-1 min-w-0 max-w-4xl">
       <div className="flex items-center justify-between mb-3">
         <p className="text-xs text-inksoft">
           Asystent widzi tylko zamówienia, pozycje, magazyn i kursy NBP (bez danych klientów) i niczego nie zmienia — tylko odczyt.
         </p>
         {messages.length > 0 && (
-          <button onClick={() => { setMessages([]); setError(""); }} className="text-xs font-semibold text-teal hover:underline shrink-0 ml-3">
+          <button onClick={newConversation} disabled={loading} className="text-xs font-semibold text-teal hover:underline shrink-0 ml-3 disabled:opacity-50">
             Nowa rozmowa
           </button>
         )}
@@ -197,6 +258,7 @@ export default function AiView({ session }: { session: Session }) {
         </div>
       </div>
       <div ref={bottomRef} />
+      </div>
     </div>
   );
 }

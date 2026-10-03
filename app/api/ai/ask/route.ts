@@ -36,6 +36,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Brak pytania." }, { status: 400 });
   }
   const question = messages[messages.length - 1].content;
+  // Historia: gdy klient podał istniejącą rozmowę, dopisujemy do niej; cudzej (albo nieistniejącej) NIE ruszamy — zakładamy nową.
+  const rawId = typeof body?.conversationId === "string" && /^[0-9a-f-]{36}$/i.test(body.conversationId) ? body.conversationId : null;
+  type StoredConversation = { id: string; messages: any[]; cost_usd: number };
+  let existing = null as StoredConversation | null;
+  if (rawId) {
+    const { data } = await db.from("ai_conversations").select("id, messages, cost_usd").eq("id", rawId).eq("user_id", uid).maybeSingle();
+    existing = (data as StoredConversation | null) ?? null;
+  }
   const model = process.env.AI_MODEL || "claude-sonnet-5-5";
   const email = (await db.auth.admin.getUserById(uid)).data.user?.email ?? null;
 
@@ -64,7 +72,24 @@ export async function POST(request: Request) {
       cache_read_tokens: result.usage.cacheRead,
       cost_usd: costUsd,
     });
-    return NextResponse.json({ ok: true, answer: result.text, queries: result.queries, usage: result.usage, costUsd, model });
+    // Zapis rozmowy (po stronie serwera — przeglądarka nie ma prawa insert). Błąd zapisu historii nie psuje odpowiedzi.
+    const now = new Date().toISOString();
+    const turn = [
+      { role: "user", content: question, at: now },
+      { role: "assistant", content: result.text, at: now, queries: result.queries, usage: result.usage, costUsd, model },
+    ];
+    let conversationId: string | null = existing?.id ?? null;
+    if (existing) {
+      await db.from("ai_conversations").update({ messages: [...(existing.messages || []), ...turn], cost_usd: Number(existing.cost_usd || 0) + (costUsd ?? 0), updated_at: now }).eq("id", existing.id);
+    } else {
+      const { data: created } = await db
+        .from("ai_conversations")
+        .insert({ user_id: uid, user_email: email, title: question.replace(/\s+/g, " ").slice(0, 80), messages: turn, cost_usd: costUsd ?? 0 })
+        .select("id")
+        .single();
+      conversationId = created?.id ?? null;
+    }
+    return NextResponse.json({ ok: true, answer: result.text, queries: result.queries, usage: result.usage, costUsd, model, conversationId });
   } catch (e: any) {
     const msg = String(e?.message ?? e);
     await db.from("ai_log").insert({ user_email: email, question, model, error: msg });

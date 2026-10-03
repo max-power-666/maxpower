@@ -193,3 +193,26 @@ alter table ai_log add column if not exists cost_usd numeric;
 alter table ai_log enable row level security;
 drop policy if exists "admin read ai_log" on ai_log;
 create policy "admin read ai_log" on ai_log for select using (is_admin());
+
+-- Historia rozmów z asystentem (03.10.2026): jedna rozmowa = jeden wiersz z całą wymianą w jsonb (pytania, odpowiedzi, użyte
+-- zapytania SQL, tokeny i koszt każdej odpowiedzi). Każdy Admin widzi i usuwa TYLKO własne rozmowy (user_id = auth.uid()).
+-- Zapis (utworzenie i dopisywanie wymiany) robi wyłącznie serwer (route ai/ask, service_role) — zero polityki insert, żeby
+-- przeglądarka nie mogła podrobić odpowiedzi "asystenta". Zmiana tytułu = update własnego wiersza.
+create table if not exists ai_conversations (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users(id) on delete cascade,
+  user_email text,
+  title text not null,
+  messages jsonb not null default '[]'::jsonb,   -- [{role, content, at, queries?, usage?, costUsd?, model?}]
+  cost_usd numeric not null default 0,           -- suma kosztów odpowiedzi tej rozmowy (szacunek, USD)
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists ai_conversations_user_idx on ai_conversations (user_id, updated_at desc);
+alter table ai_conversations enable row level security;
+drop policy if exists "admin read own ai_conversations" on ai_conversations;
+create policy "admin read own ai_conversations" on ai_conversations for select using (is_admin() and user_id = auth.uid());
+drop policy if exists "admin update own ai_conversations" on ai_conversations;
+create policy "admin update own ai_conversations" on ai_conversations for update using (is_admin() and user_id = auth.uid()) with check (is_admin() and user_id = auth.uid());
+drop policy if exists "admin delete own ai_conversations" on ai_conversations;
+create policy "admin delete own ai_conversations" on ai_conversations for delete using (is_admin() and user_id = auth.uid());

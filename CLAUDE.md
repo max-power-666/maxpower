@@ -956,7 +956,7 @@ widoków, dzisiejszą datę wg Warszawy, zasady okresów ("ostatnie 30 dni" = 30
 pochodzić z wyniku zapytania, a zamówienia bez ceny/kursu mają być policzone osobno i wymienione. **Przebieg:** `ai/ask` (maxDuration 300) woła
 Anthropic Messages API zwykłym `fetch` (bez SDK; `ANTHROPIC_API_KEY`, model `AI_MODEL` albo `claude-sonnet-5-5`; prompt z `cache_control`),
 pętla narzędzia `run_sql` do 12 kroków, błędy SQL wracają do modelu, który zwykle poprawia zapytanie. Cała rozmowa idzie w body (serwer nie
-trzyma stanu; odświeżenie strony czyści rozmowę, a model przy pytaniach uzupełniających odpytuje bazę od nowa). Pod każdą odpowiedzią
+trzyma stanu między wywołaniami, a model przy pytaniach uzupełniających odpytuje bazę od nowa); od 03.10.2026 rozmowy są też zapisywane w historii (niżej). Pod każdą odpowiedzią
 "Użyte zapytania do bazy (n)" do weryfikacji liczb oraz zużycie tokenów. **Każde pytanie ląduje w `ai_log`** (kto, pytanie, odpowiedź,
 zapytania, model, tokeny, błąd) — audyt i kontrola kosztów; odczyt tylko Admin, zapis tylko serwer. **Licznik kosztów** (03.10.2026, na prośbę właściciela): pasek nad rozmową pokazuje koszt tej rozmowy i sumę od początku bieżącego miesiąca
 z `ai_log` (Admin czyta `ai_log` wprost przez RLS), a pod każdą odpowiedzią "koszt ≈ $…" z podziałem tokenów (wejście / wyjście / cache zapis i odczyt).
@@ -967,8 +967,18 @@ pokazuje "—" i tokeny, nie zgaduje. `input_tokens` z API NIE zawiera tokenów 
 `cache_read_input_tokens` osobno (inne stawki). Koszt zapisywany w `ai_log.cost_usd` (+ `cache_write_tokens`/`cache_read_tokens`, kolumny
 dodane w `ai.sql`); wiersze sprzed tej zmiany mają `cost_usd = null` i nie wchodzą do sumy. Waluta to USD (tak rozlicza Anthropic) — bez przeliczenia
 na PLN (kursów USD nie synchronizujemy, `NBP_CURRENCIES` ma tylko EUR/DKK).
+**Historia rozmów** (03.10.2026, na prośbę właściciela): lista "Historia rozmów" po lewej stronie okna (nowe "+ Nowa", otwarcie
+klikiem, usuwanie "✕" z potwierdzeniem). Tabela `ai_conversations` (`ai.sql`): jedna rozmowa = jeden wiersz z całą wymianą w `messages`
+(jsonb: pytania, odpowiedzi, użyte zapytania SQL, tokeny, koszt i model każdej odpowiedzi), tytuł = początek pierwszego pytania (80 znaków;
+zmiany tytułu w UI nie ma, choć RLS pozwala na update własnego wiersza), `cost_usd` = suma kosztów rozmowy. **Każdy Admin widzi, zmienia tytuł
+i usuwa TYLKO własne rozmowy** (`user_id = auth.uid()` + `is_admin()`); **zapis (utworzenie i dopisanie wymiany) robi wyłącznie serwer**
+(`ai/ask` po udanej odpowiedzi — zero polityki insert, żeby przeglądarka nie mogła podrobić odpowiedzi "asystenta"). Klient przekazuje
+`conversationId`; serwer dopisuje tylko do rozmowy należącej do wołającego (cudza/nieistniejąca = tworzy nową), a odpowiedź niesie
+`conversationId` nowej rozmowy. Nieudana odpowiedź nie zapisuje wymiany do historii (błąd i tak trafia do `ai_log`). Przy pytaniach
+uzupełniających model dostaje tekst poprzednich wiadomości, ale NIE ich surowe wyniki SQL (odpytuje bazę od nowa). Użytkownik usunięty z
+Auth traci rozmowy (`on delete cascade`, inaczej niż historia pracy w innych modułach — to dane osobiste, nie ewidencja).
 **Świadomie NIE zrobione:** zapisywanie
-raportów/eksport do pliku (jest "Kopiuj"), streaming odpowiedzi, trwała historia rozmów, dostęp dla innych ról, zakres Zespół/Faktury/Wysyłki
+raportów/eksport do pliku (jest "Kopiuj"), streaming odpowiedzi, dostęp dla innych ról, zakres Zespół/Faktury/Wysyłki
 (wymaga dodania kolejnych widoków `ai.*` BEZ danych osobowych), wykresy w odpowiedziach. Brak marży per zamówienie — nie mamy kosztów zakupu per
 zamówienie ani prowizji marketplace'ów, prompt każe tego nie wymyślać. Nie testowane na żywym API Anthropic (brak klucza w środowisku
 asystenta) — pętla zweryfikowana na atrapie `fetch`, warstwa SQL w PGlite (odmowa dostępu do `members`/tabel/zapisu/średników).
