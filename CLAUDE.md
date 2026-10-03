@@ -25,19 +25,19 @@ numerach seryjnych, wielokanałowa synchronizacja stanów, naprawy, auto-wycena)
 - `app/page.tsx` — jeden duży client component: logowanie, nawigacja, role, zakładki
   Przegląd / Magazyn / Zespół. Większe moduły są osobno w `app/_components/`:
   `ServiceView.tsx` (Serwis), `TestsView.tsx` (Testy), `ProductCardDrawer.tsx` (karta produktu), `TradeInHub.tsx` + `TradeInOrdersView.tsx` (Trade-in),
-  `TradeInView.tsx` (Bidder), `SalesOrdersHub.tsx` (Zamówienia, karta zamówienia w `SalesOrderCard.tsx`), `ErliParcelPanel.tsx` (nadawanie Paczkomatów InPost 24/7 przez Erli, osadzony na karcie zamówienia Erli), `ShippingView.tsx` (Wysyłka DHL), `InvoicesView.tsx` (Faktury), `NbpView.tsx` (kursy NBP), `OverviewSalesDashboard.tsx` (dashboard sprzedaży na Przeglądzie), `AiView.tsx` + `Markdown.tsx` (zakładka AI), `CategoryBreakdown.tsx` (wykresy kategorii w Magazynie).
+  `TradeInView.tsx` (Bidder), `SalesOrdersHub.tsx` (Zamówienia, karta zamówienia w `SalesOrderCard.tsx`), `ErliParcelPanel.tsx` (nadawanie Paczkomatów InPost 24/7 przez Erli, osadzony na karcie zamówienia Erli), `ShippingView.tsx` (Wysyłka DHL), `InvoicesView.tsx` (Faktury), `NbpView.tsx` (kursy NBP), `OverviewSalesDashboard.tsx` (dashboard sprzedaży na Przeglądzie), `AiView.tsx` + `Markdown.tsx` (zakładka AI), `MarginView.tsx` (zakładka Marża), `CategoryBreakdown.tsx` (wykresy kategorii w Magazynie).
 - `app/api/*/route.ts` — endpointy serwerowe (sekrety tylko tu, nigdy w przeglądarce):
-  `fakturownia/sync`, `tradein/bidder`, `tradein/competitors`, `tradein/orders-sync`, `tradein/validate`, `orders/bm-sync`, `orders/refurbed-sync`, `orders/erli-sync`, `orders/allegro-sync`, `orders/allegro-auth`, `orders/allegro-callback`, `orders/octopia-sync`, `orders/amazon-sync`, `orders/validate`, `orders/bm-refresh`, `orders/erli-refresh`, `shipping/dhl-express/{check,create}`, `shipping/dhl-parcel/{check,create,label,cancel}`, `shipping/erli/{create,label,cancel}`, `shipping/sync-marketplace`, `shipping/render-zpl`, `shipping/fetch-remote-pdf`, `shipping/qz-sign`, `invoices/{create,prefill}`, `nbp/sync`, `overview/sales-stats`, `ai/ask`.
+  `fakturownia/sync`, `tradein/bidder`, `tradein/competitors`, `tradein/orders-sync`, `tradein/validate`, `orders/bm-sync`, `orders/refurbed-sync`, `orders/erli-sync`, `orders/allegro-sync`, `orders/allegro-auth`, `orders/allegro-callback`, `orders/octopia-sync`, `orders/amazon-sync`, `orders/validate`, `orders/bm-refresh`, `orders/erli-refresh`, `shipping/dhl-express/{check,create}`, `shipping/dhl-parcel/{check,create,label,cancel}`, `shipping/erli/{create,label,cancel}`, `shipping/sync-marketplace`, `shipping/render-zpl`, `shipping/fetch-remote-pdf`, `shipping/qz-sign`, `invoices/{create,prefill}`, `nbp/sync`, `overview/sales-stats`, `ai/ask`, `margin/{list,bm-invoice}`.
 - `lib/` — `supabaseClient.ts`, `buyback.ts` (logika biddera + `isAuthorized`),
   `displayName.ts` (skrócone imię: "Maksymilian J."), `workLog.ts` (interwały Dziś/7/30 dni,
   liczenie czasu i **etykiety typów czynności/statusów** — jedno źródło dla list i karty produktu),
   `search.ts` (`escapeLike` do wyszukiwania po numerze seryjnym), `scanOrders.ts` (stronicowany skan
   zamówień Back Market z budżetem czasu i kursorem), `invoices.ts` (wystawianie faktur w Fakturowni, stawka VAT, prefill nabywcy),
-  `nbp.ts` (kursy NBP: pobieranie, kurs z dnia poprzedniego, przeliczanie na PLN), `overview.ts` (bucketing dzienny/kanałowy na Przeglądzie), `aiAgent.ts` (pętla agenta Claude z narzędziem run_sql), `aiSchema.ts` (prompt systemowy = słownik danych asystenta AI).
+  `nbp.ts` (kursy NBP: pobieranie, kurs z dnia poprzedniego, przeliczanie na PLN), `overview.ts` (bucketing dzienny/kanałowy na Przeglądzie), `aiAgent.ts` (pętla agenta Claude z narzędziem run_sql), `aiSchema.ts` (prompt systemowy = słownik danych asystenta AI), `margin.ts` (marża na sztuce + średnie stawki BM z faktur), `buybackCosts.ts`/`stockCosts.ts` (koszty Trade-in), `csv.ts` (parser CSV).
 - `supabase/*.sql` — schemat, każdy plik idempotentny: `schema.sql` (units, members,
   cache Fakturowni), `tradein.sql` (bidder), `buyback-orders.sql` (zamówienia + obsługa
   paczek), `backlog.sql` (zakładka Backlog), `shipping.sql` (Wysyłka: nadawca, szablony, przesyłki), `sales-orders.sql` (zamówienia sprzedaży Back Market, refurbed, Erli, Allegro, Octopia i Amazon, plus archiwum Apilo; tokeny OAuth), `service.sql` (rejestr napraw), `tests.sql` (rejestr testów), `invoices.sql` (zakładka Faktury: tabela faktur + widok `invoices_ready_orders`),
-  `overview.sql` (widok `sales_order_values` dla dashboardu Przeglądu), `nbp.sql` (zakładka NBP: kursy walut), `inventory.sql` (widok `fakturownia_stock_with_sku` dla Magazynu -> Raw data; po schema/buyback-orders/tests), `ai.sql` (zakładka AI: widoki `ai.*`, rola `ai_reader`, funkcja `ai_query`, dziennik `ai_log`; po wszystkich powyższych).
+  `overview.sql` (widok `sales_order_values` dla dashboardu Przeglądu), `nbp.sql` (zakładka NBP: kursy walut), `inventory.sql` (widok `fakturownia_stock_with_sku` dla Magazynu -> Raw data; po schema/buyback-orders/tests), `margin.sql` (zakładka Marża: `fakturownia_purchases`, `bm_invoice_lines`, widok `margin_items`; po shipping/buyback-orders/nbp), `ai.sql` (zakładka AI: widoki `ai.*`, rola `ai_reader`, funkcja `ai_query`, dziennik `ai_log`; po wszystkich powyższych).
 - `scripts/import-buyback.mjs` — jednorazowy import ze starego programu Buyback Bidder.
 
 ## Zakładki i role
@@ -62,6 +62,7 @@ Rola jest zwykłym tekstem w `members.role` — dodanie roli nie wymaga SQL.
 | Backlog | `backlog` | wszyscy (każda rola) |
 | Wysyłka | `shipping` | Admin, Manager, Zamówienia |
 | Faktury | `invoices` | Admin, Manager, Zamówienia |
+| Marża | `margin` | Admin, Manager (03.10.2026) |
 | NBP | `nbp` | Admin, Manager |
 | AI | `ai` | tylko Admin (03.10.2026; serwer też wpuszcza tylko Admina) |
 | RCP | `rcp` | wszyscy (każda rola) |
@@ -1065,6 +1066,26 @@ raportów/eksport do pliku (jest "Kopiuj"), streaming odpowiedzi, dostęp dla in
 zamówienie ani prowizji marketplace'ów, prompt każe tego nie wymyślać. Nie testowane na żywym API Anthropic (brak klucza w środowisku
 asystenta) — pętla zweryfikowana na atrapie `fetch`, warstwa SQL w PGlite (odmowa dostępu do `members`/tabel/zapisu/średników).
 
+**Marża** (zakładka `margin`, `MarginView.tsx`, `lib/margin.ts`, `margin.sql`, `app/api/margin/{list,bm-invoice}`; 03.10.2026, na prośbę właściciela; Admin i Manager).
+Lista SPRZEDANYCH sztuk z wprowadzonym numerem seryjnym/IMEI (jedna pozycja zamówienia = jeden wiersz, jak w Zamówieniach, ale kolumny finansowe) z marżą po kosztach:
+Data, Marketplace, Nr zamówienia (link do karty), Numer seryjny, SKU, Cena sprzedaży (PLN + oryginał), Cena zakupu, VAT od marży, Wysyłka, Koszty dodatkowe, Prowizja, Serwis, Marża, Marża %;
+pod tabelą podsumowanie całego wyniku filtra (sprzedaż, zakup, koszty, marża łącznie i %), filtry Wszystkie/Back Market/Refurbed, wyszukiwarka (numer seryjny, zamówienie, SKU), stronicowanie 25/50/100.
+**Zakres na start: tylko Back Market i refurbed** (decyzja właściciela — tam mamy rzetelne źródło prowizji; Allegro/Erli/Octopia/Amazon dojdą po ustaleniu prowizji), tylko zamówienia liczone jako sprzedaż (`isCountedOrder`, bez anulowanych/zwróconych).
+**Wzór (decyzja właściciela):** Marża = cena sprzedaży (PLN, brutto) − cena zakupu − **VAT od marży** − wysyłka − koszty dodatkowe − prowizja − serwis, gdzie **VAT od marży = (cena sprzedaży − cena zakupu, BEZ kosztów dodatkowych) × 23/123**, nigdy ujemny.
+Źródła: **cena sprzedaży** — `sales_order_items.price` przeliczona kursem NBP z dnia poprzedniego względem daty zamówienia; **cena zakupu** — cena zakupu sztuki z Fakturowni po numerze seryjnym
+(bez rozróżniania wielkości liter; przy odkupie tego samego numeru bierzemy zakup SPRZED zamówienia); **wysyłka** — cena DHL z wyceny zapisana przy nadaniu (jak na karcie zamówienia), a gdy jej nie ma, ręczny `shipping_cost`;
+**koszty dodatkowe** — Trade-in (prowizja BM + logistyka wg regulaminu, `lib/buybackCosts.ts`) po numerze zamówienia z opisu sztuki w Fakturowni; sztuka spoza Trade-in ma 0; **serwis** — kolumna zawsze pusta ("—"),
+koszty serwisu wejdą do marży po wprowadzeniu kosztów części (decyzja właściciela). Koszty poziomu ZAMÓWIENIA (wysyłka, opłaty z faktury BM) dzielone na pozycje proporcjonalnie do ceny pozycji.
+**Brakujące składniki:** marża nie jest liczona (— i flaga), gdy brak ceny sprzedaży/kursu NBP albo ceny zakupu; brak wysyłki/prowizji liczy się jako 0, ALE wiersz dostaje ⚠ z listą braków (najechanie), a podsumowanie liczy takie pozycje i podaje ich liczbę.
+**Fakturownia: historia zakupów.** `fakturownia_stock_cache` trzyma tylko sztuki ze stanem 1 i KASUJE sprzedane, więc cena zakupu sprzedanej sztuki przepadała. Synchronizacja (`fakturownia/sync`) zapisuje teraz WSZYSTKIE produkty także do
+`fakturownia_purchases` (też sprzedane, ze `stock_level`); `margin.sql` jednorazowo kasuje `last_synced_at`, więc najbliższe "Odśwież" w Magazynie robi pełny skan (~minuta) i wypełnia tabelę — **do tego czasu zakładka Marża pokazuje "brak ceny zakupu"**.
+**Prowizja Back Market (z faktur):** właściciel wgrywa tygodniowe faktury CSV (`invoice_YYYYMMDD-EU-H-*.csv`, przycisk "Wgraj fakturę BM (CSV)", wiele plików naraz; numer faktury z nazwy pliku, ponowne wgranie nie dubluje — klucz `(invoice_ref, line_no)`) do `bm_invoice_lines`.
+Sprawdzone na 3 prawdziwych fakturach (sumy z CSV zgadzają się z PDF-ami co do grosza): **prowizja NIE jest stała** — na zamówieniu 6%, 11% albo 20% (akcesoria) sprzedaży, do tego **opłata płatnicza 1%** i **stała opłata CCBM za pozycję** (6,99 € dla konsol, 1,99 € akcesoria, 6,49 €), a "Platform Adjustment" (dynamiczne ceny) faktura sama kompensuje wpisem w portfelu (pomijamy go jako kosztem neutralny; netto lekko dodatni).
+Faktury są bez VAT (odwrotne obciążenie, "AE"). Liczymy **dokładnie z faktury** dla zamówień na niej (prowizja + opłata płatnicza + CCBM zsumowane z kilku faktur po `order_id`; gdy CCBM jeszcze nie fakturowano — średnia stała), a **dla pozostałych szacujemy ze średnich stawek** (`deriveBmRates`:
+ostatnie 8 tygodni faktur, tylko zamówienia sprzedane i niezwrócone; na dzień wdrożenia z 3 faktur ≈ 7,1% prowizji + 1,0% płatności + ≈ 6,2 € CCBM za pozycję, z 635 zamówień) — szacunek oznaczony w tabeli "szacunek", średnie aktualizują się same przy kolejnym wgraniu faktury ("aktualizowane co tydzień" wg decyzji właściciela).
+Miesięczna opłata abonamentowa BM (75 €) i korekty/credit notes nie są rozdzielane na zamówienia. **refurbed:** prowizja wprost z danych zamówienia (`settlement_total_commission` pozycji = baza + płatność + dynamiczna, w walucie rozliczenia, przeliczana NBP).
+Widok `margin_items` czyta tabele z danymi finansowymi, więc jest dostępny TYLKO dla `service_role`; route `margin/list` wpuszcza Admina i Managera i liczy wszystkie wiersze naraz po stronie serwera (stronicowanie/sumy na wyniku). Kursy NBP muszą sięgać stycznia 2026 ("Odśwież" w zakładce NBP).
+
 **RCP** (`RcpView.tsx`) — rejestracja czasu pracy; **na razie tylko pusta zakładka-szkielet**, widoczna dla wszystkich ról. Docelowo z niej ma wyjść ewidencja godzin
 potrzebna do wydajności (punkty na godzinę) i premii z regulaminu (plan rozwoju, punkt 8).
 
@@ -1393,4 +1414,5 @@ Configuration) musi być aktualny adres produkcyjny, inaczej magic link nie zadz
     per kraj nabywcy (dziś jedna stała stawka)
 13. ✅ Przegląd: dashboard sprzedaży (kafelki Dziś/30 dni, wykres dzienny, udział kanałów) + NBP: kursy walut do
     przeliczania na PLN (01.10.2026)
+15. 🟡 Marża: lista sprzedanych sztuk z marżą (BM i refurbed; serwis jako pusta kolumna) zrobiona · ⬜ pozostałe kanały (Allegro/Erli/Octopia/Amazon), koszty części/serwisu, PCC, eksport
 14. 🟡 AI: asystent do pytań o dane (Admin, sprzedaż/zamówienia/magazyn) zrobiony · ⬜ pozostałe role, zakresy Zespół/Faktury/Wysyłki, zapis raportów, streaming

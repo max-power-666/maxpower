@@ -39,6 +39,26 @@ const num = (v: unknown): number | null => {
 // Jedno zamówienie liczymy RAZ, nawet gdy kilka sztuk w magazynie wskazuje to samo (inaczej koszty by się dublowały). Koszt w EUR
 // przeliczamy na PLN kursem NBP z dnia poprzedniego względem wypłaty (a gdy brak daty wypłaty — względem utworzenia zamówienia),
 // tą samą zasadą co reszta aplikacji. Zamówienia bez kursu NBP są pominięte z sumy i policzone osobno (nie zgadujemy kursu).
+// Koszt Trade-in JEDNEGO zamówienia w PLN (prowizja + logistyka z lib/buybackCosts.ts, EUR -> PLN kursem NBP z dnia poprzedniego względem wypłaty).
+// null amountPln = nie da się policzyć (zamówienie niewypłacone/bez ceny albo brak kursu); noRate odróżnia brak kursu od reszty.
+export function tradeInOrderCostPln(o: BuybackOrderLite, eurRates: NbpRate[]): { amountPln: number | null; noRate: boolean; incomplete: boolean } {
+  if (!TRADEIN_PAID_STATUSES.includes(o.status)) return { amountPln: null, noRate: false, incomplete: false };
+  const c = computeTradeInCosts({
+    originalPrice: num(o.original_price),
+    counterOfferPrice: num(o.counter_offer_price),
+    currency: o.counter_offer_price_currency ?? o.original_price_currency,
+    title: o.product_title,
+    sku: o.sku,
+  });
+  if (!c) return { amountPln: null, noRate: false, incomplete: false };
+  // Gdy logistyki nie da się ustalić (nieznana kategoria/waluta) — bierzemy samą prowizję i zaznaczamy to jako niepełne.
+  const eur = c.extra ?? c.commission;
+  const date = (o.payment_date || o.creation_date || "").slice(0, 10);
+  const rate = date ? rateBeforeDate(eurRates, date) : null;
+  if (rate === null) return { amountPln: null, noRate: true, incomplete: c.extra === null };
+  return { amountPln: eur * rate, noRate: false, incomplete: c.extra === null };
+}
+
 export function stockTradeInCosts(descriptions: (string | null)[], orders: Map<string, BuybackOrderLite>, eurRates: NbpRate[]): CostLine {
   const seen = new Set<string>();
   let amount = 0;
@@ -52,24 +72,13 @@ export function stockTradeInCosts(descriptions: (string | null)[], orders: Map<s
     linkedItems += 1;
     if (seen.has(id)) continue;
     seen.add(id);
-    const c = computeTradeInCosts({
-      originalPrice: num(o.original_price),
-      counterOfferPrice: num(o.counter_offer_price),
-      currency: o.counter_offer_price_currency ?? o.original_price_currency,
-      title: o.product_title,
-      sku: o.sku,
-    });
-    if (!c) continue;
-    // Gdy logistyki nie da się ustalić (nieznana kategoria/waluta) — bierzemy samą prowizję i zaznaczamy to jako niepełne.
-    const eur = c.extra ?? c.commission;
-    if (c.extra === null) incomplete += 1;
-    const date = (o.payment_date || o.creation_date || "").slice(0, 10);
-    const rate = date ? rateBeforeDate(eurRates, date) : null;
-    if (rate === null) {
+    const r = tradeInOrderCostPln(o, eurRates);
+    if (r.incomplete) incomplete += 1;
+    if (r.noRate) {
       noRate += 1;
       continue;
     }
-    amount += eur * rate;
+    if (r.amountPln !== null) amount += r.amountPln;
   }
   const parts = [`z ${seen.size} zamówień Trade-in (${linkedItems} sztuk w magazynie)`];
   if (noRate > 0) parts.push(`${noRate} zamówień pominięto — brak kursu NBP (kliknij „Odśwież” w zakładce NBP)`);

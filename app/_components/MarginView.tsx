@@ -1,0 +1,226 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import type { Session } from "@supabase/supabase-js";
+import { MARKETPLACES } from "@/lib/salesOrders";
+import type { MemberLite } from "@/lib/displayName";
+import SalesOrderCard from "./SalesOrderCard";
+import type { BmRates, MarginResult } from "@/lib/margin";
+
+// Zakładka Marża (03.10.2026, Admin i Manager): lista sprzedanych sztuk z numerem seryjnym i marżą po kosztach. Układ jak lista Zamówień,
+// ale kolumny finansowe. Całość liczy serwer (app/api/margin/list, lib/margin.ts); tu tylko wyświetlamy, filtrujemy i wgrywamy faktury BM.
+
+type Totals = { count: number; withMargin: number; sale: number; purchase: number; vat: number; shipping: number; extra: number; commission: number; margin: number; incomplete: number };
+const PAGE_SIZES = [25, 50, 100];
+const FILTERS = [
+  { key: "", label: "Wszystkie" },
+  { key: "backmarket", label: "Back Market" },
+  { key: "refurbed", label: "Refurbed" },
+];
+
+const fmtPLN = (n: number | null) => (n === null ? "—" : n.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+const fmtDate = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—");
+const pill = (active: boolean) => `px-3 py-1.5 rounded-full text-sm font-semibold border ${active ? "bg-ink text-paper border-ink" : "bg-white border-line"}`;
+
+export default function MarginView({ session, members }: { session: Session; members: MemberLite[] }) {
+  const [rows, setRows] = useState<MarginResult[]>([]);
+  const [total, setTotal] = useState(0);
+  const [totals, setTotals] = useState<Totals | null>(null);
+  const [bmRates, setBmRates] = useState<BmRates | null>(null);
+  const [invoiceCount, setInvoiceCount] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const [marketplace, setMarketplace] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [uploadMsg, setUploadMsg] = useState("");
+  const [openOrder, setOpenOrder] = useState<{ marketplace: string; externalId: string } | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const seq = useRef(0);
+  const auth = { Authorization: `Bearer ${session.access_token}` };
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setSearch(searchInput.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  async function load() {
+    const mySeq = ++seq.current;
+    setLoading(true);
+    setError("");
+    try {
+      const qs = new URLSearchParams({ page: String(page), pageSize: String(pageSize), search, marketplace });
+      const res = await fetch(`/api/margin/list?${qs}`, { headers: auth });
+      const data = await res.json().catch(() => ({}));
+      if (mySeq !== seq.current) return;
+      if (!res.ok) throw new Error(data?.error || `Błąd serwera (${res.status}).`);
+      setRows(data.rows);
+      setTotal(data.total);
+      setTotals(data.totals);
+      setBmRates(data.bmRates);
+      setInvoiceCount(data.invoiceCount);
+    } catch (e: any) {
+      if (mySeq === seq.current) setError(e.message || "Nie udało się wczytać marży.");
+    } finally {
+      if (mySeq === seq.current) setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, pageSize, search, marketplace]);
+
+  async function upload(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    setUploadMsg("");
+    const results: string[] = [];
+    for (const f of Array.from(files)) {
+      try {
+        const csv = await f.text();
+        const res = await fetch("/api/margin/bm-invoice", { method: "POST", headers: { ...auth, "Content-Type": "application/json" }, body: JSON.stringify({ filename: f.name, csv }) });
+        const data = await res.json().catch(() => ({}));
+        results.push(res.ok ? `${data.invoiceRef}: ${data.lines} wierszy, ${data.orders} zamówień` : `${f.name}: ${data?.error || "błąd"}`);
+      } catch (e: any) {
+        results.push(`${f.name}: ${e.message || "błąd"}`);
+      }
+    }
+    setUploadMsg(results.join(" · "));
+    if (fileRef.current) fileRef.current.value = "";
+    load();
+  }
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const marginCls = (n: number | null) => (n === null ? "" : n < 0 ? "text-rust" : "text-teal");
+
+  return (
+    <div>
+      <div className="border border-line bg-white p-4 mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="text-sm">
+          <div className="text-xs font-semibold text-inksoft mb-1">PROWIZJA BACK MARKET (z wgranych faktur)</div>
+          {bmRates ? (
+            <span>
+              średnio <span className="font-mono font-semibold">{bmRates.commissionPct.toFixed(2).replace(".", ",")}%</span> prowizji +{" "}
+              <span className="font-mono font-semibold">{bmRates.paymentPct.toFixed(2).replace(".", ",")}%</span> opłaty płatniczej +{" "}
+              <span className="font-mono font-semibold">{bmRates.ccbmFixedEur.toFixed(2).replace(".", ",")} €</span> za pozycję (CCBM) · z {bmRates.orders} zamówień,{" "}
+              {invoiceCount} {invoiceCount === 1 ? "faktury" : "faktur"}. Dla zamówień objętych fakturą liczone dokładnie z niej.
+            </span>
+          ) : (
+            <span className="text-inksoft">Brak wgranych faktur — prowizja Back Market nie jest liczona. Wgraj fakturę tygodniową (CSV).</span>
+          )}
+          <div className="text-[11px] text-inksoft mt-1">Średnia z ostatnich 8 tygodni faktur; wgrywaj kolejne co tydzień, a stawki zaktualizują się same. refurbed — prowizja wprost z danych zamówienia.</div>
+        </div>
+        <div className="shrink-0">
+          <input ref={fileRef} type="file" accept=".csv,text/csv" multiple className="hidden" onChange={(e) => upload(e.target.files)} />
+          <button onClick={() => fileRef.current?.click()} className="bg-ink text-paper px-4 py-2 rounded text-sm font-semibold">Wgraj fakturę BM (CSV)</button>
+        </div>
+      </div>
+      {uploadMsg && <p className="text-xs text-teal font-semibold mb-3">{uploadMsg}</p>}
+
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <div className="flex flex-wrap items-center gap-2">
+          {FILTERS.map((f) => (
+            <button key={f.key} onClick={() => { setMarketplace(f.key); setPage(1); }} className={pill(marketplace === f.key)}>{f.label}</button>
+          ))}
+          <input
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Szukaj: numer seryjny, zamówienie, SKU"
+            className="w-72 border border-line bg-white px-3 py-2 rounded text-sm ml-2"
+          />
+          <label className="text-xs text-inksoft ml-2">Pokaż</label>
+          <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }} className="border border-line bg-white px-2 py-1.5 rounded text-sm font-semibold">
+            {PAGE_SIZES.map((n) => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </div>
+        <div className="flex items-center gap-3 text-xs text-inksoft">
+          <span>{total.toLocaleString("pl-PL")} pozycji · strona {Math.min(page, totalPages)} z {totalPages}</span>
+          <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1 || loading} className="bg-white border border-line px-3 py-1.5 rounded text-sm font-semibold text-ink disabled:opacity-40">‹ Poprzednia</button>
+          <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages || loading} className="bg-white border border-line px-3 py-1.5 rounded text-sm font-semibold text-ink disabled:opacity-40">Następna ›</button>
+        </div>
+      </div>
+
+      {error && <p className="text-rust text-xs mb-3">{error}</p>}
+
+      <div className="border border-line bg-white overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-inksoft border-b border-line">
+              <th className="p-3">Data</th>
+              <th className="p-3">Marketplace</th>
+              <th className="p-3">Nr zamówienia</th>
+              <th className="p-3">Numer seryjny</th>
+              <th className="p-3">SKU</th>
+              <th className="p-3 text-right">Cena sprzedaży</th>
+              <th className="p-3 text-right">Cena zakupu</th>
+              <th className="p-3 text-right">VAT od marży</th>
+              <th className="p-3 text-right">Wysyłka</th>
+              <th className="p-3 text-right">Koszty dodatkowe</th>
+              <th className="p-3 text-right">Prowizja</th>
+              <th className="p-3 text-right">Serwis</th>
+              <th className="p-3 text-right">Marża</th>
+              <th className="p-3 text-right">Marża %</th>
+            </tr>
+          </thead>
+          <tbody>
+            {!loading && rows.length === 0 && (
+              <tr><td colSpan={14} className="p-6 text-center text-inksoft text-sm">{search || marketplace ? "Brak wyników." : "Brak sprzedanych sztuk z numerem seryjnym (Back Market i refurbed)."}</td></tr>
+            )}
+            {rows.map((r) => (
+              <tr key={`${r.marketplace}:${r.orderId}:${r.itemKey}`} className="border-b border-line last:border-b-0 hover:bg-paper">
+                <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDate(r.orderDate)}</td>
+                <td className="p-3 text-xs">{MARKETPLACES.find((m) => m.key === r.marketplace)?.label ?? r.marketplace}</td>
+                <td className="p-3 text-xs font-mono">
+                  <button onClick={() => setOpenOrder({ marketplace: r.marketplace, externalId: r.orderId })} className="text-teal hover:underline">{r.orderId}</button>
+                </td>
+                <td className="p-3 font-mono text-xs font-semibold">{r.serial}</td>
+                <td className="p-3 font-mono text-xs">{r.sku || "—"}</td>
+                <td className="p-3 text-right font-mono whitespace-nowrap">
+                  {fmtPLN(r.salePln)}
+                  {r.currency !== "PLN" && r.price !== null && <div className="text-[10px] text-inksoft">{r.price.toLocaleString("pl-PL")} {r.currency}</div>}
+                </td>
+                <td className="p-3 text-right font-mono">{fmtPLN(r.purchasePln)}</td>
+                <td className="p-3 text-right font-mono text-inksoft">{fmtPLN(r.vatPln)}</td>
+                <td className="p-3 text-right font-mono">{fmtPLN(r.shippingPln)}</td>
+                <td className="p-3 text-right font-mono">{fmtPLN(r.extraPln)}</td>
+                <td className="p-3 text-right font-mono whitespace-nowrap">
+                  {fmtPLN(r.commissionPln)}
+                  {r.commissionSource === "szacunek" && <div className="text-[10px] text-amber font-sans" title="Zamówienie jeszcze nie jest na wgranej fakturze — prowizja ze średnich stawek">szacunek</div>}
+                </td>
+                <td className="p-3 text-right font-mono text-inksoft" title="Koszty serwisu jeszcze nie wchodzą do marży">—</td>
+                <td className={`p-3 text-right font-mono font-semibold whitespace-nowrap ${marginCls(r.marginPln)}`}>
+                  {fmtPLN(r.marginPln)}
+                  {r.flags.length > 0 && <span className="text-amber ml-1 cursor-help" title={r.flags.join("; ")}>⚠</span>}
+                </td>
+                <td className={`p-3 text-right font-mono ${marginCls(r.marginPln)}`}>{r.marginPct === null ? "—" : `${(r.marginPct * 100).toLocaleString("pl-PL", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {totals && (
+        <div className="border border-line border-t-0 bg-white px-4 py-3 flex flex-wrap items-center gap-x-8 gap-y-1 text-sm">
+          <span className="text-xs font-semibold text-inksoft">PODSUMOWANIE WYNIKU — wszystkie strony, {totals.withMargin} z {totals.count} pozycji z policzoną marżą</span>
+          <span>Sprzedaż: <span className="font-mono font-semibold">{fmtPLN(totals.sale)} zł</span></span>
+          <span>Zakup: <span className="font-mono font-semibold">{fmtPLN(totals.purchase)} zł</span></span>
+          <span>Koszty (wysyłka + dodatkowe + prowizja): <span className="font-mono font-semibold">{fmtPLN(totals.shipping + totals.extra + totals.commission)} zł</span></span>
+          <span>Marża łącznie: <span className={`font-mono font-bold ${marginCls(totals.margin)}`}>{fmtPLN(totals.margin)} zł</span></span>
+          <span>Marża %: <span className="font-mono font-semibold">{totals.sale > 0 ? ((totals.margin / totals.sale) * 100).toLocaleString("pl-PL", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : "—"}%</span></span>
+          {totals.incomplete > 0 && <span className="text-amber text-xs">⚠ {totals.incomplete} pozycji z niepełnymi kosztami (najedź na ⚠ w wierszu)</span>}
+        </div>
+      )}
+      <p className="text-[11px] text-inksoft mt-3 max-w-4xl">
+        Marża = cena sprzedaży (PLN, brutto) − cena zakupu − VAT od marży ({"("}sprzedaż − zakup{")"} × 23/123, bez kosztów dodatkowych) − wysyłka − koszty dodatkowe (Trade-in) − prowizja marketplace&apos;u.
+        Koszty serwisu jeszcze nie są uwzględniane. Koszty zamówień z wieloma pozycjami dzielone wg ceny pozycji; waluty przeliczone kursem NBP z dnia poprzedniego względem daty zamówienia.
+      </p>
+
+      {openOrder && <SalesOrderCard marketplace={openOrder.marketplace} externalId={openOrder.externalId} session={session} members={members} onClose={() => setOpenOrder(null)} />}
+    </div>
+  );
+}

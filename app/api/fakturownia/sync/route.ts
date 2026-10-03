@@ -97,6 +97,26 @@ export async function GET(request: Request) {
       }));
     const toDeleteIds = products.filter((p) => Number(p.stock_level) !== 1).map((p) => p.id);
 
+    // WSZYSTKIE produkty (także sprzedane) do fakturownia_purchases — historia cen zakupu do liczenia marży (zakładka Marża); cache wyżej
+    // trzyma tylko sztuki ze stanem 1 i kasuje sprzedane, więc po sprzedaży cena zakupu inaczej by przepadła.
+    const purchases = products.map((p) => ({
+      id: p.id,
+      name: p.name ?? null,
+      description: p.description ?? null,
+      purchase_price_gross: Number(p.purchase_price_gross) || 0,
+      category_name: (p.category_id != null && categoryNames[String(p.category_id)]) || "Bez kategorii",
+      stock_level: p.stock_level === null || p.stock_level === undefined ? null : Number(p.stock_level),
+      product_created_at: p.created_at ?? null,
+      updated_at: new Date().toISOString(),
+    }));
+    {
+      const { error } = await admin.from("fakturownia_purchases").upsert(purchases);
+      // Brak tabeli (nie uruchomiono margin.sql) nie psuje synchronizacji magazynu — tylko pomijamy historię zakupów.
+      if (error && !/fakturownia_purchases/.test(error.message)) {
+        return NextResponse.json({ error: `Błąd zapisu do Supabase: ${error.message}` }, { status: 500 });
+      }
+    }
+
     if (toUpsert.length > 0) {
       const { error } = await admin.from("fakturownia_stock_cache").upsert(toUpsert);
       if (error) return NextResponse.json({ error: `Błąd zapisu do Supabase: ${error.message}` }, { status: 500 });
