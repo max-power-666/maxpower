@@ -10,6 +10,37 @@
 
 import { rateBeforeDate, type NbpRate } from "./nbp";
 import { tradeInOrderCostPln, type BuybackOrderLite } from "./stockCosts";
+import { tradeInCategory } from "./buybackCosts";
+
+// Prowizja Back Market od sprzedaży — reguły sprawdzone na 707 zamówieniach z faktur (wszystkie zgodne co do stawki, poza kilkoma zamówieniami z mieszanymi pozycjami):
+//  - KONSOLE: standardowo 11% (regulamin art. 15.1, "pozostałe produkty"), ale w programie Accelerator for Sellers (zaproszenie BM dla M13) obniżka o 5 pkt proc.
+//    — czyli 6% — dla sprzedaży konsol do FR/DE/ES/IT w okresie 15.08–31.12.2026. Poza tymi krajami albo poza okresem programu: 11%.
+//    Program NIE obejmuje konsol retro, gier ani akcesoriów konsolowych.
+//  - AKCESORIA konsolowe (pady, Joy-Cony): 20% (akcesoria innych marek), bez obniżki.
+//  - POZOSTAŁE (aparaty, zegarki, telefony...): 11% (bez obniżki; stawki 10%/12% dla MacBooków/smartfonów ES-FR z regulaminu pomijamy — poza zakresem listy).
+export const BM_ACCELERATOR = { markets: ["FR", "DE", "ES", "IT"], from: "2026-08-15", to: "2026-12-31", reductionPp: 5 };
+export const BM_STANDARD_PCT = 11;
+export const BM_ACCESSORY_PCT = 20;
+export type BmKind = "console" | "accessory" | "other";
+
+export function bmKind(sku: string | null | undefined, title: string | null | undefined): BmKind {
+  const p = (sku || "").split("-")[0].toLowerCase();
+  const t = (title || "").toLowerCase();
+  if (/^(pad|ds4|nsjc|ps5pad|joy)/.test(p) || /manette|controller|joy-?con|joystick|dualshock|dualsense|gamepad|\bpad\b/.test(t)) return "accessory";
+  if (/macbook|laptop/.test(t)) return "other";
+  return tradeInCategory(title, sku) === "consoles_laptops" ? "console" : "other";
+}
+
+// Stawka prowizji (% ceny sprzedaży) wg reguł wyżej; `date` = data zamówienia (YYYY-MM-DD), `country` = kraj odbiorcy.
+export function bmCommissionPct(o: { sku: string | null | undefined; title: string | null | undefined; country: string | null | undefined; date: string }): { pct: number; kind: BmKind; accelerator: boolean } {
+  const kind = bmKind(o.sku, o.title);
+  if (kind === "accessory") return { pct: BM_ACCESSORY_PCT, kind, accelerator: false };
+  if (kind === "console" && o.country && BM_ACCELERATOR.markets.includes(o.country.toUpperCase()) && o.date >= BM_ACCELERATOR.from && o.date <= BM_ACCELERATOR.to) {
+    return { pct: BM_STANDARD_PCT - BM_ACCELERATOR.reductionPp, kind, accelerator: true };
+  }
+  return { pct: BM_STANDARD_PCT, kind, accelerator: false };
+}
+
 
 export const MARGIN_VAT_RATE = 23; // % — VAT od marży (23/123 marży brutto), ta sama stała stawka co faktury (INVOICE_VAT_RATE)
 export const MARGIN_MARKETPLACES = ["backmarket", "refurbed"] as const;
@@ -81,17 +112,18 @@ const num = (v: unknown): number | null => {
 };
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-export type BmLine = { invoice_ref: string; invoice_key: string; order_id: string | null; amount: number | string; sku?: string | null };
+export type BmLine = { invoice_ref: string; invoice_key: string; order_id: string | null; amount: number | string; sku?: string | null; designation?: string | null };
 export type BmRates = {
-  commissionPct: number; // % ceny sprzedaży: prowizja ("sales_fees") — średnia z faktur
-  paymentPct: number; // % ceny sprzedaży: opłata płatnicza ("payment_fees")
-  ccbmFixedEur: number; // € za pozycję: Customer Care by Back Market ("ccbm_fees") — kwota stała, nie procent
+  commissionPct: number; // % ceny sprzedaży: średnia prowizja z faktur (tylko do wyświetlenia — szacunek idzie wg reguł bmCommissionPct, nie średniej)
+  paymentPct: number; // % ceny sprzedaży: opłata płatnicza ("payment_fees") — średnia z faktur (regulamin: 1%)
+  ccbmFixedEur: number; // € za pozycję: Customer Care by Back Market ("ccbm_fees") dla konsol i reszty — kwota stała, nie procent
+  ccbmAccessoryEur: number; // € za pozycję CCBM dla akcesoriów (znacznie niższa)
   orders: number; // z ilu zamówień policzono
-  invoices: string[]; // numery faktur wzięte do średniej
+  invoices: string[]; // numery faktur wzięte do średnich
 };
 
-// Średnie stawki BM z wgranych faktur: z ostatnich `weeks` tygodni faktur (numer zaczyna się od daty RRRRMMDD), tylko zamówienia SPRZEDANE i niezwrócone
-// (zwroty mają ujemne "sales" i kredyty prowizji — wypaczyłyby średnią). Zwraca null, gdy nie ma z czego liczyć.
+// Średnie z wgranych faktur: z ostatnich `weeks` tygodni faktur (numer zaczyna się od daty RRRRMMDD), tylko zamówienia SPRZEDANE i niezwrócone (zwroty mają ujemne "sales"
+// i kredyty prowizji — wypaczyłyby średnią). CCBM liczymy osobno dla akcesoriów (SKU z wiersza "sales" zamówienia) i dla pozostałych. Zwraca null, gdy nie ma z czego liczyć.
 export function deriveBmRates(lines: BmLine[], weeks = 8): BmRates | null {
   const dates = lines.map((l) => l.invoice_ref.slice(0, 8)).filter((d) => /^\d{8}$/.test(d)).sort();
   if (dates.length === 0) return null;
@@ -103,13 +135,15 @@ export function deriveBmRates(lines: BmLine[], weeks = 8): BmRates | null {
     return /^\d{8}$/.test(d) && Date.UTC(+d.slice(0, 4), +d.slice(4, 6) - 1, +d.slice(6, 8)) >= cutoff;
   });
   const byOrder = new Map<string, Record<string, number>>();
+  const skuOf = new Map<string, string>();
   for (const l of inWindow) {
     if (!l.order_id) continue;
     const o = byOrder.get(l.order_id) || {};
     o[l.invoice_key] = (o[l.invoice_key] || 0) + Number(l.amount);
     byOrder.set(l.order_id, o);
+    if (l.invoice_key === "sales" && l.sku) skuOf.set(l.order_id, l.sku);
   }
-  let sales = 0, comm = 0, pay = 0, ccbm = 0, ccbmLines = 0, orders = 0;
+  let sales = 0, comm = 0, pay = 0, orders = 0;
   for (const o of byOrder.values()) {
     if (!(o.sales > 0) || o.refunds) continue;
     orders++;
@@ -117,17 +151,24 @@ export function deriveBmRates(lines: BmLine[], weeks = 8): BmRates | null {
     comm += -(o.sales_fees || 0);
     pay += -(o.payment_fees || 0);
   }
+  let ccbmMain = 0, ccbmMainN = 0, ccbmAcc = 0, ccbmAccN = 0;
   for (const l of inWindow) {
-    if (l.invoice_key === "ccbm_fees" && Number(l.amount) < 0) {
-      ccbm += -Number(l.amount);
-      ccbmLines++;
+    if (l.invoice_key !== "ccbm_fees" || !(Number(l.amount) < 0) || !l.order_id) continue;
+    const acc = bmKind(skuOf.get(l.order_id) ?? l.sku ?? null, l.designation ?? null) === "accessory";
+    if (acc) {
+      ccbmAcc += -Number(l.amount);
+      ccbmAccN++;
+    } else {
+      ccbmMain += -Number(l.amount);
+      ccbmMainN++;
     }
   }
   if (orders === 0 || sales <= 0) return null;
   return {
     commissionPct: (comm / sales) * 100,
     paymentPct: (pay / sales) * 100,
-    ccbmFixedEur: ccbmLines > 0 ? ccbm / ccbmLines : 0,
+    ccbmFixedEur: ccbmMainN > 0 ? ccbmMain / ccbmMainN : 6.99,
+    ccbmAccessoryEur: ccbmAccN > 0 ? ccbmAcc / ccbmAccN : 1.99,
     orders,
     invoices: Array.from(new Set(inWindow.map((l) => l.invoice_ref))).sort(),
   };
@@ -208,13 +249,17 @@ export function computeMargin(row: MarginDbRow, ctx: MarginContext): MarginResul
       // dokładnie z faktury: prowizja + opłata płatnicza (+ CCBM, a gdy jeszcze go nie ma na żadnej fakturze — średnia stała); wartości ujemne = koszt
       const ccbm = num(row.bm_ccbm_fees);
       const eurOrder = -(salesFees + (num(row.bm_payment_fees) ?? 0)) + (ccbm !== null ? -ccbm : 0);
-      const eurItem = eurOrder * share + (ccbm === null && ctx.bmRates ? ctx.bmRates.ccbmFixedEur : 0);
+      const kindCcbm = ctx.bmRates ? (bmKind(row.sku, row.product_name) === "accessory" ? ctx.bmRates.ccbmAccessoryEur : ctx.bmRates.ccbmFixedEur) : 0;
+      const eurItem = eurOrder * share + (ccbm === null ? kindCcbm : 0);
       commissionPln = toPln(eurItem, "EUR", date, ctx);
       commissionSource = "faktura";
-    } else if (ctx.bmRates && price !== null && (row.currency || "EUR").toUpperCase() === "EUR") {
-      // zamówienie jeszcze bez faktury: średnia % z faktur od ceny + stała opłata CCBM za pozycję (w EUR, zamówienia BM są w EUR)
-      const eur = price * ((ctx.bmRates.commissionPct + ctx.bmRates.paymentPct) / 100) + ctx.bmRates.ccbmFixedEur;
-      commissionPln = toPln(eur, "EUR", date, ctx);
+    } else if (price !== null && (row.currency || "EUR").toUpperCase() === "EUR") {
+      // zamówienie jeszcze bez faktury: stawka WG REGUŁ (kraj, okres programu Accelerator, rodzaj produktu) + opłata płatnicza (średnia z faktur albo 1% z regulaminu)
+      // + stała opłata CCBM za pozycję (średnia z faktur albo 6,99 € / 1,99 € dla akcesoriów); działa też bez wgranych faktur — wtedy wartości z regulaminu
+      const c = bmCommissionPct({ sku: row.sku, title: row.product_name, country: row.country_code, date });
+      const payPct = ctx.bmRates?.paymentPct ?? 1;
+      const ccbm = c.kind === "accessory" ? (ctx.bmRates?.ccbmAccessoryEur ?? 1.99) : (ctx.bmRates?.ccbmFixedEur ?? 6.99);
+      commissionPln = toPln(price * ((c.pct + payPct) / 100) + ccbm, "EUR", date, ctx);
       commissionSource = "szacunek";
     }
   }

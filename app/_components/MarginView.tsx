@@ -124,18 +124,21 @@ export default function MarginView({ session, members }: { session: Session; mem
     <div>
       <div className="border border-line bg-white p-4 mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="text-sm">
-          <div className="text-xs font-semibold text-inksoft mb-1">PROWIZJA BACK MARKET (z wgranych faktur)</div>
+          <div className="text-xs font-semibold text-inksoft mb-1">PROWIZJA BACK MARKET</div>
           {bmRates ? (
             <span>
-              średnio <span className="font-mono font-semibold">{bmRates.commissionPct.toFixed(2).replace(".", ",")}%</span> prowizji +{" "}
-              <span className="font-mono font-semibold">{bmRates.paymentPct.toFixed(2).replace(".", ",")}%</span> opłaty płatniczej +{" "}
-              <span className="font-mono font-semibold">{bmRates.ccbmFixedEur.toFixed(2).replace(".", ",")} €</span> za pozycję (CCBM) · z {bmRates.orders} zamówień,{" "}
-              {invoiceCount} {invoiceCount === 1 ? "faktury" : "faktur"}. Dla zamówień objętych fakturą liczone dokładnie z niej.
+              Z faktur: średnio <span className="font-mono font-semibold">{bmRates.paymentPct.toFixed(2).replace(".", ",")}%</span> opłaty płatniczej,{" "}
+              <span className="font-mono font-semibold">{bmRates.ccbmFixedEur.toFixed(2).replace(".", ",")} €</span> CCBM za pozycję (akcesoria{" "}
+              <span className="font-mono font-semibold">{bmRates.ccbmAccessoryEur.toFixed(2).replace(".", ",")} €</span>) · z {bmRates.orders} zamówień, {invoiceCount} {invoiceCount === 1 ? "faktury" : "faktur"}.
+              Dla zamówień objętych fakturą liczone dokładnie z niej.
             </span>
           ) : (
-            <span className="text-inksoft">Brak wgranych faktur — prowizja Back Market nie jest liczona. Wgraj fakturę tygodniową (CSV).</span>
+            <span className="text-inksoft">Brak wgranych faktur — używam stawek z regulaminu (1% opłaty płatniczej, CCBM 6,99 €). Wgraj fakturę tygodniową (CSV), żeby liczyć dokładnie i z faktycznych średnich.</span>
           )}
-          <div className="text-[11px] text-inksoft mt-1">Średnia z ostatnich 8 tygodni faktur; wgrywaj kolejne co tydzień, a stawki zaktualizują się same. refurbed — prowizja wprost z danych zamówienia.</div>
+          <div className="text-[11px] text-inksoft mt-1">
+            Prowizja szacowana wg reguł (sprawdzone na zamówieniach z faktur): <span className="font-semibold">konsole do FR/DE/ES/IT — 6%</span> (program Accelerator, −5 pkt proc., 15.08–31.12.2026),
+            konsole do pozostałych krajów 11%, akcesoria (pady) 20%, pozostałe produkty 11%. refurbed — prowizja wprost z danych zamówienia. Średnie z ostatnich 8 tygodni faktur; wgrywaj kolejne co tydzień.
+          </div>
         </div>
         <div className="shrink-0">
           <input ref={fileRef} type="file" accept=".csv,text/csv" multiple className="hidden" onChange={(e) => upload(e.target.files)} />

@@ -38,7 +38,7 @@ export async function GET(request: Request) {
     const [rowsRaw, rateRows, lines] = await Promise.all([
       fetchAll<MarginDbRow>((from, to) => db.from("margin_items").select("*").in("marketplace", [...MARGIN_MARKETPLACES]).order("order_id").order("position").range(from, to)),
       fetchAll<{ currency: string; rate_date: string; mid: number | string }>((from, to) => db.from("nbp_rates").select("currency, rate_date, mid").in("currency", ["EUR", "DKK"]).range(from, to)),
-      fetchAll<BmLine & { invoice_ref: string }>((from, to) => db.from("bm_invoice_lines").select("invoice_ref, invoice_key, order_id, amount").order("id").range(from, to)).catch(() => [] as (BmLine & { invoice_ref: string })[]),
+      fetchAll<BmLine & { invoice_ref: string }>((from, to) => db.from("bm_invoice_lines").select("invoice_ref, invoice_key, order_id, amount, sku, designation").order("id").range(from, to)).catch(() => [] as (BmLine & { invoice_ref: string })[]),
     ]);
     // ile produktów z Fakturowni (historia zakupów) mamy w bazie — gdy 0, zakładka podpowiada pełną synchronizację
     const { count: purchasesCount } = await db.from("fakturownia_purchases").select("id", { count: "exact", head: true });
