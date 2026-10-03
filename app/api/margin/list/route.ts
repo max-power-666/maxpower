@@ -40,6 +40,8 @@ export async function GET(request: Request) {
       fetchAll<{ currency: string; rate_date: string; mid: number | string }>((from, to) => db.from("nbp_rates").select("currency, rate_date, mid").in("currency", ["EUR", "DKK"]).range(from, to)),
       fetchAll<BmLine & { invoice_ref: string }>((from, to) => db.from("bm_invoice_lines").select("invoice_ref, invoice_key, order_id, amount").order("id").range(from, to)).catch(() => [] as (BmLine & { invoice_ref: string })[]),
     ]);
+    // ile produktów z Fakturowni (historia zakupów) mamy w bazie — gdy 0, zakładka podpowiada pełną synchronizację
+    const { count: purchasesCount } = await db.from("fakturownia_purchases").select("id", { count: "exact", head: true });
     const toRates = (cur: string): NbpRate[] => rateRows.filter((r) => r.currency === cur).map((r) => ({ currency: r.currency, rateDate: r.rate_date, mid: Number(r.mid) }));
     const bmRates = deriveBmRates(lines);
     const ctx = { eurRates: toRates("EUR"), dkkRates: toRates("DKK"), bmRates };
@@ -72,6 +74,7 @@ export async function GET(request: Request) {
       totals,
       bmRates,
       invoiceCount: new Set(lines.map((l) => l.invoice_ref)).size,
+      purchasesCount: purchasesCount ?? 0,
     });
   } catch (e: any) {
     return NextResponse.json({ error: `Nie udało się policzyć marży: ${e.message || e}. Czy uruchomiono supabase/margin.sql?` }, { status: 500 });

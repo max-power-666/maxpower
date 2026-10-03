@@ -14,6 +14,7 @@ import { createClient } from "@supabase/supabase-js";
 export const maxDuration = 300;
 
 const PER_PAGE = 100;
+const PURCHASES_FROM = "2025-01-01"; // historia zakupów do marży sięga produktów utworzonych od tej daty
 const MAX_PAGES = 300;
 
 function supabaseAdmin() {
@@ -56,7 +57,9 @@ export async function GET(request: Request) {
     .maybeSingle();
   if (metaError) return NextResponse.json({ error: `Błąd odczytu z Supabase: ${metaError.message}` }, { status: 500 });
 
-  const lastSyncedAt = metaRow?.last_synced_at as string | null | undefined;
+  // ?full=1 wymusza pełny skan mimo zapisanej daty ostatniej synchronizacji (zakładka Marża: gdy historia zakupów jest pusta, a magazyn już synchronizowano).
+  const forceFull = new URL(request.url).searchParams.get("full") === "1";
+  const lastSyncedAt = forceFull ? null : (metaRow?.last_synced_at as string | null | undefined);
   const dateFromParam = lastSyncedAt ? `&date_from=${encodeURIComponent(lastSyncedAt.slice(0, 10))}` : "";
 
   const catRes = await fetch(
@@ -72,6 +75,7 @@ export async function GET(request: Request) {
 
   const syncStartedAt = new Date().toISOString();
   let processed = 0;
+  let purchasesSaved = 0;
 
   for (let page = 1; page <= MAX_PAGES; page++) {
     const url = `https://${domain}.fakturownia.pl/products.json?api_token=${encodeURIComponent(token)}&per_page=${PER_PAGE}&page=${page}${dateFromParam}`;
@@ -99,7 +103,11 @@ export async function GET(request: Request) {
 
     // WSZYSTKIE produkty (także sprzedane) do fakturownia_purchases — historia cen zakupu do liczenia marży (zakładka Marża); cache wyżej
     // trzyma tylko sztuki ze stanem 1 i kasuje sprzedane, więc po sprzedaży cena zakupu inaczej by przepadła.
-    const purchases = products.map((p) => ({
+    // Tylko produkty utworzone od 01.01.2025 (decyzja właściciela: starsze nie są potrzebne do marży). Sam skan Fakturowni dalej obejmuje cały katalog —
+    // cache magazynu (stan 1) musi widzieć też starsze sztuki, które wciąż leżą w magazynie.
+    const purchases = products
+      .filter((p) => !p.created_at || String(p.created_at).slice(0, 10) >= PURCHASES_FROM)
+      .map((p) => ({
       id: p.id,
       name: p.name ?? null,
       description: p.description ?? null,
@@ -109,12 +117,13 @@ export async function GET(request: Request) {
       product_created_at: p.created_at ?? null,
       updated_at: new Date().toISOString(),
     }));
-    {
+    if (purchases.length > 0) {
       const { error } = await admin.from("fakturownia_purchases").upsert(purchases);
-      // Brak tabeli (nie uruchomiono margin.sql) nie psuje synchronizacji magazynu — tylko pomijamy historię zakupów.
-      if (error && !/fakturownia_purchases/.test(error.message)) {
-        return NextResponse.json({ error: `Błąd zapisu do Supabase: ${error.message}` }, { status: 500 });
+      // Tylko BRAK tabeli (nie uruchomiono margin.sql) nie psuje synchronizacji magazynu; każdy inny błąd (np. uprawnienia) przerywa i jest widoczny.
+      if (error && !/does not exist|schema cache|Could not find the table/i.test(error.message)) {
+        return NextResponse.json({ error: `Błąd zapisu historii zakupów (fakturownia_purchases): ${error.message}` }, { status: 500 });
       }
+      if (!error) purchasesSaved += purchases.length;
     }
 
     if (toUpsert.length > 0) {
@@ -137,5 +146,5 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: `Błąd zapisu do Supabase: ${metaWriteError.message}` }, { status: 500 });
   }
 
-  return NextResponse.json({ ok: true, processed, incremental: !!lastSyncedAt, syncedAt: syncStartedAt });
+  return NextResponse.json({ ok: true, processed, purchasesSaved, incremental: !!lastSyncedAt, syncedAt: syncStartedAt });
 }

@@ -28,6 +28,9 @@ export default function MarginView({ session, members }: { session: Session; mem
   const [totals, setTotals] = useState<Totals | null>(null);
   const [bmRates, setBmRates] = useState<BmRates | null>(null);
   const [invoiceCount, setInvoiceCount] = useState(0);
+  const [purchasesCount, setPurchasesCount] = useState<number | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [marketplace, setMarketplace] = useState("");
@@ -64,6 +67,7 @@ export default function MarginView({ session, members }: { session: Session; mem
       setTotals(data.totals);
       setBmRates(data.bmRates);
       setInvoiceCount(data.invoiceCount);
+      setPurchasesCount(data.purchasesCount ?? null);
     } catch (e: any) {
       if (mySeq === seq.current) setError(e.message || "Nie udało się wczytać marży.");
     } finally {
@@ -75,6 +79,24 @@ export default function MarginView({ session, members }: { session: Session; mem
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, pageSize, search, marketplace]);
+
+  // Pełna synchronizacja z Fakturownią (ten sam route co "Odśwież" w Magazynie): zapisuje też produkty sprzedane (stan 0), od 01.01.2025 — to z nich
+  // bierze się cena zakupu w tej zakładce. Pierwszy raz trwa ok. minuty (cały katalog).
+  async function syncPurchases() {
+    setSyncing(true);
+    setSyncMsg("");
+    try {
+      const res = await fetch(`/api/fakturownia/sync${purchasesCount === 0 ? "?full=1" : ""}`, { headers: auth });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || `Błąd serwera (${res.status}).`);
+      setSyncMsg(`Pobrano z Fakturowni: ${data.processed} produktów przeanalizowano, ${data.purchasesSaved} zapisano w historii zakupów${data.incremental ? " (zmiany od ostatniej synchronizacji)" : " (pełny skan)"}.`);
+    } catch (e: any) {
+      setSyncMsg(`Synchronizacja nie powiodła się: ${e.message || e}`);
+    } finally {
+      setSyncing(false);
+      load();
+    }
+  }
 
   async function upload(files: FileList | null) {
     if (!files || files.length === 0) return;
@@ -121,6 +143,23 @@ export default function MarginView({ session, members }: { session: Session; mem
         </div>
       </div>
       {uploadMsg && <p className="text-xs text-teal font-semibold mb-3">{uploadMsg}</p>}
+
+      <div className="border border-line bg-white p-4 mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="text-sm">
+          <div className="text-xs font-semibold text-inksoft mb-1">CENY ZAKUPU (z Fakturowni, produkty od 01.01.2025, także sprzedane)</div>
+          {purchasesCount === null ? (
+            <span className="text-inksoft">Wczytywanie…</span>
+          ) : purchasesCount === 0 ? (
+            <span className="text-rust font-semibold">Brak historii zakupów w bazie — kolumna „Cena zakupu” jest pusta. Kliknij „Pobierz z Fakturowni” (pełna synchronizacja trwa około minuty).</span>
+          ) : (
+            <span>W bazie: <span className="font-mono font-semibold">{purchasesCount.toLocaleString("pl-PL")}</span> produktów z Fakturowni. Nowe zakupy dochodzą przy każdej synchronizacji magazynu.</span>
+          )}
+          {syncMsg && <div className={`text-xs mt-1 font-semibold ${syncMsg.startsWith("Synchronizacja nie") ? "text-rust" : "text-teal"}`}>{syncMsg}</div>}
+        </div>
+        <button onClick={syncPurchases} disabled={syncing} className="bg-ink text-paper px-4 py-2 rounded text-sm font-semibold disabled:opacity-50 shrink-0">
+          {syncing ? "Pobieranie… (do kilku minut)" : "Pobierz z Fakturowni"}
+        </button>
+      </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div className="flex flex-wrap items-center gap-2">
