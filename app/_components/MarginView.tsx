@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { MARKETPLACES } from "@/lib/salesOrders";
 import type { MemberLite } from "@/lib/displayName";
@@ -39,6 +39,7 @@ export default function MarginView({ session, members }: { session: Session; mem
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [uploadMsg, setUploadMsg] = useState("");
+  const [expanded, setExpanded] = useState<Set<string>>(new Set()); // rozwinięte wiersze (szczegółowe wyliczenie marży)
   const [openOrder, setOpenOrder] = useState<{ marketplace: string; externalId: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const seq = useRef(0);
@@ -207,14 +208,19 @@ export default function MarginView({ session, members }: { session: Session; mem
               <th className="p-3 text-right">Serwis</th>
               <th className="p-3 text-right">Marża</th>
               <th className="p-3 text-right">Marża %</th>
+              <th className="p-3 w-8"></th>
             </tr>
           </thead>
           <tbody>
             {!loading && rows.length === 0 && (
-              <tr><td colSpan={14} className="p-6 text-center text-inksoft text-sm">{search || marketplace ? "Brak wyników." : "Brak sprzedanych sztuk z numerem seryjnym (Back Market i refurbed)."}</td></tr>
+              <tr><td colSpan={15} className="p-6 text-center text-inksoft text-sm">{search || marketplace ? "Brak wyników." : "Brak sprzedanych sztuk z numerem seryjnym (Back Market i refurbed)."}</td></tr>
             )}
-            {rows.map((r) => (
-              <tr key={`${r.marketplace}:${r.orderId}:${r.itemKey}`} className="border-b border-line last:border-b-0 hover:bg-paper">
+            {rows.map((r) => {
+              const rowKey = `${r.marketplace}:${r.orderId}:${r.itemKey}`;
+              const open = expanded.has(rowKey);
+              return (
+              <Fragment key={rowKey}>
+              <tr className={`border-b border-line last:border-b-0 hover:bg-paper ${open ? "bg-paper" : ""}`}>
                 <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDate(r.orderDate)}</td>
                 <td className="p-3 text-xs">{MARKETPLACES.find((m) => m.key === r.marketplace)?.label ?? r.marketplace}</td>
                 <td className="p-3 text-xs font-mono">
@@ -240,8 +246,44 @@ export default function MarginView({ session, members }: { session: Session; mem
                   {r.flags.length > 0 && <span className="text-amber ml-1 cursor-help" title={r.flags.join("; ")}>⚠</span>}
                 </td>
                 <td className={`p-3 text-right font-mono ${marginCls(r.marginPln)}`}>{r.marginPct === null ? "—" : `${(r.marginPct * 100).toLocaleString("pl-PL", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`}</td>
+                <td className="p-3 text-center">
+                  <button
+                    onClick={() => setExpanded((prev) => { const next = new Set(prev); if (next.has(rowKey)) next.delete(rowKey); else next.add(rowKey); return next; })}
+                    aria-expanded={open}
+                    title={open ? "Zwiń wyliczenie" : "Pokaż szczegółowe wyliczenie marży"}
+                    className="text-teal font-bold w-6 h-6 rounded hover:bg-tealsoft"
+                  >
+                    {open ? "▾" : "▸"}
+                  </button>
+                </td>
               </tr>
-            ))}
+              {open && (
+                <tr className="border-b border-line bg-paper">
+                  <td colSpan={15} className="px-6 py-4">
+                    <div className="text-xs font-semibold text-inksoft mb-2">WYLICZENIE MARŻY — {r.productName || r.sku || r.serial} · {r.serial}</div>
+                    <table className="w-full max-w-5xl text-sm bg-white border border-line">
+                      <tbody>
+                        {r.details.map((d) => (
+                          <tr key={d.key} className={`border-b border-line last:border-b-0 ${d.sign === "=" ? "font-semibold bg-paper" : ""}`}>
+                            <td className="p-2 pl-3 w-10 text-center font-mono text-inksoft">{d.sign}</td>
+                            <td className="p-2 w-48 whitespace-nowrap">{d.label}</td>
+                            <td className={`p-2 w-32 text-right font-mono whitespace-nowrap ${d.sign === "=" ? marginCls(d.amountPln) : ""}`}>{d.amountPln === null ? "—" : `${fmtPLN(d.amountPln)} zł`}</td>
+                            <td className="p-2 pr-3 text-xs text-inksoft">{d.note}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {r.flags.length > 0 && (
+                      <ul className="mt-2 text-xs text-amber list-disc pl-5">
+                        {r.flags.map((f) => <li key={f}>{f}</li>)}
+                      </ul>
+                    )}
+                  </td>
+                </tr>
+              )}
+              </Fragment>
+              );
+            })}
           </tbody>
         </table>
       </div>

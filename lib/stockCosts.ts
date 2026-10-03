@@ -41,7 +41,8 @@ const num = (v: unknown): number | null => {
 // tą samą zasadą co reszta aplikacji. Zamówienia bez kursu NBP są pominięte z sumy i policzone osobno (nie zgadujemy kursu).
 // Koszt Trade-in JEDNEGO zamówienia w PLN (prowizja + logistyka z lib/buybackCosts.ts, EUR -> PLN kursem NBP z dnia poprzedniego względem wypłaty, plus PCC 2% od wartości > 1000 zł).
 // null amountPln = nie da się policzyć (zamówienie niewypłacone/bez ceny albo brak kursu); noRate odróżnia brak kursu od reszty.
-export function tradeInOrderCostPln(o: BuybackOrderLite, eurRates: NbpRate[]): { amountPln: number | null; noRate: boolean; incomplete: boolean } {
+export type TradeInCostDetail = { rate: number; commissionEur: number; logisticsEur: number | null; valuePln: number | null; pccPln: number | null; category: string | null; basisEur: number; dateUsed: string };
+export function tradeInOrderCostPln(o: BuybackOrderLite, eurRates: NbpRate[]): { amountPln: number | null; noRate: boolean; incomplete: boolean; detail?: TradeInCostDetail } {
   if (!TRADEIN_PAID_STATUSES.includes(o.status)) return { amountPln: null, noRate: false, incomplete: false };
   // Data wypłaty (pole "Płatność" zamówienia BM) w czasie polskim; gdy BM jej nie podał (rzadkie), data utworzenia zamówienia.
   const date = warsawDate(o.payment_date || o.creation_date);
@@ -59,7 +60,12 @@ export function tradeInOrderCostPln(o: BuybackOrderLite, eurRates: NbpRate[]): {
   // Prowizja + logistyka (EUR) przeliczone kursem na PLN, a PCC (już policzone w PLN od wartości w PLN) dokładamy wprost. Gdy logistyki nie da się
   // ustalić (nieznana kategoria/waluta) — bierzemy samą prowizję i zaznaczamy to jako niepełne.
   const eurBase = c.logistics === null ? c.commission : c.commission + c.logistics;
-  return { amountPln: eurBase * rate + (c.pccPln ?? 0), noRate: false, incomplete: c.extra === null };
+  return {
+    amountPln: eurBase * rate + (c.pccPln ?? 0),
+    noRate: false,
+    incomplete: c.extra === null,
+    detail: { rate, commissionEur: c.commission, logisticsEur: c.logistics, valuePln: c.valuePln, pccPln: c.pccPln, category: c.category, basisEur: c.base, dateUsed: date },
+  };
 }
 
 export function stockTradeInCosts(descriptions: (string | null)[], orders: Map<string, BuybackOrderLite>, eurRates: NbpRate[]): CostLine {

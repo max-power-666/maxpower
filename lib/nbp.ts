@@ -32,6 +32,15 @@ export function rateBeforeDate(rates: NbpRate[], date: string): number | null {
   return best ? best.mid : null;
 }
 
+// To samo co rateBeforeDate, ale zwraca też DATĘ notowania użytego kursu (do wyjaśnień w UI: "kurs 4,2520 z 09.09").
+export function rateInfoBeforeDate(rates: NbpRate[], date: string): { mid: number; rateDate: string } | null {
+  let best: NbpRate | null = null;
+  for (const r of rates) {
+    if (r.rateDate < date && (!best || r.rateDate > best.rateDate)) best = r;
+  }
+  return best ? { mid: best.mid, rateDate: best.rateDate } : null;
+}
+
 // Przelicza kwotę na PLN. PLN (albo waluta nieznana/pusta — zakładamy PLN, ten sam fallback co reszta apki,
 // np. fmtMoney w SalesOrdersHub.tsx) zostaje bez zmian. Zwraca null, gdy brak kursu dla danej daty (np. zamówienie
 // sprzed zakresu zsynchronizowanych kursów) — wywołujący decyduje, co z tym zrobić (pominąć z sumy, pokazać "—").

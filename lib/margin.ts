@@ -8,9 +8,9 @@
 //
 // Koszty poziomu ZAMÓWIENIA (wysyłka, opłaty z faktury BM) dzielimy na pozycje proporcjonalnie do ceny pozycji.
 
-import { rateBeforeDate, type NbpRate } from "./nbp";
+import { rateBeforeDate, rateInfoBeforeDate, type NbpRate } from "./nbp";
 import { tradeInOrderCostPln, type BuybackOrderLite } from "./stockCosts";
-import { tradeInCategory } from "./buybackCosts";
+import { tradeInCategory, TRADEIN_CATEGORY_LABELS, type TradeInCategory } from "./buybackCosts";
 
 // Prowizja Back Market od sprzedaży — reguły sprawdzone na 707 zamówieniach z faktur (wszystkie zgodne co do stawki, poza kilkoma zamówieniami z mieszanymi pozycjami):
 //  - KONSOLE: standardowo 11% (regulamin art. 15.1, "pozostałe produkty"), ale w programie Accelerator for Sellers (zaproszenie BM dla M13) obniżka o 5 pkt proc.
@@ -103,7 +103,10 @@ export type MarginResult = {
   marginPln: number | null;
   marginPct: number | null; // marża / cena sprzedaży
   flags: string[]; // czego brakuje (marża wtedy niepełna) — pokazywane w UI
+  details: MarginDetail[]; // szczegółowe wyliczenie (rozwijany wiersz w UI): każdy składnik z kwotą i opisem skąd się wziął
 };
+
+export type MarginDetail = { key: string; label: string; sign: "+" | "-" | "="; amountPln: number | null; note: string };
 
 const num = (v: unknown): number | null => {
   if (v === null || v === undefined || v === "") return null;
@@ -189,31 +192,84 @@ function toPln(amount: number, currency: string | null | undefined, date: string
   return r === null ? null : amount * r;
 }
 
+const f2 = (n: number) => n.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const f4 = (n: number) => n.toLocaleString("pl-PL", { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+const dm = (iso: string) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}`;
+
 export function computeMargin(row: MarginDbRow, ctx: MarginContext): MarginResult {
   const flags: string[] = [];
+  const details: MarginDetail[] = [];
   const price = num(row.price);
   const date = (row.order_date || "").slice(0, 10);
   const orderTotal = num(row.order_total);
   const items = Math.max(1, num(row.order_items) ?? 1);
   // udział pozycji w kosztach zamówienia: wg ceny, a gdy brak cen — po równo
   const share = price !== null && orderTotal !== null && orderTotal > 0 ? price / orderTotal : 1 / items;
+  const shareNote = items > 1 ? ` Zamówienie ma ${items} pozycje — koszt zamówienia dzielony wg ceny pozycji (udział ${f2(share * 100)}%).` : "";
+  const cur = (row.currency || "PLN").toUpperCase();
+  const rateOf = (c: string) => {
+    const rs = c === "EUR" ? ctx.eurRates : c === "DKK" ? ctx.dkkRates : null;
+    return rs && date ? rateInfoBeforeDate(rs, date) : null;
+  };
 
+  // --- cena sprzedaży
   const salePln = price !== null && date ? toPln(price, row.currency, date, ctx) : null;
   if (salePln === null) flags.push(price === null ? "brak ceny sprzedaży" : "brak kursu NBP");
+  {
+    let note = "";
+    if (price === null) note = "Brak ceny pozycji w zamówieniu.";
+    else if (cur === "PLN") note = `Cena z zamówienia: ${f2(price)} zł (brutto).`;
+    else {
+      const ri = rateOf(cur);
+      note = ri ? `${f2(price)} ${cur} × kurs NBP ${f4(ri.mid)} (z ${dm(ri.rateDate)}, dzień roboczy przed zamówieniem ${dm(date)}) — cena brutto.` : `${f2(price)} ${cur} — brak kursu NBP sprzed ${date}.`;
+    }
+    details.push({ key: "sale", label: "Cena sprzedaży", sign: "+", amountPln: salePln === null ? null : round2(salePln), note });
+  }
 
+  // --- cena zakupu
   const purchase = num(row.purchase_price_gross);
   if (purchase === null) flags.push("brak ceny zakupu");
+  details.push({
+    key: "purchase",
+    label: "Cena zakupu",
+    sign: "-",
+    amountPln: purchase,
+    note: purchase === null ? "Brak ceny zakupu tej sztuki w historii zakupów z Fakturowni (pobierz ją przyciskiem „Pobierz z Fakturowni”)." : `Z Fakturowni, wg numeru seryjnego${row.purchase_ref ? ` (zamówienie/dokument: ${row.purchase_ref.trim()})` : ""}.`,
+  });
 
-  // wysyłka: cena z wyceny DHL jest autorytatywna, ręczny koszt tylko gdy jej nie ma (jak na karcie zamówienia)
+  // --- VAT od marży (po cenie sprzedaży i zakupu, bez kosztów dodatkowych)
+  const vatPln = salePln !== null && purchase !== null ? round2(Math.max(0, salePln - purchase) * (MARGIN_VAT_RATE / (100 + MARGIN_VAT_RATE))) : null;
+  details.push({
+    key: "vat",
+    label: "VAT od marży",
+    sign: "-",
+    amountPln: vatPln,
+    note:
+      vatPln === null
+        ? "Nie do policzenia bez ceny sprzedaży i zakupu."
+        : salePln! - purchase! <= 0
+          ? "Sprzedaż nie przekracza zakupu — VAT od marży wynosi 0."
+          : `(sprzedaż ${f2(salePln!)} − zakup ${f2(purchase!)}) × ${MARGIN_VAT_RATE}/${100 + MARGIN_VAT_RATE}, bez kosztów dodatkowych.`,
+  });
+
+  // --- wysyłka: cena z wyceny DHL jest autorytatywna, ręczny koszt tylko gdy jej nie ma (jak na karcie zamówienia)
   let shippingTotal: number | null = null;
+  let shipNote = "Brak kosztu wysyłki: przesyłka nienadana przez ERP albo bez zapisanej ceny, i bez ręcznego kosztu na karcie zamówienia.";
   const shipPrice = num(row.shipping_price);
-  if (shipPrice !== null && date) shippingTotal = toPln(shipPrice, row.shipping_currency, date, ctx);
-  else if (num(row.shipping_manual) !== null) shippingTotal = num(row.shipping_manual);
+  if (shipPrice !== null && date) {
+    shippingTotal = toPln(shipPrice, row.shipping_currency, date, ctx);
+    shipNote = `Cena z wyceny DHL zapisana przy nadaniu: ${f2(shipPrice)} ${(row.shipping_currency || "PLN").toUpperCase()} (netto wg cennika).`;
+  } else if (num(row.shipping_manual) !== null) {
+    shippingTotal = num(row.shipping_manual);
+    shipNote = `Ręcznie wpisany koszt wysyłki z karty zamówienia: ${f2(shippingTotal!)} zł.`;
+  }
   const shippingPln = shippingTotal === null ? null : shippingTotal * share;
   if (shippingPln === null) flags.push("brak kosztu wysyłki");
+  details.push({ key: "shipping", label: "Wysyłka", sign: "-", amountPln: shippingPln === null ? null : round2(shippingPln), note: shippingPln === null ? shipNote : shipNote + shareNote });
 
-  // koszty dodatkowe = Trade-in (prowizja BM + logistyka wg regulaminu); sztuka spoza Trade-in (np. faktura "VAT marża") nie ma ich w ogóle (0)
+  // --- koszty dodatkowe = Trade-in (prowizja BM + logistyka wg regulaminu + PCC); sztuka spoza Trade-in (np. faktura "VAT marża") nie ma ich w ogóle (0)
   let extraPln: number | null = 0;
+  let extraNote = "Zakup nie z Trade-in (np. od firmy, faktura „VAT marża”) — brak kosztów dodatkowych. Koszty części i serwisu dojdą później.";
   if (row.tradein_status) {
     const t = tradeInOrderCostPln(
       {
@@ -232,45 +288,81 @@ export function computeMargin(row: MarginDbRow, ctx: MarginContext): MarginResul
     );
     extraPln = t.amountPln;
     if (t.amountPln === null && t.noRate) flags.push("brak kursu NBP dla kosztów Trade-in");
+    if (t.detail) {
+      const d = t.detail;
+      const lg = d.logisticsEur === null ? "logistyka: nieznana kategoria (pominięta)" : `logistyka ${f2(d.logisticsEur)} € (${TRADEIN_CATEGORY_LABELS[d.category as TradeInCategory] ?? "kategoria"}, magazyn w Polsce)`;
+      extraNote = `Trade-in ${row.purchase_ref?.trim() ?? ""}: cena po kontrofercie ${f2(d.basisEur)} € → prowizja BM 10% = ${f2(d.commissionEur)} €; ${lg}; razem przeliczone kursem NBP ${f4(d.rate)} (dzień roboczy przed płatnością ${dm(d.dateUsed)}). PCC: ${
+        d.pccPln && d.pccPln > 0 ? `${f2(d.pccPln)} zł (2% od wartości ${f2(d.valuePln ?? 0)} zł, powyżej 1000 zł)` : `0 zł (wartość ${f2(d.valuePln ?? 0)} zł nie przekracza 1000 zł)`
+      }.`;
+    } else if (t.amountPln === null) {
+      extraNote = t.noRate ? "Brak kursu NBP z dnia płatności zamówienia Trade-in — koszty nie do policzenia." : `Zamówienie Trade-in (${row.tradein_status}) niewypłacone — koszty jeszcze nie naliczone.`;
+    }
   }
+  details.push({ key: "extra", label: "Koszty dodatkowe", sign: "-", amountPln: extraPln === null ? null : round2(extraPln), note: extraNote });
 
-  // prowizja marketplace'u
+  // --- prowizja marketplace'u
   let commissionPln: number | null = null;
   let commissionSource: MarginResult["commissionSource"] = null;
+  let commNote = "Brak źródła prowizji dla tego zamówienia.";
   if (row.marketplace === "refurbed") {
     const c = num(row.refurbed_commission);
     if (c !== null && date) {
       commissionPln = toPln(c, row.refurbed_commission_currency, date, ctx);
       commissionSource = "refurbed";
-    }
+      const ri = (row.refurbed_commission_currency || "EUR").toUpperCase() === "PLN" ? null : rateOf((row.refurbed_commission_currency || "EUR").toUpperCase());
+      commNote = `Z danych zamówienia refurbed (prowizja bazowa + płatność + dynamiczna): ${f2(c)} ${(row.refurbed_commission_currency || "").toUpperCase()}${ri ? ` × kurs NBP ${f4(ri.mid)} (z ${dm(ri.rateDate)})` : ""}.`;
+    } else commNote = "Brak kwoty prowizji w danych zamówienia refurbed.";
   } else if (row.marketplace === "backmarket" && date) {
     const salesFees = num(row.bm_sales_fees);
+    const ri = rateOf("EUR");
+    const rateTxt = ri ? ` × kurs NBP ${f4(ri.mid)} (z ${dm(ri.rateDate)})` : "";
     if (row.bm_has_invoice && salesFees !== null) {
       // dokładnie z faktury: prowizja + opłata płatnicza (+ CCBM, a gdy jeszcze go nie ma na żadnej fakturze — średnia stała); wartości ujemne = koszt
       const ccbm = num(row.bm_ccbm_fees);
-      const eurOrder = -(salesFees + (num(row.bm_payment_fees) ?? 0)) + (ccbm !== null ? -ccbm : 0);
+      const pay = num(row.bm_payment_fees) ?? 0;
+      const eurOrder = -(salesFees + pay) + (ccbm !== null ? -ccbm : 0);
       const kindCcbm = ctx.bmRates ? (bmKind(row.sku, row.product_name) === "accessory" ? ctx.bmRates.ccbmAccessoryEur : ctx.bmRates.ccbmFixedEur) : 0;
       const eurItem = eurOrder * share + (ccbm === null ? kindCcbm : 0);
       commissionPln = toPln(eurItem, "EUR", date, ctx);
       commissionSource = "faktura";
-    } else if (price !== null && (row.currency || "EUR").toUpperCase() === "EUR") {
+      commNote = `Dokładnie z faktury Back Market (zamówienie): prowizja ${f2(-salesFees)} € + opłata płatnicza ${f2(-pay)} € + CCBM ${ccbm !== null ? f2(-ccbm) + " €" : `${f2(kindCcbm)} € (jeszcze niezafakturowane — średnia)`} = ${f2(-(salesFees + pay) + (ccbm !== null ? -ccbm : kindCcbm))} €${rateTxt}.${shareNote}`;
+    } else if (price !== null && cur === "EUR") {
       // zamówienie jeszcze bez faktury: stawka WG REGUŁ (kraj, okres programu Accelerator, rodzaj produktu) + opłata płatnicza (średnia z faktur albo 1% z regulaminu)
       // + stała opłata CCBM za pozycję (średnia z faktur albo 6,99 € / 1,99 € dla akcesoriów); działa też bez wgranych faktur — wtedy wartości z regulaminu
       const c = bmCommissionPct({ sku: row.sku, title: row.product_name, country: row.country_code, date });
       const payPct = ctx.bmRates?.paymentPct ?? 1;
       const ccbm = c.kind === "accessory" ? (ctx.bmRates?.ccbmAccessoryEur ?? 1.99) : (ctx.bmRates?.ccbmFixedEur ?? 6.99);
-      commissionPln = toPln(price * ((c.pct + payPct) / 100) + ccbm, "EUR", date, ctx);
+      const eur = price * ((c.pct + payPct) / 100) + ccbm;
+      commissionPln = toPln(eur, "EUR", date, ctx);
       commissionSource = "szacunek";
+      const why =
+        c.kind === "accessory"
+          ? "akcesorium konsolowe — 20% bez obniżki"
+          : c.kind === "console"
+            ? c.accelerator
+              ? `konsola do ${row.country_code} w okresie programu Accelerator (11% − 5 pkt proc.)`
+              : `konsola${row.country_code && BM_ACCELERATOR.markets.includes(row.country_code.toUpperCase()) ? " poza okresem programu Accelerator" : ` do ${row.country_code || "nieznanego kraju"} (poza FR/DE/ES/IT)`} — stawka standardowa 11%`
+            : "produkt spoza konsol — stawka standardowa 11%";
+      commNote = `SZACUNEK (zamówienia nie ma jeszcze na wgranej fakturze): ${f2(price)} € × (${c.pct}% prowizji [${why}] + ${f2(payPct)}% opłaty płatniczej) + CCBM ${f2(ccbm)} € = ${f2(eur)} €${rateTxt}.`;
     }
   }
   if (commissionPln === null) flags.push("brak prowizji");
-  else if (commissionSource === "szacunek") flags.push("prowizja szacowana ze średniej");
+  else if (commissionSource === "szacunek") flags.push("prowizja szacowana wg reguł");
+  details.push({ key: "commission", label: "Prowizja marketplace", sign: "-", amountPln: commissionPln === null ? null : round2(commissionPln), note: commNote });
 
-  const vatPln = salePln !== null && purchase !== null ? round2(Math.max(0, salePln - purchase) * (MARGIN_VAT_RATE / (100 + MARGIN_VAT_RATE))) : null;
+  details.push({ key: "service", label: "Koszty serwisu", sign: "-", amountPln: null, note: "Jeszcze nieuwzględniane w marży (dodamy po wprowadzeniu kosztów części)." });
+
   const marginPln =
     salePln !== null && purchase !== null && vatPln !== null
       ? round2(salePln - purchase - vatPln - (shippingPln ?? 0) - (extraPln ?? 0) - (commissionPln ?? 0))
       : null;
+  details.push({
+    key: "margin",
+    label: "Marża",
+    sign: "=",
+    amountPln: marginPln,
+    note: marginPln === null ? "Nie do policzenia — brakuje ceny sprzedaży (lub kursu) albo ceny zakupu." : "sprzedaż − zakup − VAT od marży − wysyłka − koszty dodatkowe − prowizja (− serwis). Brakujące koszty liczone jako 0 (patrz ostrzeżenia).",
+  });
 
   return {
     marketplace: row.marketplace,
@@ -293,5 +385,6 @@ export function computeMargin(row: MarginDbRow, ctx: MarginContext): MarginResul
     marginPln,
     marginPct: marginPln !== null && salePln ? marginPln / salePln : null,
     flags,
+    details,
   };
 }
