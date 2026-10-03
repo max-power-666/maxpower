@@ -202,6 +202,9 @@ wyszukiwaniem — AND): opcje "Wszystkie" / "Bez SKU" (kategoria) albo "Bez klas
 wzajemnie zależne:** po wybraniu kategorii lista klas pokazuje tylko klasy sztuk z tej kategorii (i odwrotnie), a wybrana wartość zostaje na liście nawet przy
 zerowym wyniku. Listy budowane z par (kategoria z SKU, klasa) wszystkich sztuk wczytywanych z widoku i odświeżanych razem z listą; zmiana filtra wraca na stronę 1.
 W tabeli Raw data jest też kolumna **"Klasa"** (zaraz po "Kategoria z SKU").
+**Podsumowanie pod tabelą Raw data** (03.10.2026): pasek z liczbą sztuk, sumą cen zakupu i **średnią ceną zakupu brutto** dla CAŁEGO wyniku bieżących filtrów
+(wyszukiwanie + kategoria z SKU + klasa), a nie tylko dla widocznej strony. Liczone w przeglądarce z cen wszystkich pasujących sztuk (osobne zapytanie
+paginowane po 1000, bez agregatów PostgREST), przeliczane tylko przy zmianie filtrów/odświeżeniu — nie przy zmianie strony. Pusty wynik pokazuje "—".
 **VAT** (`fakturownia_stock_cache.vat`, nullable tekst) ma być wpisywany RĘCZNIE przy dodawaniu produktu do
 magazynu — na razie nic go nie wypełnia (kolumna pokazuje "—"), synchronizacja z Fakturowni go nie rusza. Podsumowanie
 magazynu (kafelki, wykres kołowy) dalej czyta tabelę, nie widok — z wyjątkami: **drugi wykres obok pierwszego** (02.10.2026): oba pierścienie z tabelą mają teraz po pół szerokości

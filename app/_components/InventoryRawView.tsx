@@ -50,6 +50,8 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
   // Filtr "Klasa" (lista rozwijana), łączny z kategorią: oba działają jednocześnie (AND), a liczniki w każdej liście
   // uwzględniają wybór w drugiej (np. po wybraniu kategorii NS lista klas pokazuje tylko klasy sztuk z NS).
   const [skuClass, setSkuClass] = useState("");
+  // Podsumowanie CAŁEGO wyniku filtra (nie tylko bieżącej strony): liczba sztuk, suma i średnia cena zakupu brutto.
+  const [summary, setSummary] = useState<{ count: number; sum: number } | null>(null);
   const [skuPairs, setSkuPairs] = useState<{ c: string | null; k: string | null }[]>([]);
   const [openSerial, setOpenSerial] = useState<string | null>(null);
 
@@ -118,6 +120,39 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
     return { none, list: Array.from(counts, ([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name, "pl")) };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [skuPairs, skuCategory, skuClass]);
+
+  // Podsumowanie wyniku filtra: ceny wszystkich pasujących sztuk (paginowane po 1000, bo PostgREST tnie wynik) i liczone
+  // w przeglądarce — bez zależności od agregatów PostgREST. Niezależne od strony/rozmiaru strony, więc zmiana strony go nie przelicza.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const PAGE = 1000;
+      let count = 0;
+      let sum = 0;
+      for (let from = 0; ; from += PAGE) {
+        let q = supabase.from("fakturownia_stock_with_sku").select("purchase_price_gross");
+        if (search) q = q.ilike("name", `%${escapeLike(search)}%`);
+        if (skuCategory === NO_SKU) q = q.is("sku_category", null);
+        else if (skuCategory) q = q.eq("sku_category", skuCategory);
+        if (skuClass === NO_CLASS) q = q.is("sku_class", null);
+        else if (skuClass) q = q.eq("sku_class", skuClass);
+        const { data, error: err } = await q.order("id").range(from, from + PAGE - 1);
+        if (err) {
+          if (!cancelled) setSummary(null);
+          return;
+        }
+        for (const r of (data as { purchase_price_gross: number | string }[]) || []) {
+          count += 1;
+          sum += Number(r.purchase_price_gross) || 0;
+        }
+        if (!data || data.length < PAGE) break;
+      }
+      if (!cancelled) setSummary({ count, sum });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [search, skuCategory, skuClass, reloadTick, reloadKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -283,6 +318,18 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
           </tbody>
         </table>
       </div>
+
+      {summary && (
+        <div className="border border-line border-t-0 bg-white px-4 py-3 flex flex-wrap items-center gap-x-8 gap-y-1 text-sm">
+          <span className="text-xs font-semibold text-inksoft">PODSUMOWANIE WYNIKU{search || skuCategory || skuClass ? " (wg filtrów)" : ""} — wszystkie strony</span>
+          <span>Sztuk: <span className="font-mono font-semibold">{summary.count.toLocaleString("pl-PL")}</span></span>
+          <span>Suma cen zakupu: <span className="font-mono font-semibold">{fmtPLN(summary.sum)}</span></span>
+          <span>
+            Średnia cena zakupu brutto:{" "}
+            <span className="font-mono font-semibold">{summary.count > 0 ? fmtPLN(summary.sum / summary.count) : "—"}</span>
+          </span>
+        </div>
+      )}
 
       {openSerial && <ProductCardDrawer serial={openSerial} members={members} onClose={() => setOpenSerial(null)} />}
     </div>
