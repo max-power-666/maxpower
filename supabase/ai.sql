@@ -139,7 +139,8 @@ select
   purchase_price_gross,
   vat,
   description as source_order,
-  product_created_at as added_at
+  product_created_at as added_at,
+  sku_class
 from fakturownia_stock_with_sku;
 
 create or replace view ai.nbp_rates as

@@ -30,11 +30,16 @@ create policy "admin write serial_skus" on serial_skus for all using (is_admin()
 create index if not exists test_log_serial_norm_idx on test_log (lower(btrim(serial_number)));
 create index if not exists buyback_order_intake_serial_norm_idx on buyback_order_intake (lower(btrim(serial_number)));
 
+-- sku_class (03.10.2026) — "Klasa" = OSTATNI człon SKU po ostatnim myślniku, jeśli składa się wyłącznie z liter (NS-32-V1-D -> D,
+-- NS-32-V2-BC -> BC, NS-32-V1-C -> C, PS4P-1TB-BK-A -> A); inaczej null — np. SKU bez myślnika albo ze starego schematu, gdzie ostatni
+-- człon to liczba pad-ów/gwarancji ("PS4-500-B-2M" -> null, bo "2M" nie jest klasą). Dopisana na końcu widoku jak sku_category.
 -- sku_category (02.10.2026) — "Kategoria z SKU" = pierwszy człon SKU przed pierwszym myślnikiem (XSX-1TB-BK-A -> XSX,
 -- PS4S-1TB-BK-AB -> PS4S, NS-32-V1-D -> NS); SKU bez myślnika -> cała wartość; brak SKU -> null. Kolumna dopisana NA KOŃCU
 -- widoku (create or replace view pozwala tylko dopisywać kolumny na końcu).
 create or replace view fakturownia_stock_with_sku as
-select v.*, nullif(btrim(split_part(v.sku, '-', 1)), '') as sku_category
+select v.*,
+       nullif(btrim(split_part(v.sku, '-', 1)), '') as sku_category,
+       case when v.sku ~ '-[A-Za-z]+$' then substring(v.sku from '[A-Za-z]+$') end as sku_class
 from (
 select
   c.id,

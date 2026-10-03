@@ -187,7 +187,11 @@ wartość; brak SKU -> puste. Wyliczana w widoku (`split_part`), nie przechowywa
 to INNE pole niż "Kategoria" z Fakturowni obok (`category_name`), nic ich ze sobą nie łączy.
 Wpisy z pustym SKU są pomijane (wcześniejszy, ale nieuzupełniony wpis nie zasłania późniejszego z SKU); numery
 porównywane bez rozróżniania wielkości liter i bez spacji na brzegach; dla sztuki bez żadnego wpisu SKU jest puste
-("—"). **Filtr "Kategoria z SKU"** (03.10.2026, lista rozwijana nad listą Raw data, obok wyszukiwarki; działa łącznie z wyszukiwaniem po numerze seryjnym): opcje "Wszystkie" / "Bez SKU" / każda kategoria z licznikiem (np. "NS (249)"), lista kategorii wczytywana z widoku i odświeżana razem z listą; zmiana filtra wraca na stronę 1.
+("—"). **"Klasa"** (`sku_class` w widoku, 03.10.2026; wiersz "Klasa" w karcie produktu, sekcja Magazyn) = OSTATNI człon SKU po ostatnim
+myślniku, ale tylko gdy składa się wyłącznie z liter (NS-32-V1-D -> D, NS-32-V2-BC -> BC, NS-32-V1-C -> C, NS-32-V2-B -> B, APM-A -> A);
+inaczej puste — SKU bez myślnika albo ze starego schematu, gdzie ostatni człon to liczba pad-ów ("PS4-500-B-2M"; "2M" nie jest klasą), nie
+dostają fałszywej klasy. Wyliczana w widoku jak kategoria z SKU, widoczna też w `ai.stock` dla asystenta AI.
+**Filtr "Kategoria z SKU"** (03.10.2026, lista rozwijana nad listą Raw data, obok wyszukiwarki; działa łącznie z wyszukiwaniem po numerze seryjnym): opcje "Wszystkie" / "Bez SKU" / każda kategoria z licznikiem (np. "NS (249)"), lista kategorii wczytywana z widoku i odświeżana razem z listą; zmiana filtra wraca na stronę 1.
 **VAT** (`fakturownia_stock_cache.vat`, nullable tekst) ma być wpisywany RĘCZNIE przy dodawaniu produktu do
 magazynu — na razie nic go nie wypełnia (kolumna pokazuje "—"), synchronizacja z Fakturowni go nie rusza. Podsumowanie
 magazynu (kafelki, wykres kołowy) dalej czyta tabelę, nie widok — z wyjątkami: **drugi wykres obok pierwszego** (02.10.2026): oba pierścienie z tabelą mają teraz po pół szerokości

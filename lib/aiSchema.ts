@@ -23,7 +23,8 @@ WIDOKI
 3) ai.stock — magazyn: sztuki ze stanem 1 w Fakturowni (1 wiersz = 1 sztuka):
    serial_number, category (kategoria z Fakturowni, np. Konsola, Samsung, iPhone), sku (może być null — przypisane z Testów/Trade-in/importu),
    sku_category (pierwszy człon SKU), purchase_price_gross (cena zakupu brutto w PLN), vat (zwykle puste), source_order (numer zamówienia
-   Back Market, z którego pochodzi sztuka), added_at.
+   Back Market, z którego pochodzi sztuka), added_at, sku_class (klasa = ostatni człon SKU złożony z liter, np. D, BC; null gdy SKU nie ma
+   takiego członu).
 4) ai.nbp_rates — kursy NBP: currency, rate_date, mid (1 jednostka waluty = tyle PLN).
 
 SKU ma budowę KATEGORIA-POJEMNOŚĆ-KOLOR-KLASA (np. PS4P-1TB-BK-A); klasa A > B > C > D (stan), ostatnia litera.
