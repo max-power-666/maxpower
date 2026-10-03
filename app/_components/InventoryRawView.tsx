@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { escapeLike } from "@/lib/search";
 import type { MemberLite } from "@/lib/displayName";
@@ -20,10 +20,12 @@ type Row = {
   vat: string | null;
   sku: string | null;
   sku_category: string | null;
+  sku_class: string | null;
 };
 
 const PAGE_SIZES = [25, 50, 100];
-const NO_SKU = "__bez_sku__";
+const NO_SKU = "__bez_sku__"; // w filtrze kategorii: sztuki bez SKU (brak kategorii z SKU)
+const NO_CLASS = "__bez_klasy__"; // w filtrze klasy: sztuki bez klasy
 
 function fmtDate(iso: string | null) {
   if (!iso) return "—";
@@ -45,7 +47,10 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
   const [reloadTick, setReloadTick] = useState(0);
   // Filtr "Kategoria z SKU" (lista rozwijana): "" = wszystkie, NO_SKU = sztuki bez SKU, inaczej konkretna kategoria.
   const [skuCategory, setSkuCategory] = useState("");
-  const [skuCategoryOptions, setSkuCategoryOptions] = useState<{ name: string; count: number }[]>([]);
+  // Filtr "Klasa" (lista rozwijana), łączny z kategorią: oba działają jednocześnie (AND), a liczniki w każdej liście
+  // uwzględniają wybór w drugiej (np. po wybraniu kategorii NS lista klas pokazuje tylko klasy sztuk z NS).
+  const [skuClass, setSkuClass] = useState("");
+  const [skuPairs, setSkuPairs] = useState<{ c: string | null; k: string | null }[]>([]);
   const [openSerial, setOpenSerial] = useState<string | null>(null);
 
   useEffect(() => {
@@ -66,26 +71,53 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
     };
   }, []);
 
-  // Lista kategorii z SKU do rozwijanej listy (z licznikami) — odświeżana razem z listą (Odśwież, synchronizacja).
+  // Pary (kategoria z SKU, klasa) wszystkich sztuk — do rozwijanych list z licznikami; odświeżane razem z listą.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const PAGE = 1000;
-      const counts = new Map<string, number>();
+      const pairs: { c: string | null; k: string | null }[] = [];
       let from = 0;
       while (true) {
-        const { data, error: err } = await supabase.from("fakturownia_stock_with_sku").select("sku_category").not("sku_category", "is", null).range(from, from + PAGE - 1);
-        if (err) return; // brak widoku itp. — filtr po prostu bez opcji, lista działa dalej
-        for (const r of (data as { sku_category: string }[]) || []) counts.set(r.sku_category, (counts.get(r.sku_category) || 0) + 1);
+        const { data, error: err } = await supabase.from("fakturownia_stock_with_sku").select("sku_category, sku_class").range(from, from + PAGE - 1);
+        if (err) return; // brak widoku itp. — filtry po prostu bez opcji, lista działa dalej
+        for (const r of (data as { sku_category: string | null; sku_class: string | null }[]) || []) pairs.push({ c: r.sku_category, k: r.sku_class });
         if (!data || data.length < PAGE) break;
         from += PAGE;
       }
-      if (!cancelled) setSkuCategoryOptions(Array.from(counts, ([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name, "pl")));
+      if (!cancelled) setSkuPairs(pairs);
     })();
     return () => {
       cancelled = true;
     };
   }, [reloadTick, reloadKey]);
+
+  const matchesClass = (k: string | null) => (skuClass === "" ? true : skuClass === NO_CLASS ? k === null : k === skuClass);
+  const matchesCategory = (c: string | null) => (skuCategory === "" ? true : skuCategory === NO_SKU ? c === null : c === skuCategory);
+  const categoryOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    let none = 0;
+    for (const p of skuPairs) {
+      if (!matchesClass(p.k)) continue;
+      if (p.c === null) none++;
+      else counts.set(p.c, (counts.get(p.c) || 0) + 1);
+    }
+    if (skuCategory && skuCategory !== NO_SKU && !counts.has(skuCategory)) counts.set(skuCategory, 0); // wybrana wartość zostaje na liście nawet bez wyników
+    return { none, list: Array.from(counts, ([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name, "pl")) };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [skuPairs, skuClass, skuCategory]);
+  const classOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    let none = 0;
+    for (const p of skuPairs) {
+      if (!matchesCategory(p.c)) continue;
+      if (p.k === null) none++;
+      else counts.set(p.k, (counts.get(p.k) || 0) + 1);
+    }
+    if (skuClass && skuClass !== NO_CLASS && !counts.has(skuClass)) counts.set(skuClass, 0);
+    return { none, list: Array.from(counts, ([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name, "pl")) };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [skuPairs, skuCategory, skuClass]);
 
   useEffect(() => {
     let cancelled = false;
@@ -95,10 +127,12 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
       const from = (page - 1) * pageSize;
       let q = supabase
         .from("fakturownia_stock_with_sku")
-        .select("id, name, category_name, description, purchase_price_gross, product_created_at, vat, sku, sku_category", { count: "exact" });
+        .select("id, name, category_name, description, purchase_price_gross, product_created_at, vat, sku, sku_category, sku_class", { count: "exact" });
       if (search) q = q.ilike("name", `%${escapeLike(search)}%`);
       if (skuCategory === NO_SKU) q = q.is("sku_category", null);
       else if (skuCategory) q = q.eq("sku_category", skuCategory);
+      if (skuClass === NO_CLASS) q = q.is("sku_class", null);
+      else if (skuClass) q = q.eq("sku_class", skuClass);
       const { data, error: err, count } = await q
         .order("product_created_at", { ascending: false, nullsFirst: false })
         .order("id", { ascending: false })
@@ -117,7 +151,7 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
     return () => {
       cancelled = true;
     };
-  }, [page, pageSize, search, skuCategory, reloadTick, reloadKey]);
+  }, [page, pageSize, search, skuCategory, skuClass, reloadTick, reloadKey]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const needsBackfill = !search && rows.length > 0 && rows.every((r) => r.name === null);
@@ -142,8 +176,23 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
             className="border border-line bg-white px-2 py-1.5 rounded text-sm font-semibold font-mono"
           >
             <option value="">Wszystkie</option>
-            <option value={NO_SKU}>Bez SKU</option>
-            {skuCategoryOptions.map((o) => (
+            <option value={NO_SKU}>Bez SKU ({categoryOptions.none})</option>
+            {categoryOptions.list.map((o) => (
+              <option key={o.name} value={o.name}>{o.name} ({o.count})</option>
+            ))}
+          </select>
+          <label className="text-xs text-inksoft">Klasa</label>
+          <select
+            value={skuClass}
+            onChange={(e) => {
+              setSkuClass(e.target.value);
+              setPage(1);
+            }}
+            className="border border-line bg-white px-2 py-1.5 rounded text-sm font-semibold font-mono"
+          >
+            <option value="">Wszystkie</option>
+            <option value={NO_CLASS}>Bez klasy ({classOptions.none})</option>
+            {classOptions.list.map((o) => (
               <option key={o.name} value={o.name}>{o.name} ({o.count})</option>
             ))}
           </select>
@@ -163,7 +212,7 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
         </div>
         <div className="flex items-center gap-3 text-xs text-inksoft">
           <span>
-            {total.toLocaleString("pl-PL")} {search || skuCategory ? "wyników" : "produktów"} · strona {Math.min(page, totalPages)} z {totalPages}
+            {total.toLocaleString("pl-PL")} {search || skuCategory || skuClass ? "wyników" : "produktów"} · strona {Math.min(page, totalPages)} z {totalPages}
           </span>
           <button
             onClick={() => setPage((p) => Math.max(1, p - 1))}
@@ -196,6 +245,7 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
               <th className="p-3">Numer seryjny</th>
               <th className="p-3">SKU</th>
               <th className="p-3">Kategoria z SKU</th>
+              <th className="p-3">Klasa</th>
               <th className="p-3">Kategoria</th>
               <th className="p-3">Zamówienie</th>
               <th className="p-3 text-right">Cena zakupu brutto</th>
@@ -206,8 +256,8 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
           <tbody>
             {!loading && rows.length === 0 && (
               <tr>
-                <td colSpan={8} className="p-6 text-center text-inksoft text-sm">
-                  {search || skuCategory ? "Nic nie znaleziono dla tych kryteriów." : "Brak produktów — kliknij „Odśwież”, żeby pobrać dane z Fakturowni."}
+                <td colSpan={9} className="p-6 text-center text-inksoft text-sm">
+                  {search || skuCategory || skuClass ? "Nic nie znaleziono dla tych kryteriów." : "Brak produktów — kliknij „Odśwież”, żeby pobrać dane z Fakturowni."}
                 </td>
               </tr>
             )}
@@ -222,6 +272,7 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
                 </td>
                 <td className="p-3 font-mono text-xs">{r.sku || "—"}</td>
                 <td className="p-3 font-mono text-xs font-semibold">{r.sku_category || "—"}</td>
+                <td className="p-3 font-mono text-xs font-semibold">{r.sku_class || "—"}</td>
                 <td className="p-3">{r.category_name}</td>
                 <td className="p-3 font-mono text-xs">{r.description || "—"}</td>
                 <td className="p-3 text-right font-mono">{fmtPLN(r.purchase_price_gross)}</td>

@@ -197,7 +197,11 @@ każe łączyć sprzedaż z magazynem po `sku_base`, nie po surowym SKU.
 myślniku, ale tylko gdy składa się wyłącznie z liter (NS-32-V1-D -> D, NS-32-V2-BC -> BC, NS-32-V1-C -> C, NS-32-V2-B -> B, APM-A -> A);
 inaczej puste — SKU bez myślnika albo ze starego schematu, gdzie ostatni człon to liczba pad-ów ("PS4-500-B-2M"; "2M" nie jest klasą), nie
 dostają fałszywej klasy. Wyliczana w widoku jak kategoria z SKU, widoczna też w `ai.stock` dla asystenta AI.
-**Filtr "Kategoria z SKU"** (03.10.2026, lista rozwijana nad listą Raw data, obok wyszukiwarki; działa łącznie z wyszukiwaniem po numerze seryjnym): opcje "Wszystkie" / "Bez SKU" / każda kategoria z licznikiem (np. "NS (249)"), lista kategorii wczytywana z widoku i odświeżana razem z listą; zmiana filtra wraca na stronę 1.
+**Filtry "Kategoria z SKU" i "Klasa"** (03.10.2026, dwie listy rozwijane nad Raw data, obok wyszukiwarki po numerze seryjnym; **działają JEDNOCZEŚNIE**, razem z
+wyszukiwaniem — AND): opcje "Wszystkie" / "Bez SKU" (kategoria) albo "Bez klasy" / każda wartość z licznikiem (np. "NS (249)", "B (310)"). **Liczniki są
+wzajemnie zależne:** po wybraniu kategorii lista klas pokazuje tylko klasy sztuk z tej kategorii (i odwrotnie), a wybrana wartość zostaje na liście nawet przy
+zerowym wyniku. Listy budowane z par (kategoria z SKU, klasa) wszystkich sztuk wczytywanych z widoku i odświeżanych razem z listą; zmiana filtra wraca na stronę 1.
+W tabeli Raw data jest też kolumna **"Klasa"** (zaraz po "Kategoria z SKU").
 **VAT** (`fakturownia_stock_cache.vat`, nullable tekst) ma być wpisywany RĘCZNIE przy dodawaniu produktu do
 magazynu — na razie nic go nie wypełnia (kolumna pokazuje "—"), synchronizacja z Fakturowni go nie rusza. Podsumowanie
 magazynu (kafelki, wykres kołowy) dalej czyta tabelę, nie widok — z wyjątkami: **drugi wykres obok pierwszego** (02.10.2026): oba pierścienie z tabelą mają teraz po pół szerokości
