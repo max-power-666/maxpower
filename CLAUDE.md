@@ -165,6 +165,18 @@ kolumny `name`, `description`, `product_created_at`, kategoria, cena zakupu) +
 "Odśwież" robi jednorazowy pełny skan i uzupełnia braki. Zapis tylko serwer (service_role);
 zespół ma tylko odczyt.
 
+**Wartość z kosztami** (03.10.2026, na prośbę właściciela; Magazyn -> Podsumowanie, drugi rząd kafelków POD kafelkami "Dostępne produkty"/"Łączna wartość"): kafelek
+"Koszty dodatkowe" (lista linii kosztów z opisem, ile zamówień/sztuk objęto) i kafelek **"Łączna wartość + koszty"** (ceny zakupu + suma kosztów). **DZIŚ jedyny
+koszt to Trade-in** (prowizja BM 10% + logistyka wg regulaminu, patrz sekcja Trade-in -> koszty dodatkowe, `lib/buybackCosts.ts`); z czasem dojdą koszty części, podatek PCC
+(zakup powyżej 1000 zł) itd. — **każdy składnik to osobna linia `CostLine`** (`lib/stockCosts.ts`), sumowana do "wartości z kosztami", więc dodanie składnika to nowa funkcja
+zwracająca `CostLine` dopisana w `fetchStockCosts` (`page.tsx`), bez przebudowy reszty. Mechanizm Trade-in: sztuka w magazynie wskazuje zamówienie w `description` (numer BM,
+np. FR-26392-JMMYS; pozostałe opisy — faktury "VAT marża" itp. — nie pasują do wzorca i nie mają kosztu Trade-in), dopasowanie do `buyback_orders` (paczkami po 60 id, pamięć
+podręczna na sesję), liczone tylko zamówienia WYPŁACONE (VALIDATED/PAID/MONEY_TRANSFERED — BM pobiera opłaty przy wypłacie), **jedno zamówienie RAZ** nawet gdy wskazuje je kilka
+sztuk. EUR -> PLN **kursem NBP z dnia poprzedniego względem wypłaty** (a bez daty wypłaty — względem utworzenia zamówienia), tą samą zasadą co reszta aplikacji; zamówienia bez
+kursu są pominięte z sumy i policzone osobno w opisie ("brak kursu NBP"), bez zgadywania. **Kursy NBP sięgają teraz do 15.12.2025:** `nbp/sync` jednorazowo dociąga historię wstecz
+(`HISTORY_START`), bo wcześniej backfill miał tylko 60 dni, a zamówienia Trade-in sięgają stycznia 2026 — po wdrożeniu trzeba raz kliknąć "Odśwież" w zakładce NBP (albo poczekać na
+cron). Na dzień wdrożenia: 937 zamówień Trade-in w magazynie, koszty ≈ 99 tys. zł przy wartości zakupu ≈ 666 tys. zł (≈ 15%; liczone testowo z kursami NBP pobranymi wprost).
+Kafelek "Wartość magazynu" na Przeglądzie dalej pokazuje samą wartość zakupu (bez kosztów).
 **Raw data — kolumny SKU i VAT** (02.10.2026, na prośbę właściciela). Raw data czyta teraz widok
 `fakturownia_stock_with_sku` (`supabase/inventory.sql`, uruchamiać PO schema/buyback-orders/tests) zamiast samej tabeli
 cache. **SKU** nie istnieje w Fakturowni (tam serial = nazwa = kod), więc jest wyliczane z naszej bazy po numerze

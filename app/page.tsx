@@ -11,6 +11,8 @@ import ShippingView from "./_components/ShippingView";
 import InvoicesView from "./_components/InvoicesView";
 import AiView from "./_components/AiView";
 import NbpView from "./_components/NbpView";
+import { stockTradeInCosts, type BuybackOrderLite, type CostLine } from "@/lib/stockCosts";
+import type { NbpRate } from "@/lib/nbp";
 import CategoryBreakdown, { FAKTUROWNIA_PALETTE } from "./_components/CategoryBreakdown";
 import OverviewSalesDashboard from "./_components/OverviewSalesDashboard";
 import RcpView from "./_components/RcpView";
@@ -105,7 +107,8 @@ type FakturowniaCategorySummary = { name: string; count: number; value: number }
 // sku: rozbicie dostępnych sztuk wg "kategorii z SKU" (widok fakturownia_stock_with_sku); null = nie udało się policzyć
 // (np. nie uruchomiono inventory.sql). `categories` bez sztuk bez SKU — te są osobno w `none`.
 type FakturowniaSku = { count: number; categories: FakturowniaCategorySummary[]; none: { count: number; value: number } };
-type FakturowniaSummary = { totalCount: number; totalValue: number; sku: FakturowniaSku | null; categories: FakturowniaCategorySummary[] };
+// costs: koszty dodatkowe sztuk w magazynie (dziś tylko Trade-in; kolejne składniki jako kolejne linie) — patrz lib/stockCosts.ts; null = nie udało się policzyć.
+type FakturowniaSummary = { totalCount: number; totalValue: number; sku: FakturowniaSku | null; costs: CostLine[] | null; categories: FakturowniaCategorySummary[] };
 
 type Unit = {
   id: string;
@@ -340,11 +343,11 @@ export default function Home() {
   async function fetchAllStockCacheRows() {
     const PAGE = 1000;
     let from = 0;
-    const all: { category_name: string; purchase_price_gross: number }[] = [];
+    const all: { category_name: string; purchase_price_gross: number; description: string | null }[] = [];
     while (true) {
       const { data, error } = await supabase
         .from("fakturownia_stock_cache")
-        .select("category_name, purchase_price_gross")
+        .select("category_name, purchase_price_gross, description")
         .range(from, from + PAGE - 1);
       if (error) throw error;
       all.push(...((data as any[]) || []));
@@ -389,10 +392,47 @@ export default function Home() {
     return { count, categories: Array.from(totals.values()).sort((a, b) => b.value - a.value), none };
   }
 
+  // Koszty dodatkowe sztuk w magazynie (dziś: Trade-in). Zamówienia BM dopasowujemy po `description` sztuki (numer zamówienia), w paczkach po 60
+  // identyfikatorów (limit długości URL); raz pobrane zamówienia zostają w pamięci podręcznej do końca sesji, żeby odświeżenia z realtime
+  // nie odpytywały bazy od nowa. Dodatek do podsumowania — błąd zwraca null i nie blokuje reszty.
+  const buybackOrderCache = useRef(new Map<string, BuybackOrderLite | null>());
+  async function fetchStockCosts(descriptions: (string | null)[]): Promise<CostLine[] | null> {
+    try {
+      const ids = Array.from(new Set(descriptions.map((d) => (d || "").trim()).filter((d) => /^[A-Z]{2}-\d{5}-[A-Z0-9]{5}$/.test(d))));
+      const missing = ids.filter((id) => !buybackOrderCache.current.has(id));
+      const chunks: string[][] = [];
+      for (let i = 0; i < missing.length; i += 60) chunks.push(missing.slice(i, i + 60));
+      for (let i = 0; i < chunks.length; i += 6) {
+        await Promise.all(
+          chunks.slice(i, i + 6).map(async (chunk) => {
+            const { data, error } = await supabase
+              .from("buyback_orders")
+              .select("order_public_id, status, product_title, sku, original_price, original_price_currency, counter_offer_price, counter_offer_price_currency, payment_date, creation_date")
+              .in("order_public_id", chunk);
+            if (error) throw error;
+            for (const id of chunk) buybackOrderCache.current.set(id, null);
+            for (const o of (data as BuybackOrderLite[]) || []) buybackOrderCache.current.set(o.order_public_id, o);
+          })
+        );
+      }
+      const orders = new Map<string, BuybackOrderLite>();
+      for (const id of ids) {
+        const o = buybackOrderCache.current.get(id);
+        if (o) orders.set(id, o);
+      }
+      const { data: rateRows, error: rateErr } = await supabase.from("nbp_rates").select("currency, rate_date, mid").eq("currency", "EUR").limit(1000);
+      if (rateErr) throw rateErr;
+      const rates: NbpRate[] = (rateRows || []).map((r: any) => ({ currency: r.currency, rateDate: r.rate_date, mid: Number(r.mid) }));
+      return [stockTradeInCosts(descriptions, orders, rates)];
+    } catch {
+      return null;
+    }
+  }
+
   // Czyta z bazy (fakturownia_stock_cache), a nie z Fakturowni bezpośrednio — dlatego
   // podsumowanie jest dostępne od razu po odświeżeniu strony, bez czekania na API.
   async function loadFakturowniaSummaryFromDb() {
-    let rows: { category_name: string; purchase_price_gross: number }[];
+    let rows: { category_name: string; purchase_price_gross: number; description: string | null }[];
     let metaRow: { last_synced_at: string } | null;
     let sku: FakturowniaSku | null = null;
     try {
@@ -421,11 +461,13 @@ export default function Home() {
       totalValue += Number(r.purchase_price_gross) || 0;
     }
 
+    const costs = await fetchStockCosts(rows.map((r) => r.description));
     setFakturowniaError("");
     setFakturowniaSummary({
       totalCount,
       totalValue,
       sku,
+      costs,
       categories: Array.from(totals.values()).sort((a, b) => b.value - a.value),
     });
     setFakturowniaLastSynced((metaRow?.last_synced_at as string) ?? null);
@@ -652,6 +694,34 @@ function FakturowniaSummaryView({ summary }: { summary: FakturowniaSummary }) {
           <div className="text-xs text-inksoft mb-2">ŁĄCZNA WARTOŚĆ (ceny zakupu brutto)</div>
           <div className="text-3xl font-bold font-mono">{fmtPLN(summary.totalValue)}</div>
         </div>
+        {summary.costs && (
+          <>
+            <div className="bg-white p-5">
+              <div className="text-xs text-inksoft mb-2">KOSZTY DODATKOWE (dziś tylko Trade-in)</div>
+              <div className="text-sm space-y-2">
+                {summary.costs.map((c) => (
+                  <div key={c.key}>
+                    <div className="flex justify-between gap-4">
+                      <span>{c.label}</span>
+                      <span className="font-mono font-semibold">{fmtPLN(c.amountPln)}</span>
+                    </div>
+                    <div className="text-[11px] text-inksoft">{c.detail}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="text-[11px] text-inksoft mt-3">
+                Wg regulaminu Back Market (netto, EUR → PLN kursem NBP z dnia poprzedniego). Jeszcze bez kosztów części, podatku PCC i in.
+              </div>
+            </div>
+            <div className="bg-white p-5">
+              <div className="text-xs text-inksoft mb-2">ŁĄCZNA WARTOŚĆ + KOSZTY</div>
+              <div className="text-3xl font-bold font-mono">{fmtPLN(summary.totalValue + summary.costs.reduce((acc, c) => acc + c.amountPln, 0))}</div>
+              <div className="text-xs text-inksoft mt-2">
+                ceny zakupu {fmtPLN(summary.totalValue)} + koszty {fmtPLN(summary.costs.reduce((acc, c) => acc + c.amountPln, 0))}
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       {summary.categories.length === 0 ? (
