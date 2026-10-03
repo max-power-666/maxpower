@@ -588,6 +588,19 @@ Portal (nie klasyczny "Apps and Services" — Amazon w 2026 skonsolidował rejes
 z rolą "Inventory and Order Tracking". Nie testowane na żywym API z tego środowiska (brak dostępu) — zweryfikowane na atrapie `fetch` wg
 oficjalnego modelu OpenAPI (github.com/amzn/selling-partner-api-models, orders-api-model).
 
+**Swopify — zamówienia RĘCZNE** (`marketplace = 'swopify'`, 03.10.2026, na prośbę właściciela): marketplace BEZ integracji API (nie ma
+jeszcze połączenia) — zamówienia dopisujemy ręcznie z maili "Klient opłacił zamówienie". Wybrane podejście: **jednorazowe dopisanie jednego
+zamówienia (C6L9EFR8)** plikiem SQL, bez formularza (wybór właściciela; formularz "Dodaj zamówienie ręcznie" odrzucony na tym etapie — każde następne
+zamówienie ze Swopify wymaga na razie dopisania przez asystenta albo zbudowania tego formularza). Dane klienta i adresy, których nie ma w żadnej
+tabeli surowej, siedzą w nowej kolumnie `sales_orders.manual_details` (jsonb, `sales-orders.sql`; null = zamówienie z API): `product_id`, `seller`,
+`condition`, `customer{name,phone,email}`, `shipping{name,company,street,houseNumber,apartment,postalCode,city,countryCode}`, `billing{...,taxNo}`
+(ulica i numer domu rozdzielone przy wpisywaniu). Na niej opierają się: sekcja "Dane zamówienia ręcznego" na karcie zamówienia, **przycisk "Nadaj
+przesyłkę DHL"** (`buildManualShipPrefill` w `lib/shipping.ts`) i **faktura** (gałąź `swopify` w `buildInvoiceBuyerPrefill` + `invoices/prefill`: adres do
+faktury, a gdy go brak — dostawy). Statusy ustawiamy sami: `PAID` ("Opłacone", liczy się jako Nowe i jako sprzedaż), `SHIPPED` (Wysłane), `CANCELLED`
+(Anulowane, nie liczy się) — `SWOPIFY_ORDER_STATES`, wpisy w `SHIPPED_STATUS`/`CANCELLED_STATUS`/`NOT_COUNTED` i lustro w `ai.sql` (test parytetu).
+**Nic nie synchronizuje i nic nie nadpisuje** tego zamówienia — status trzeba zmienić ręcznie w bazie, jeśli ma wyjść z "Opłacone" (zgłoszenie
+numeru przesyłki do Swopify nie istnieje: `notifyMarketplace` dla tego kanału nic nie robi, więc numer trzeba wpisać u nich ręcznie). Data zamówienia z maila
+to sama data (godzina nieznana — wpisane południe czasu polskiego); kraj DK wyprowadzony z adresu i waluty DKK, nie z maila.
 **Apilo** — dawny tymczasowy most do Amazon (sprzed integracji SP-API powyżej); **integracja wycofana 28.09.2026** (kod usunięty: `lib/apilo.ts`,
 `lib/apiloServer.ts`, `app/api/orders/apilo-{sync,connect}`, wpis w `vercel.json`, mappery w `lib/salesOrders.ts`, zmienne `APILO_*`), na wyraźną prośbę
 właściciela — Amazon ma już własną, bezpośrednią integrację, most nie był potrzebny. **Zostaje tylko historia:** tabela `apilo_orders` i zamówienia

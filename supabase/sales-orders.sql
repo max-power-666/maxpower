@@ -179,6 +179,10 @@ alter table sales_orders add column if not exists our_status text not null defau
 alter table sales_orders add column if not exists country_code text;
 alter table sales_orders add column if not exists shipping_method text;
 alter table sales_orders add column if not exists planned_shipping_date timestamptz;
+-- Zamówienia RĘCZNE (03.10.2026): kanały bez integracji API (dziś Swopify) dopisywane z maili. Dane klienta i adresy
+-- (których nie ma w żadnej tabeli surowej) trzymamy tu jako jsonb: {product_id, seller, condition, customer:{name,phone,email},
+-- shipping:{name,company,street,houseNumber,apartment,postalCode,city,countryCode}, billing:{...,taxNo}}. null = zamówienie z API.
+alter table sales_orders add column if not exists manual_details jsonb;
 -- Koszt wysyłki (01.10.2026, na prośbę właściciela) — RĘCZNY fallback, tylko gdy nie dało się go wziąć
 -- automatycznie z już zapisanej ceny DHL (shipments.charges, patrz SalesOrderCard.tsx "Koszt wysyłki" —
 -- woła dhlCharge z lib/shipping.ts). Potrzebny, bo do 01.10.2026 ta cena w ogóle się nie zapisywała: DHL

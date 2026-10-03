@@ -9,6 +9,7 @@ export const MARKETPLACES = [
   { key: "allegro", label: "Allegro" },
   { key: "octopia", label: "Octopia" },
   { key: "amazon", label: "Amazon" },
+  { key: "swopify", label: "Swopify" }, // BEZ integracji API (03.10.2026) — zamówienia dopisywane ręcznie z maili; dane klienta w sales_orders.manual_details
   { key: "apilo", label: "Amazon (Apilo)" }, // integracja wycofana (zastąpiona bezpośrednim SP-API) — etykieta zostaje tylko dla historycznych zamówień
 ] as const;
 
@@ -37,6 +38,7 @@ const SHIPPED_STATUS: Record<string, string[]> = {
   allegro: ["SENT"], // nasz znacznik (allegroDerivedStatus) — status zamówienia sam nie ma "wysłane", patrz niżej
   octopia: ["Shipped", "Delivered"],
   amazon: ["Shipped"],
+  swopify: ["SHIPPED"], // kanał ręczny — statusy ustawiamy sami (PAID / SHIPPED / CANCELLED)
 };
 const CANCELLED_STATUS: Record<string, string[]> = {
   backmarket: ["cancelled", "refunded"],
@@ -45,6 +47,7 @@ const CANCELLED_STATUS: Record<string, string[]> = {
   allegro: ["CANCELLED", "RETURNED"], // RETURNED to też nasz znacznik (allegroDerivedStatus)
   octopia: ["Cancelled", "Rejected", "Refused"], // Refused (56 zamówień na żywych danych) był pomijany — leciał do "nowe"
   amazon: ["Canceled"],
+  swopify: ["CANCELLED"],
 };
 
 export function statusBucket(marketplace: string, status: string): StatusBucket {
@@ -157,6 +160,9 @@ export const AMAZON_ORDER_STATES: Record<string, string> = {
   PendingAvailability: "Oczekuje na dostępność",
 };
 
+// Swopify (kanał bez integracji, zamówienia dopisywane ręcznie z maili): PAID = "Klient opłacił zamówienie" z maila.
+export const SWOPIFY_ORDER_STATES: Record<string, string> = { PAID: "Opłacone", SHIPPED: "Wysłane", CANCELLED: "Anulowane" };
+
 export function salesStatusLabel(marketplace: string, status: string): string {
   if (marketplace === "backmarket") return BM_ORDER_STATES[status] ?? `Stan ${status}`;
   if (marketplace === "refurbed") return REFURBED_ORDER_STATES[status] ?? status;
@@ -164,6 +170,7 @@ export function salesStatusLabel(marketplace: string, status: string): string {
   if (marketplace === "allegro") return ALLEGRO_ORDER_STATES[status] ?? status;
   if (marketplace === "octopia") return OCTOPIA_ORDER_STATES[status] ?? status;
   if (marketplace === "amazon") return AMAZON_ORDER_STATES[status] ?? status;
+  if (marketplace === "swopify") return SWOPIFY_ORDER_STATES[status] ?? status;
   return status;
 }
 
@@ -582,6 +589,7 @@ const NOT_COUNTED: Record<string, string[]> = {
   erli: ["cancelled", "returned", "pending"],
   allegro: ["CANCELLED", "BOUGHT", "FILLED_IN", "RETURNED"],
   octopia: ["Cancelled", "Rejected", "Refused"], // brakujący wpis do 30.09.2026 — te statusy liczyły się jak żywe zamówienia
+  swopify: ["CANCELLED"],
 };
 
 export function isCountedOrder(marketplace: string, status: string): boolean {

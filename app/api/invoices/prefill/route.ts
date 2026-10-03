@@ -42,6 +42,12 @@ export async function GET(request: Request) {
     const { data } = await db.from("erli_orders").select("raw").eq("id", externalId).maybeSingle();
     raw = data?.raw ?? null;
   }
+  if (marketplace === "swopify") {
+    // Zamówienie ręczne (bez integracji): dane nabywcy z sales_orders.manual_details.
+    const { data } = await db.from("sales_orders").select("manual_details").eq("marketplace", marketplace).eq("external_id", externalId).maybeSingle();
+    raw = data?.manual_details ?? null;
+    customerEmail = raw?.customer?.email ?? null;
+  }
   // Amazon: raw zostaje null celowo — buildInvoiceBuyerPrefill i tak odda puste pola (PII niedostępne przez SP-API).
 
   const buyer = buildInvoiceBuyerPrefill(marketplace, raw, customerEmail);

@@ -99,6 +99,23 @@ export function buildInvoiceBuyerPrefill(marketplace: string, raw: any, customer
         taxNo: isCompany ? clean(a.company_vatin) : "",
       };
     }
+  } else if (marketplace === "swopify") {
+    // Zamówienie RĘCZNE: raw = sales_orders.manual_details (patrz sales-orders.sql) — adres do faktury wpisany z maila,
+    // a gdy go brak, adres dostawy. Ulica i numer domu są już rozdzielone.
+    const a = raw?.billing || raw?.shipping;
+    if (a) {
+      return {
+        name: clean(a.name),
+        company: clean(a.company),
+        street: clean(a.street),
+        houseNumber: clean(a.houseNumber),
+        apartment: clean(a.apartment),
+        postalCode: clean(a.postalCode),
+        city: clean(a.city),
+        countryCode: clean(a.countryCode).toUpperCase(),
+        taxNo: clean(a.taxNo),
+      };
+    }
   } else if (marketplace === "allegro") {
     const ia = raw?.invoice?.required ? raw?.invoice?.address : null;
     if (ia) {

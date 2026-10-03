@@ -347,6 +347,7 @@ const MARKETPLACE_STYLE: Record<string, string> = {
   octopia: "bg-[#dcf5e3] text-[#1a7a3d]",
   apilo: "bg-[#fdecc8] text-[#a15c00]",
   amazon: "bg-[#2a2a2a] text-[#ff9900]",
+  swopify: "bg-[#e9e0ff] text-[#5b21b6]",
 };
 
 // Kolor plakietki statusu Back Market: w toku (do zrobienia) bursztyn, wysłane zielone, reszta neutralnie.
@@ -370,6 +371,10 @@ function statusStyle(marketplace: string, status: string) {
   if (marketplace === "octopia") {
     if (status === "WaitingAcceptance" || status === "Accepted" || status === "InPreparation") return "bg-ambersoft text-amber";
     if (status === "Shipped" || status === "Delivered") return "bg-tealsoft text-teal";
+  }
+  if (marketplace === "swopify") {
+    if (status === "PAID") return "bg-ambersoft text-amber"; // opłacone — do obsłużenia
+    if (status === "SHIPPED") return "bg-tealsoft text-teal";
   }
   if (marketplace === "erli") {
     if (status === "purchased") return "bg-ambersoft text-amber"; // opłacone — do obsłużenia

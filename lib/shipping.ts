@@ -132,6 +132,27 @@ export function parcelQuoteTotal(base: number, fuelPct: number | null): number {
 
 // getPrice dla jednego produktu (EK albo PI). Gdy produkt nie jest dostępny na trasie, DHL zwraca błąd — oddajemy go jako wynik
 // (ok: false), żeby w tabeli było widać, że produkt jest niedostępny i dlaczego, zamiast przerywać całą wycenę.
+// Formularz przesyłki z zamówienia RĘCZNEGO (Swopify i inne kanały bez integracji): dane z sales_orders.manual_details
+// (adres dostawy z maila, już z rozdzieloną ulicą i numerem domu; telefon i e-mail z danych klienta).
+export function buildManualShipPrefill(marketplace: string, externalId: string, d: any): ShipPrefill | null {
+  const a = d?.shipping;
+  if (!a) return null;
+  return {
+    marketplace,
+    externalId,
+    name: clean(a.name) || clean(d?.customer?.name),
+    company: clean(a.company),
+    street: clean(a.street),
+    houseNumber: clean(a.houseNumber),
+    apartment: clean(a.apartment),
+    postalCode: clean(a.postalCode),
+    city: clean(a.city),
+    countryCode: clean(a.countryCode).toUpperCase(),
+    phone: clean(d?.customer?.phone),
+    email: clean(d?.customer?.email),
+  };
+}
+
 // Domyślna data nadania: dziś, jeśli dzień roboczy i przed południem (czas lokalny), w przeciwnym razie najbliższy dzień roboczy.
 export function defaultShippingDate(now: Date = new Date()): string {
   const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());

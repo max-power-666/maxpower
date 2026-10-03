@@ -10,7 +10,7 @@ Masz jedno narzędzie, run_sql — zapytania SQL (PostgreSQL) tylko do odczytu n
 
 WIDOKI
 1) ai.orders — jedno zamówienie z marketplace'u na wiersz:
-   marketplace (backmarket | refurbed | erli | allegro | octopia | amazon | apilo [historia]), order_id, order_date (timestamptz),
+   marketplace (backmarket | refurbed | erli | allegro | octopia | amazon | swopify [ręcznie dopisywane] | apilo [historia]), order_id, order_date (timestamptz),
    order_day_pl (data zamówienia w strefie Europe/Warsaw — UŻYWAJ DO GRUPOWANIA PO DNIACH/MIESIĄCACH), status (surowy status kanału),
    stage ('nowe' | 'wyslane' | 'anulowane'), is_counted (boolean: czy zamówienie liczy się jako sprzedaż — FALSE dla anulowanych, zwróconych
    i nieopłaconych), country_code (kraj odbiorcy, ISO 2 litery), shipping_method ('Standard'/'Express', tylko Back Market), planned_shipping_date,

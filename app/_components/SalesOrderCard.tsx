@@ -6,7 +6,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { BM_ORDERLINE_STATES, MARKETPLACES, salesStatusLabel } from "@/lib/salesOrders";
 import { MAX_PADS } from "./PadSerialsCell";
-import { buildShipPrefill, dhlCharge, type ShipPrefill } from "@/lib/shipping";
+import { buildShipPrefill, buildManualShipPrefill, dhlCharge, type ShipPrefill } from "@/lib/shipping";
 import ErliParcelPanel from "./ErliParcelPanel";
 
 // Karta zamówienia sprzedaży (panel boczny po kliknięciu numeru zamówienia): dane z API marketplace'u,
@@ -29,6 +29,20 @@ export type SalesItem = {
   currency: string | null;
 };
 
+// Zamówienie RĘCZNE (kanały bez integracji, dziś Swopify) — dane z maila w sales_orders.manual_details (sales-orders.sql).
+type ManualAddress = { name?: string; company?: string; street?: string; houseNumber?: string; apartment?: string; postalCode?: string; city?: string; countryCode?: string; taxNo?: string };
+type ManualDetails = {
+  product_id?: string;
+  seller?: string;
+  condition?: string;
+  note?: string;
+  customer?: { name?: string; phone?: string; email?: string };
+  shipping?: ManualAddress;
+  billing?: ManualAddress;
+};
+const formatManualAddress = (a?: ManualAddress) =>
+  a ? [a.name, a.company, [a.street, a.houseNumber].filter(Boolean).join(" "), a.apartment, [a.postalCode, a.city].filter(Boolean).join(" "), a.countryCode].filter(Boolean).join(", ") : null;
+
 type WorkerData = {
   marketplace: string;
   external_id: string;
@@ -37,6 +51,7 @@ type WorkerData = {
   sku: string | null;
   country_code: string | null;
   shipping_cost: number | null;
+  manual_details?: ManualDetails | null;
   history: SalesHistoryEntry[];
 };
 
@@ -584,7 +599,9 @@ export default function SalesOrderCard({
         ? buildShipPrefill("refurbed", externalId, rf.raw, rf.customer_email)
         : marketplace === "octopia" && oc
           ? buildShipPrefill("octopia", externalId, oc.raw, null)
-          : null;
+          : marketplace === "swopify" && worker?.manual_details
+            ? buildManualShipPrefill("swopify", externalId, worker.manual_details)
+            : null;
 
   // Koszt wysyłki (01.10.2026, na prośbę właściciela) — tylko dla zamówień ZAGRANICZNYCH (kraj odbiorcy inny
   // niż Polska); auto-wartość z już nadanej przesyłki DHL, gdy jest, inaczej ręczne pole (patrz saveShippingCost).
@@ -817,6 +834,23 @@ export default function SalesOrderCard({
                 </>
               )}
             </div>
+
+            {worker.manual_details && (
+              <>
+                <h3 className="text-xs font-semibold text-inksoft mb-2">DANE ZAMÓWIENIA RĘCZNEGO (z maila — kanał bez integracji API)</h3>
+                <div className="border border-line bg-white mb-6">
+                  <Row label="ID produktu" value={worker.manual_details.product_id} mono />
+                  <Row label="Sprzedający" value={worker.manual_details.seller} />
+                  <Row label="Stan produktu" value={worker.manual_details.condition} />
+                  <Row label="Klient" value={worker.manual_details.customer?.name} />
+                  <Row label="Telefon" value={worker.manual_details.customer?.phone} mono />
+                  <Row label="E-mail klienta" value={worker.manual_details.customer?.email} />
+                  <Row label="Adres dostawy" value={formatManualAddress(worker.manual_details.shipping)} />
+                  <Row label="Dane do faktury" value={formatManualAddress(worker.manual_details.billing)} />
+                  {worker.manual_details.note && <Row label="Notatka" value={worker.manual_details.note} />}
+                </div>
+              </>
+            )}
 
             {((marketplace === "backmarket" && !bm) || (marketplace === "refurbed" && !rf) || (marketplace === "erli" && !er) || (marketplace === "allegro" && !al) || (marketplace === "octopia" && !oc) || (marketplace === "apilo" && !ap) || (marketplace === "amazon" && !az)) && (
               <p className="text-inksoft text-xs mb-6">Brak surowych danych z API dla tego zamówienia.</p>
