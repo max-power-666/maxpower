@@ -16,6 +16,7 @@ import { stockTradeInCosts, type BuybackOrderLite, type CostLine } from "@/lib/s
 import type { NbpRate } from "@/lib/nbp";
 import CategoryBreakdown, { FAKTUROWNIA_PALETTE } from "./_components/CategoryBreakdown";
 import OverviewSalesDashboard from "./_components/OverviewSalesDashboard";
+import OverviewMarginChart from "./_components/OverviewMarginChart";
 import RcpView from "./_components/RcpView";
 import ReturnsView from "./_components/ReturnsView";
 import ShopProductsView from "./_components/ShopProductsView";
@@ -570,6 +571,7 @@ export default function Home() {
           {view === "overview" && (
             <div>
               <OverviewSalesDashboard session={session} />
+              <OverviewMarginChart session={session} />
               <div className="grid grid-cols-4 gap-px bg-line border border-line">
                 <div className="bg-white p-5"><div className="text-xs text-inksoft mb-2">URZĄDZENIA</div><div className="text-3xl font-bold font-mono">{(fakturowniaSummary?.totalCount ?? 0).toLocaleString("pl-PL")}</div></div>
                 <div className="bg-white p-5"><div className="text-xs text-inksoft mb-2">WARTOŚĆ MAGAZYNU</div><div className="text-3xl font-bold font-mono">{fmtPLN(fakturowniaSummary?.totalValue ?? 0)}</div></div>
