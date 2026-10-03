@@ -42,3 +42,12 @@ export function convertToPln(amount: number, currency: string | null | undefined
   if (rate === null) return null;
   return amount * rate;
 }
+
+// Data kalendarzowa (YYYY-MM-DD) danej chwili w strefie Europe/Warsaw — do kursów liczonych od dnia WYPŁATY (Trade-in): wypłata o 00:30 czasu polskiego to
+// w UTC jeszcze poprzedni dzień, a polska zasada "kurs z dnia poprzedniego" liczy się od polskiej daty.
+export function warsawDate(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return "";
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Warsaw", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(t));
+}

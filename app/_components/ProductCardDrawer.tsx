@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { escapeLike } from "@/lib/search";
 import { computeTradeInCosts, PCC_RATE, PCC_THRESHOLD_PLN } from "@/lib/buybackCosts";
-import { rateBeforeDate, type NbpRate } from "@/lib/nbp";
+import { rateBeforeDate, warsawDate, type NbpRate } from "@/lib/nbp";
 import { TRADEIN_PAID_STATUSES } from "@/lib/stockCosts";
 import { SERVICE_STATUSES, SERVICE_TASKS, TEST_STATUSES, labelFor } from "@/lib/workLog";
 
@@ -95,7 +95,7 @@ export default function ProductCardDrawer({
     const o = orders.find((x) => x.order_public_id === (description || "").trim());
     if (!o) return "— (zakup nie z Trade-in)";
     if (!TRADEIN_PAID_STATUSES.includes(o.status)) return "— (zamówienie jeszcze niewypłacone)";
-    const d = (o.payment_date || o.creation_date || "").slice(0, 10);
+    const d = warsawDate(o.payment_date || o.creation_date);
     const c = computeTradeInCosts({
       originalPrice: o.original_price,
       counterOfferPrice: o.counter_offer_price,

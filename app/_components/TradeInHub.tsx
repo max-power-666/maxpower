@@ -8,7 +8,7 @@ import InlineEditCell from "./InlineEditCell";
 import PadSerialsCell, { MAX_PADS } from "./PadSerialsCell";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { computeTradeInCosts, TRADEIN_CATEGORY_LABELS, TRADEIN_COMMISSION_RATE, PCC_RATE, PCC_THRESHOLD_PLN } from "@/lib/buybackCosts";
-import { rateBeforeDate, type NbpRate } from "@/lib/nbp";
+import { rateBeforeDate, warsawDate, type NbpRate } from "@/lib/nbp";
 import { INTAKE_STATUSES, INTERVALS, fmtDuration, rangeStart, type Interval } from "@/lib/workLog";
 import { escapeLike } from "@/lib/search";
 import { buybackStatusLabel, buybackStatusStyle } from "@/lib/buybackOrders";
@@ -792,7 +792,7 @@ function OrderCardDrawer({
         sku: order.sku,
         // kurs NBP z dnia poprzedniego względem wypłaty (a bez daty wypłaty — względem utworzenia zamówienia); bez kursu nie liczymy PCC
         eurRate: (() => {
-          const d = (order.payment_date || order.creation_date || "").slice(0, 10);
+          const d = warsawDate(order.payment_date || order.creation_date);
           return d ? rateBeforeDate(eurRates, d) : null;
         })(),
       })

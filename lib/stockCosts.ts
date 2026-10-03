@@ -4,7 +4,7 @@
 // sumowana do "wartości z kosztami", więc dodanie składnika nie zmienia reszty.
 
 import { computeTradeInCosts } from "./buybackCosts";
-import { rateBeforeDate, type NbpRate } from "./nbp";
+import { rateBeforeDate, warsawDate, type NbpRate } from "./nbp";
 
 export type BuybackOrderLite = {
   order_public_id: string;
@@ -43,7 +43,8 @@ const num = (v: unknown): number | null => {
 // null amountPln = nie da się policzyć (zamówienie niewypłacone/bez ceny albo brak kursu); noRate odróżnia brak kursu od reszty.
 export function tradeInOrderCostPln(o: BuybackOrderLite, eurRates: NbpRate[]): { amountPln: number | null; noRate: boolean; incomplete: boolean } {
   if (!TRADEIN_PAID_STATUSES.includes(o.status)) return { amountPln: null, noRate: false, incomplete: false };
-  const date = (o.payment_date || o.creation_date || "").slice(0, 10);
+  // Data wypłaty (pole "Płatność" zamówienia BM) w czasie polskim; gdy BM jej nie podał (rzadkie), data utworzenia zamówienia.
+  const date = warsawDate(o.payment_date || o.creation_date);
   const rate = date ? rateBeforeDate(eurRates, date) : null;
   const c = computeTradeInCosts({
     originalPrice: num(o.original_price),

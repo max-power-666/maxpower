@@ -381,6 +381,9 @@ firm (np. faktury "VAT marża") i tylko dla wypłaconych zamówień; bez kursu N
 "Koszty dodatkowe razem" i "Koszt całkowity" na karcie zamówienia Trade-in (wiersz "PCC — 2% od wartości > 1 000 zł": kwota w zł, w nawiasie EUR i wartość w zł); `tradeInOrderCostPln` (koszty w PLN) dolicza PCC wprost
 w PLN, więc **trafia ono też do kafelka kosztów Magazynu i do kolumny "Koszty dodatkowe" w zakładce Marża**. **W karcie produktu** (sekcja "Magazyn (Fakturownia)", pod "Cena zakupu") jest wiersz **"PCC"** z kwotą w zł i wartością
 zakupu w zł albo wyjaśnieniem ("— (zakup nie z Trade-in)", "— (zamówienie jeszcze niewypłacone)", "— (brak kursu NBP)"). Na dzień wdrożenia: 52 z 937 zamówień w magazynie przekracza próg, PCC łącznie ≈ 1 718 zł.
+**Kurs i PCC liczone od daty PŁATNOŚCI zamówienia BM** (`buyback_orders.payment_date`, pole "Płatność" na karcie; potwierdzone przez właściciela 03.10.2026): kurs = ostatni kurs NBP ŚCIŚLE wcześniejszy niż dzień wypłaty,
+a dzień wypłaty brany jako data w czasie POLSKIM (`warsawDate` w `lib/nbp.ts`) — wypłata o 00:30 w Polsce to w UTC jeszcze poprzedni dzień i po dacie UTC dałaby kurs sprzed dwóch dni. Gdy BM nie podał daty płatności (na dzień sprawdzenia 3 z 6823
+wypłaconych zamówień), awaryjnie bierzemy datę utworzenia zamówienia. Dotyczy to tylko kosztów Trade-in/PCC; przeliczenia ceny SPRZEDAŻY w Marży i na Przeglądzie dalej liczą datę zamówienia w UTC (jak `overview/sales-stats`).
 **Poza zakresem:** opłata 7,50 € za "Trade-in Chargeback" (tylko gdy płatność Refurbishera zostanie odrzucona) i stawki
   prowizji od SPRZEDAŻY (11%/12% itd.) — to osobny temat. Regulamin może się zmienić z 1-miesięcznym wyprzedzeniem (art. 15.1) — przy zmianie zaktualizować stałe w pliku.
 - Numer zamówienia jest linkiem do **karty zamówienia** (panel boczny): dane z API + dane
