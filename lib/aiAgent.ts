@@ -4,7 +4,9 @@
 
 export type AiChatMessage = { role: "user" | "assistant"; content: string };
 export type AiQueryTrace = { sql: string; rows?: number; error?: string };
-export type AiAgentResult = { text: string; queries: AiQueryTrace[]; usage: { input: number; output: number } };
+import type { AiUsage } from "./aiPricing";
+
+export type AiAgentResult = { text: string; queries: AiQueryTrace[]; usage: AiUsage };
 
 type Block = { type: string; [k: string]: any };
 
@@ -50,7 +52,7 @@ export async function runAiAgent(opts: {
   const f = opts.fetchImpl ?? fetch;
   const maxSteps = opts.maxSteps ?? 12;
   const queries: AiQueryTrace[] = [];
-  const usage = { input: 0, output: 0 };
+  const usage: AiUsage = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
   const convo: { role: "user" | "assistant"; content: string | Block[] }[] = opts.messages.map((m) => ({ role: m.role, content: m.content }));
 
   for (let step = 0; step < maxSteps; step++) {
@@ -70,6 +72,9 @@ export async function runAiAgent(opts: {
     if (!res.ok) throw new Error(data?.error?.message || `Błąd API Anthropic (${res.status}).`);
     usage.input += Number(data?.usage?.input_tokens) || 0;
     usage.output += Number(data?.usage?.output_tokens) || 0;
+    // input_tokens NIE zawiera tokenów z/do cache — rozliczane po innych stawkach (zapis 1,25x, odczyt 0,1x ceny wejścia)
+    usage.cacheWrite += Number(data?.usage?.cache_creation_input_tokens) || 0;
+    usage.cacheRead += Number(data?.usage?.cache_read_input_tokens) || 0;
 
     const content: Block[] = Array.isArray(data?.content) ? data.content : [];
     const toolUses = content.filter((b) => b.type === "tool_use");

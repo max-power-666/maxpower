@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { requireRole } from "@/lib/serverAuth";
 import { runAiAgent, type AiChatMessage } from "@/lib/aiAgent";
 import { buildAiSystemPrompt } from "@/lib/aiSchema";
+import { aiCostUsd } from "@/lib/aiPricing";
 
 // Asystent AI (zakładka "AI", 03.10.2026) — TYLKO Admin (na tym etapie, decyzja właściciela). Pytanie po polsku -> Claude
 // układa zapytania SQL tylko do odczytu (supabase/ai.sql: widoki ai.*, rola ai_reader, funkcja ai_query) -> odpowiedź.
@@ -50,6 +51,7 @@ export async function POST(request: Request) {
         return data;
       },
     });
+    const costUsd = aiCostUsd(model, result.usage);
     await db.from("ai_log").insert({
       user_email: email,
       question,
@@ -58,8 +60,11 @@ export async function POST(request: Request) {
       model,
       input_tokens: result.usage.input,
       output_tokens: result.usage.output,
+      cache_write_tokens: result.usage.cacheWrite,
+      cache_read_tokens: result.usage.cacheRead,
+      cost_usd: costUsd,
     });
-    return NextResponse.json({ ok: true, answer: result.text, queries: result.queries, usage: result.usage });
+    return NextResponse.json({ ok: true, answer: result.text, queries: result.queries, usage: result.usage, costUsd, model });
   } catch (e: any) {
     const msg = String(e?.message ?? e);
     await db.from("ai_log").insert({ user_email: email, question, model, error: msg });

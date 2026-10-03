@@ -958,7 +958,16 @@ Anthropic Messages API zwykłym `fetch` (bez SDK; `ANTHROPIC_API_KEY`, model `AI
 pętla narzędzia `run_sql` do 12 kroków, błędy SQL wracają do modelu, który zwykle poprawia zapytanie. Cała rozmowa idzie w body (serwer nie
 trzyma stanu; odświeżenie strony czyści rozmowę, a model przy pytaniach uzupełniających odpytuje bazę od nowa). Pod każdą odpowiedzią
 "Użyte zapytania do bazy (n)" do weryfikacji liczb oraz zużycie tokenów. **Każde pytanie ląduje w `ai_log`** (kto, pytanie, odpowiedź,
-zapytania, model, tokeny, błąd) — audyt i kontrola kosztów; odczyt tylko Admin, zapis tylko serwer. **Świadomie NIE zrobione:** zapisywanie
+zapytania, model, tokeny, błąd) — audyt i kontrola kosztów; odczyt tylko Admin, zapis tylko serwer. **Licznik kosztów** (03.10.2026, na prośbę właściciela): pasek nad rozmową pokazuje koszt tej rozmowy i sumę od początku bieżącego miesiąca
+z `ai_log` (Admin czyta `ai_log` wprost przez RLS), a pod każdą odpowiedzią "koszt ≈ $…" z podziałem tokenów (wejście / wyjście / cache zapis i odczyt).
+Cennik w `lib/aiPricing.ts` (USD za 1M tokenów, wg strony cennika Anthropic z 03.10.2026: Sonnet 5.5 2/10, Opus 5.5 4/20, Fable 5.1 10/50, Haiku
+4.5 1/5; cache: zapis 5-min 1,25x ceny wejścia, odczyt 0,1x — Opus 5.5 0,05x, Fable 5.1 0,025x) — **to SZACUNEK po stronie aplikacji, faktyczne
+rozliczenie jest w konsoli Anthropic**; po zmianie modelu (`AI_MODEL`) albo cennika trzeba zaktualizować tabelę, a dla modelu spoza niej licznik
+pokazuje "—" i tokeny, nie zgaduje. `input_tokens` z API NIE zawiera tokenów cache, dlatego agent zlicza `cache_creation_input_tokens` i
+`cache_read_input_tokens` osobno (inne stawki). Koszt zapisywany w `ai_log.cost_usd` (+ `cache_write_tokens`/`cache_read_tokens`, kolumny
+dodane w `ai.sql`); wiersze sprzed tej zmiany mają `cost_usd = null` i nie wchodzą do sumy. Waluta to USD (tak rozlicza Anthropic) — bez przeliczenia
+na PLN (kursów USD nie synchronizujemy, `NBP_CURRENCIES` ma tylko EUR/DKK).
+**Świadomie NIE zrobione:** zapisywanie
 raportów/eksport do pliku (jest "Kopiuj"), streaming odpowiedzi, trwała historia rozmów, dostęp dla innych ról, zakres Zespół/Faktury/Wysyłki
 (wymaga dodania kolejnych widoków `ai.*` BEZ danych osobowych), wykresy w odpowiedziach. Brak marży per zamówienie — nie mamy kosztów zakupu per
 zamówienie ani prowizji marketplace'ów, prompt każe tego nie wymyślać. Nie testowane na żywym API Anthropic (brak klucza w środowisku

@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
+import { supabase } from "@/lib/supabaseClient";
+import { fmtUsd } from "@/lib/aiPricing";
 import Markdown from "./Markdown";
 
 // Asystent AI (03.10.2026, tylko Admin): okno, w którym wpisujesz polecenie po polsku (np. "wygeneruj raport sprzedaży za
@@ -9,7 +11,8 @@ import Markdown from "./Markdown";
 // Rozmowa żyje w stanie przeglądarki (odświeżenie ją czyści); każde pytanie zapisuje się w ai_log po stronie serwera.
 
 type Trace = { sql: string; rows?: number; error?: string };
-type Msg = { role: "user" | "assistant"; content: string; queries?: Trace[]; usage?: { input: number; output: number } };
+type Usage = { input: number; output: number; cacheWrite?: number; cacheRead?: number };
+type Msg = { role: "user" | "assistant"; content: string; queries?: Trace[]; usage?: Usage; costUsd?: number | null; model?: string };
 
 const EXAMPLES = [
   "Na podstawie dostępnych danych wygeneruj raport sprzedaży za poprzedni miesiąc.",
@@ -26,6 +29,32 @@ export default function AiView({ session }: { session: Session }) {
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
+  // Licznik kosztów (szacunek wg cennika z lib/aiPricing.ts; faktyczne rozliczenie jest w konsoli Anthropic): suma tej
+  // rozmowy + suma z dziennika ai_log od początku bieżącego miesiąca (odczyt ai_log ma tylko Admin — RLS).
+  const [monthly, setMonthly] = useState<{ usd: number; questions: number } | null>(null);
+  const conversationUsd = messages.reduce((sum, m) => sum + (m.costUsd ?? 0), 0);
+
+  async function loadMonthly() {
+    const start = new Date();
+    start.setDate(1);
+    start.setHours(0, 0, 0, 0);
+    let usd = 0;
+    let questions = 0;
+    for (let from = 0; ; from += 1000) {
+      const { data, error: err } = await supabase.from("ai_log").select("cost_usd").gte("at", start.toISOString()).is("error", null).range(from, from + 999);
+      if (err) return; // brak kolumny (nie uruchomiono ai.sql) itp. — po prostu bez sumy miesięcznej
+      for (const r of (data as { cost_usd: number | string | null }[]) || []) {
+        usd += Number(r.cost_usd) || 0;
+        questions += 1;
+      }
+      if (!data || data.length < 1000) break;
+    }
+    setMonthly({ usd, questions });
+  }
+
+  useEffect(() => {
+    loadMonthly();
+  }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -54,7 +83,8 @@ export default function AiView({ session }: { session: Session }) {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || `Błąd serwera (${res.status}).`);
-      setMessages([...next, { role: "assistant", content: data.answer, queries: data.queries, usage: data.usage }]);
+      setMessages([...next, { role: "assistant", content: data.answer, queries: data.queries, usage: data.usage, costUsd: data.costUsd, model: data.model }]);
+      loadMonthly();
     } catch (e: any) {
       setError(e.message || "Nie udało się uzyskać odpowiedzi.");
     } finally {
@@ -73,6 +103,15 @@ export default function AiView({ session }: { session: Session }) {
             Nowa rozmowa
           </button>
         )}
+      </div>
+      <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-inksoft mb-4 border border-line bg-white px-3 py-2" title="Szacunek wg cennika API (USD). Faktyczne rozliczenie: console.anthropic.com">
+        <span>Koszt tej rozmowy: <span className="font-mono font-semibold text-ink">{fmtUsd(conversationUsd)}</span></span>
+        {monthly && (
+          <span>
+            W tym miesiącu: <span className="font-mono font-semibold text-ink">{fmtUsd(monthly.usd)}</span> ({monthly.questions} {monthly.questions === 1 ? "pytanie" : "pytań"})
+          </span>
+        )}
+        <span>szacunek wg cennika API w USD</span>
       </div>
 
       {messages.length === 0 && !loading && (
@@ -99,7 +138,18 @@ export default function AiView({ session }: { session: Session }) {
               <Markdown text={m.content} />
               <div className="mt-3 pt-3 border-t border-line flex flex-wrap items-center gap-4 text-xs text-inksoft">
                 <button onClick={() => navigator.clipboard?.writeText(m.content)} className="font-semibold text-teal hover:underline">Kopiuj</button>
-                {m.usage && <span>tokeny: {m.usage.input.toLocaleString("pl-PL")} wej. / {m.usage.output.toLocaleString("pl-PL")} wyj.</span>}
+                {m.usage && (
+                  <span>
+                    tokeny: {m.usage.input.toLocaleString("pl-PL")} wej. / {m.usage.output.toLocaleString("pl-PL")} wyj.
+                    {(m.usage.cacheRead || m.usage.cacheWrite) ? ` / cache ${(m.usage.cacheRead ?? 0).toLocaleString("pl-PL")} odcz. · ${(m.usage.cacheWrite ?? 0).toLocaleString("pl-PL")} zap.` : ""}
+                  </span>
+                )}
+                {m.costUsd !== undefined && (
+                  <span>
+                    koszt ≈ <span className="font-mono font-semibold text-ink">{m.costUsd === null ? "—" : fmtUsd(m.costUsd)}</span>
+                    {m.costUsd === null && ` (brak cennika modelu ${m.model ?? ""})`}
+                  </span>
+                )}
               </div>
               {m.queries && m.queries.length > 0 && (
                 <details className="mt-2 text-xs">

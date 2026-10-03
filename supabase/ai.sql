@@ -186,6 +186,10 @@ create table if not exists ai_log (
   output_tokens int,
   error text
 );
+-- Licznik kosztów (03.10.2026): tokeny cache (zapis/odczyt) i szacowany koszt w USD wg lib/aiPricing.ts (null = model bez cennika).
+alter table ai_log add column if not exists cache_write_tokens int;
+alter table ai_log add column if not exists cache_read_tokens int;
+alter table ai_log add column if not exists cost_usd numeric;
 alter table ai_log enable row level security;
 drop policy if exists "admin read ai_log" on ai_log;
 create policy "admin read ai_log" on ai_log for select using (is_admin());
