@@ -307,11 +307,9 @@ export default function MarginView({ session, members }: { session: Session; mem
       {totals && (
         <div className="border border-line border-t-0 bg-white px-4 py-3 flex flex-wrap items-center gap-x-8 gap-y-1 text-sm">
           <span className="text-xs font-semibold text-inksoft">PODSUMOWANIE WYNIKU — wszystkie strony, {totals.withMargin} z {totals.count} pozycji z policzoną marżą</span>
-          <span>Sprzedaż: <span className="font-mono font-semibold">{fmtPLN(totals.sale)} zł</span></span>
-          <span>Zakup: <span className="font-mono font-semibold">{fmtPLN(totals.purchase)} zł</span></span>
-          <span>Koszty (wysyłka + dodatkowe + prowizja): <span className="font-mono font-semibold">{fmtPLN(totals.shipping + totals.extra + totals.commission)} zł</span></span>
           <span>Marża łącznie: <span className={`font-mono font-bold ${marginCls(totals.margin)}`}>{fmtPLN(totals.margin)} zł</span></span>
           <span>Marża %: <span className="font-mono font-semibold">{totals.sale > 0 ? ((totals.margin / totals.sale) * 100).toLocaleString("pl-PL", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : "—"}%</span></span>
+          <span>Marża na produkcie (średnio): <span className={`font-mono font-bold ${marginCls(totals.margin)}`}>{totals.withMargin > 0 ? `${fmtPLN(totals.margin / totals.withMargin)} zł` : "—"}</span></span>
           {totals.incomplete > 0 && <span className="text-amber text-xs">⚠ {totals.incomplete} pozycji z niepełnymi kosztami (najedź na ⚠ w wierszu)</span>}
         </div>
       )}
