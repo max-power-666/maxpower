@@ -3,7 +3,7 @@ import { requireRole } from "@/lib/serverAuth";
 import { upsConfigFromEnv, upsRate, UpsError, UPS_DEFAULT_SERVICE } from "@/lib/ups";
 import { parseShipmentBody, parseExtraPackages } from "@/lib/shipmentInput";
 import { admin } from "@/lib/parcelServer";
-import { loadUpsShipper, upsReceiver } from "@/lib/upsServer";
+import { loadUpsShipper, parseUpsCod, upsReceiver } from "@/lib/upsServer";
 
 // UPS — konfiguracja i WYCENA (Rating API, Shop). Tylko Admin, Manager i Zamówienia.
 //  GET  -> { configured, env }: czy są dane dostępowe i które środowisko UPS jest aktywne (test / production).
@@ -35,8 +35,10 @@ export async function POST(request: Request) {
   if (!shipper) return NextResponse.json({ error: "Brak danych nadawcy (tabela shipping_settings) — uruchom supabase/shipping.sql." }, { status: 500 });
 
   const { receiver, pack } = parsed.value;
+  const cod = parseUpsCod(b?.cod, receiver.countryCode, shipper.countryCode);
+  if (!cod.ok) return NextResponse.json({ error: cod.error }, { status: 400 });
   try {
-    const quotes = await upsRate(cfg, { shipper, receiver: upsReceiver(receiver), packages: [pack, ...extra.value] });
+    const quotes = await upsRate(cfg, { shipper, receiver: upsReceiver(receiver), packages: [pack, ...extra.value], cod: cod.value });
     quotes.sort((a, b2) => a.price - b2.price);
     return NextResponse.json({ ok: true, env: cfg.env, defaultService: UPS_DEFAULT_SERVICE, quotes });
   } catch (e: any) {

@@ -6,7 +6,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { BM_ORDERLINE_STATES, MARKETPLACES, salesStatusLabel } from "@/lib/salesOrders";
 import { MAX_PADS } from "./PadSerialsCell";
-import { buildShipPrefill, buildManualShipPrefill, dhlCharge, type ShipPrefill } from "@/lib/shipping";
+import { buildShipPrefill, buildDomesticShipPrefill, buildManualShipPrefill, dhlCharge, type ShipPrefill } from "@/lib/shipping";
 import ErliParcelPanel from "./ErliParcelPanel";
 
 // Karta zamówienia sprzedaży (panel boczny po kliknięciu numeru zamówienia): dane z API marketplace'u,
@@ -601,7 +601,11 @@ export default function SalesOrderCard({
           ? buildShipPrefill("octopia", externalId, oc.raw, null)
           : marketplace === "swopify" && worker?.manual_details
             ? buildManualShipPrefill("swopify", externalId, worker.manual_details)
-            : null;
+            : marketplace === "erli" && er
+              ? buildDomesticShipPrefill("erli", externalId, er.raw)
+              : marketplace === "allegro" && al
+                ? buildDomesticShipPrefill("allegro", externalId, al.raw)
+                : null;
 
   // Koszt wysyłki (01.10.2026, na prośbę właściciela) — tylko dla zamówień ZAGRANICZNYCH (kraj odbiorcy inny
   // niż Polska); auto-wartość z już nadanej przesyłki DHL, gdy jest, inaczej ręczne pole (patrz saveShippingCost).

@@ -16,6 +16,8 @@ export type ShipPrefill = {
   countryCode: string;
   phone: string;
   email: string;
+  // Pobranie (COD) z zamówienia krajowego (Erli/Allegro): kwota do pobrania od odbiorcy. Gdy jest, formularz proponuje UPS i włącza pobranie.
+  cod?: { amount: number; currency: string } | null;
 };
 
 const clean = (v: unknown) => (typeof v === "string" ? v.trim() : "");
@@ -103,9 +105,58 @@ export function rawBuyerAddress(marketplace: string, raw: any, customerEmail?: s
   // "Shipped"). To nie błąd mapowania: nasza aplikacja Amazon ma rolę "Inventory and Order Tracking" bez dostępu do
   // danych PII (Restricted Data Token) — pełny adres wymaga osobnego zatwierdzenia w Seller Central i osobnego
   // wywołania (POST /tokens/.../restrictedDataToken + GET /orders/v0/orders/{id}/address) — do zrobienia po stronie
-  // właściciela, zanim to ma sens kodować. Erli i Allegro też bez branchu na razie — do zrobienia, gdy będą
-  // potrzebne (dziś mają własne, osobne ścieżki wysyłki, które adresu z tej funkcji nie potrzebują).
+  // właściciela, zanim to ma sens kodować. Erli i Allegro mają osobną funkcję buildDomesticShipPrefill (niżej) — ta jest wspólna z fakturami,
+  // gdzie dla tych kanałów liczą się inne, fakturowe pola.
   return p;
+}
+
+// Zamówienia KRAJOWE z Erli i Allegro (04.10.2026, na prośbę właściciela): adres z zamówienia i — gdy kupujący wybrał pobranie — kwota COD.
+// Osobno od rawBuyerAddress (wspólnego z fakturami, gdzie Erli/Allegro mają własne, fakturowe pola). Zamówienia z odbiorem w PUNKCIE/PACZKOMACIE
+// (Erli `delivery.pickupPlace`, Allegro `delivery.pickupPoint`) zwracają null: kurier pod adres kupującego nie dowiezie takiej paczki do punktu,
+// a adres w zamówieniu to wtedy adres kupującego, nie punktu — lepiej nie podsuwać błędnego formularza.
+export function buildDomesticShipPrefill(marketplace: "erli" | "allegro", externalId: string, raw: any): ShipPrefill | null {
+  if (marketplace === "erli") {
+    const d = raw?.delivery;
+    const a = raw?.user?.deliveryAddress;
+    if (!a || d?.pickupPlace) return null;
+    const flat = clean(a.flatNumber);
+    const total = Number(raw?.totalPrice);
+    const cod = d?.cod === true && Number.isFinite(total) && total > 0 ? { amount: Math.round(total) / 100, currency: clean(raw?.currency) || "PLN" } : null;
+    return {
+      marketplace,
+      externalId,
+      name: [clean(a.firstName), clean(a.lastName)].filter(Boolean).join(" "),
+      company: clean(a.companyName),
+      street: clean(a.street),
+      houseNumber: clean(a.buildingNumber),
+      apartment: flat,
+      postalCode: clean(a.zip),
+      city: clean(a.city),
+      countryCode: clean(a.country).toUpperCase(),
+      phone: clean(a.phone),
+      email: clean(raw?.user?.email),
+      cod,
+    };
+  }
+  const d = raw?.delivery;
+  const a = d?.address;
+  if (!a || d?.pickupPoint) return null;
+  const toPay = Number(raw?.summary?.totalToPay?.amount);
+  const cod = raw?.payment?.type === "CASH_ON_DELIVERY" && Number.isFinite(toPay) && toPay > 0 ? { amount: toPay, currency: clean(raw?.summary?.totalToPay?.currency) || "PLN" } : null;
+  return {
+    marketplace,
+    externalId,
+    name: [clean(a.firstName), clean(a.lastName)].filter(Boolean).join(" "),
+    company: clean(a.companyName),
+    ...splitStreet(clean(a.street)), // Allegro podaje ulicę razem z numerem ("Kąty 18", "ul. Mieszka 99/9")
+    apartment: "",
+    postalCode: clean(a.zipCode),
+    city: clean(a.city),
+    countryCode: clean(a.countryCode).toUpperCase(),
+    phone: clean(a.phoneNumber) || clean(raw?.buyer?.phoneNumber),
+    email: clean(raw?.buyer?.email),
+    cod,
+  };
 }
 
 // Adres odbiorcy z surowego zamówienia, filtrowany do krajów, gdzie wysyłamy DHL-em (DHL_EU_COUNTRIES — obejmuje

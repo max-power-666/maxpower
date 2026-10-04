@@ -162,6 +162,19 @@ const pkgBlock = (p: UpsPackage, kind: "rate" | "ship", description?: string) =>
   PackageWeight: { UnitOfMeasurement: { Code: "KGS" }, Weight: p.weight.toFixed(1) },
 });
 
+// --- pobranie (COD)
+
+// Pobranie UPS (Shipment-level COD) — dostępne dla przesyłek KRAJOWYCH w Polsce (potwierdzone wyceną na koncie: PL→PL przyjmuje kody 1 i 9, kod 0 i 8 odrzuca).
+// Kod 1 = "Cash only" (gotówka, jak przy pobraniu Erli/Allegro). Kwota w PLN, 10,00–50 000,00 (pole MonetaryValue w specyfikacji ma min. 5 znaków, np. "10.00").
+export type UpsCod = { amount: number; currency: string };
+export const UPS_COD_MIN = 10;
+export const UPS_COD_MAX = 50000;
+export function upsCodOptions(cod: UpsCod | null | undefined) {
+  if (!cod) return {};
+  if (!(cod.amount >= UPS_COD_MIN && cod.amount <= UPS_COD_MAX)) throw new UpsError(`Kwota pobrania musi mieścić się w przedziale ${UPS_COD_MIN}–${UPS_COD_MAX} zł.`);
+  return { ShipmentServiceOptions: { COD: { CODFundsCode: "1", CODAmount: { CurrencyCode: cod.currency, MonetaryValue: cod.amount.toFixed(2) } } } };
+}
+
 // --- wycena (Rating, Shop)
 
 export type UpsQuote = {
@@ -175,7 +188,7 @@ export type UpsQuote = {
   warnings: string[];
 };
 
-export async function upsRate(cfg: UpsConfig, o: { shipper: UpsAddress; receiver: UpsAddress; packages: UpsPackage[] }): Promise<UpsQuote[]> {
+export async function upsRate(cfg: UpsConfig, o: { shipper: UpsAddress; receiver: UpsAddress; packages: UpsPackage[]; cod?: UpsCod | null }): Promise<UpsQuote[]> {
   const body = {
     RateRequest: {
       Request: { TransactionReference: { CustomerContext: "recoo-erp" } },
@@ -184,6 +197,7 @@ export async function upsRate(cfg: UpsConfig, o: { shipper: UpsAddress; receiver
         ShipTo: addressBlock(o.receiver),
         ShipFrom: addressBlock(o.shipper),
         ShipmentRatingOptions: { NegotiatedRatesIndicator: "Y" },
+        ...upsCodOptions(o.cod),
         Package: o.packages.map((p) => pkgBlock(p, "rate")),
       },
     },
@@ -228,7 +242,7 @@ export type UpsCreated = {
 
 export async function upsCreate(
   cfg: UpsConfig,
-  o: { serviceCode: string; shipper: UpsAddress; receiver: UpsAddress; packages: UpsPackage[]; description: string; reference?: string }
+  o: { serviceCode: string; shipper: UpsAddress; receiver: UpsAddress; packages: UpsPackage[]; description: string; reference?: string; cod?: UpsCod | null }
 ): Promise<UpsCreated> {
   const body = {
     ShipmentRequest: {
@@ -241,6 +255,7 @@ export async function upsCreate(
         PaymentInformation: { ShipmentCharge: { Type: "01", BillShipper: { AccountNumber: cfg.account } } },
         Service: { Code: o.serviceCode },
         ShipmentRatingOptions: { NegotiatedRatesIndicator: "Y" },
+        ...upsCodOptions(o.cod),
         ...(o.reference ? { ReferenceNumber: { Code: "02", Value: o.reference.slice(0, 35) } } : {}),
         Package: o.packages.map((p) => pkgBlock(p, "ship", o.description)),
       },

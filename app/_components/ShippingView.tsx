@@ -78,6 +78,7 @@ type ShipmentRow = {
   tracking_number: string;
   tracking_url: string | null;
   receiver: { name?: string; company?: string; city?: string; countryCode?: string };
+  package: unknown; // UPS: { pieces, cod } — znacznik pobrania na liście; inni przewoźnicy: tablica paczek
   charges: unknown; // tablica {currencyType,priceCurrency,price} dla DHL; dla Erli inny kształt (id paczki) — patrz dhlCharge()
   marketplace_synced_at: string | null;
   marketplace_sync_error: string | null;
@@ -120,6 +121,9 @@ export default function ShippingView({
   // przesyłce, patrz lib/dhlParcel.ts). Pierwsza paczka zostaje w `form` jak dotąd.
   const [extraPackages, setExtraPackages] = useState<{ weight: string; length: string; width: string; height: string }[]>([]);
   const [order, setOrder] = useState<{ marketplace: string; externalId: string } | null>(null);
+  // Pobranie (COD) — tylko UPS i tylko przesyłki krajowe (PL → PL); kwota w PLN wpisywana ręcznie albo z zamówienia (Erli/Allegro).
+  const [codOn, setCodOn] = useState(false);
+  const [codAmount, setCodAmount] = useState("");
   const [plannedDate, setPlannedDate] = useState(defaultShippingDate());
   const [quoting, setQuoting] = useState(false);
   const [quote, setQuote] = useState<{ carrier: Carrier; products: QuoteRow[]; warnings: string[] } | null>(null);
@@ -175,6 +179,10 @@ export default function ShippingView({
     if (!prefill) return;
     setForm({ ...EMPTY_FORM, name: prefill.name, company: prefill.company, street: prefill.street, houseNumber: prefill.houseNumber, apartment: prefill.apartment, postalCode: prefill.postalCode, city: prefill.city, countryCode: prefill.countryCode, phone: prefill.phone, email: prefill.email, reference: prefill.externalId });
     setExtraPackages([]);
+    // Zamówienie za pobraniem (Erli/Allegro): proponujemy UPS z włączonym pobraniem na kwotę z zamówienia (można zmienić przewoźnika i wyłączyć).
+    setCodOn(!!prefill.cod);
+    setCodAmount(prefill.cod ? String(prefill.cod.amount).replace(".", ",") : "");
+    if (prefill.cod && ups?.configured) setCarrier("ups");
     setOrder({ marketplace: prefill.marketplace, externalId: prefill.externalId });
     setQuote(null);
     setChosen(null);
@@ -215,7 +223,7 @@ export default function ShippingView({
     let q = supabase
       .from("shipments")
       .select(
-        "id, created_at, carrier, cancelled_at, label_format, created_by_email, environment, marketplace, order_external_id, product_code, product_name, tracking_number, tracking_url, receiver, charges, marketplace_synced_at, marketplace_sync_error",
+        "id, created_at, carrier, cancelled_at, label_format, created_by_email, environment, marketplace, order_external_id, product_code, product_name, tracking_number, tracking_url, receiver, package, charges, marketplace_synced_at, marketplace_sync_error",
         { count: "exact" }
       );
     if (shipSearch) q = q.ilike("tracking_number", `%${escapeLike(shipSearch)}%`);
@@ -296,6 +304,11 @@ export default function ShippingView({
     email: form.email,
   });
 
+  // Pobranie idzie do żądania tylko dla UPS i kraju odbiorcy PL (serwer i tak to sprawdza).
+  const codActive = carrier === "ups" && form.countryCode === "PL" && codOn;
+  const codPayload = () => (codActive ? { amount: Number(codAmount.replace(",", ".")) } : undefined);
+  const codValid = !codActive || (Number(codAmount.replace(",", ".")) >= 10 && Number(codAmount.replace(",", ".")) <= 50000);
+
   async function getQuote() {
     setError("");
     setQuote(null);
@@ -311,6 +324,7 @@ export default function ShippingView({
           receiver: receiverPayload(),
           package: p,
           extraPackages: carrier === "parcel" || carrier === "ups" ? extraPackagesPayload() : undefined,
+          cod: codPayload(),
           plannedDate,
           // pola płaskie dla wyceny DHL Express (route sprawdza połączenie po tej trasie)
           destinationCountryCode: form.countryCode,
@@ -407,6 +421,7 @@ export default function ShippingView({
           receiver: receiverPayload(),
           package: packagePayload(),
           extraPackages: multiPiece ? extraPackagesPayload() : undefined,
+          cod: codPayload(),
           reference: form.reference,
           order,
           billing: product.billing,
@@ -607,6 +622,8 @@ export default function ShippingView({
   }
 
   function reset() {
+    setCodOn(false);
+    setCodAmount("");
     setForm(EMPTY_FORM);
     setExtraPackages([]);
     setOrder(null);
@@ -778,6 +795,28 @@ export default function ShippingView({
               <div className="col-span-2 md:col-span-6"><label className={label}>Opis zawartości</label><input value={form.description} onChange={(e) => setField("description", e.target.value)} placeholder={settings.default_description} className={inputCls} /></div>
             </div>
 
+            {carrier === "ups" && form.countryCode === "PL" && (
+              <div className="mb-3 flex items-center gap-3 flex-wrap">
+                <label className="flex items-center gap-2 text-sm font-semibold">
+                  <input type="checkbox" checked={codOn} onChange={(e) => { setCodOn(e.target.checked); setQuote(null); setChosen(null); }} />
+                  Pobranie (COD)
+                </label>
+                {codOn && (
+                  <>
+                    <input
+                      value={codAmount}
+                      onChange={(e) => { setCodAmount(e.target.value); setQuote(null); setChosen(null); }}
+                      inputMode="decimal"
+                      placeholder="Kwota do pobrania"
+                      className="w-40 border border-line bg-white px-3 py-2 rounded text-sm font-mono"
+                    />
+                    <span className="text-xs text-inksoft">zł — gotówka od odbiorcy; kwota 10–50 000 zł. UPS dolicza opłatę za pobranie (widoczna w wycenie).</span>
+                    {!codValid && <span className="text-xs text-rust font-semibold">Podaj kwotę 10–50 000 zł.</span>}
+                  </>
+                )}
+              </div>
+            )}
+
             {(carrier === "parcel" || carrier === "ups") && (
               <div className="mb-3">
                 {extraPackages.map((p, i) => (
@@ -794,7 +833,7 @@ export default function ShippingView({
               </div>
             )}
 
-            <button onClick={getQuote} disabled={quoting || !formReady || !(carrier === "parcel" ? parcel?.configured : carrier === "express" ? express?.configured : ups?.configured)} className={btnPrimary}>{quoting ? `Pytanie ${carrier === "ups" ? "UPS" : "DHL"}…` : `Wyceń (${CARRIER_LABEL[carrier]})`}</button>
+            <button onClick={getQuote} disabled={quoting || !formReady || !codValid || !(carrier === "parcel" ? parcel?.configured : carrier === "express" ? express?.configured : ups?.configured)} className={btnPrimary}>{quoting ? `Pytanie ${carrier === "ups" ? "UPS" : "DHL"}…` : `Wyceń (${CARRIER_LABEL[carrier]})`}</button>
           </div>
 
           {/* wycena i wybór produktu */}
@@ -955,7 +994,12 @@ Cena to wycena wg cennika konta ({quote.carrier === "ups" ? "UPS: kwota NETTO w 
                         {s.tracking_url ? <a href={s.tracking_url} target="_blank" rel="noreferrer" className="text-teal hover:underline">{s.tracking_number}</a> : s.tracking_number}
                       </td>
                       <td className="p-3 text-xs">{s.receiver?.name}<div className="text-inksoft">{s.receiver?.city}, {s.receiver?.countryCode}</div></td>
-                      <td className="p-3 text-xs whitespace-nowrap">{s.product_name || s.product_code}</td>
+                      <td className="p-3 text-xs whitespace-nowrap">
+                        {s.product_name || s.product_code}
+                        {(s.package as { cod?: { amount?: number } | null } | null)?.cod?.amount ? (
+                          <div className="text-amber font-semibold" title="Pobranie — kwotę do odbioru od odbiorcy wpłaca UPS na konto wg umowy">COD {Number((s.package as any).cod.amount).toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} zł</div>
+                        ) : null}
+                      </td>
                       <td className="p-3 text-right font-mono text-xs whitespace-nowrap">
                         {charge ? fmtMoney({ price: charge.price, currency: charge.priceCurrency }) : "—"}
                         {!charge && !s.cancelled_at && s.carrier === "dhl_parcel" && (

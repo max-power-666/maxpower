@@ -3,7 +3,7 @@ import { requireRole } from "@/lib/serverAuth";
 import { upsConfigFromEnv, upsCreate, upsServiceName, upsTrackingUrl, UpsError } from "@/lib/ups";
 import { parseShipmentBody, parseExtraPackages, parseQuotedCharges } from "@/lib/shipmentInput";
 import { admin } from "@/lib/parcelServer";
-import { loadUpsShipper, upsReceiver } from "@/lib/upsServer";
+import { loadUpsShipper, parseUpsCod, upsReceiver } from "@/lib/upsServer";
 import { notifyMarketplace } from "@/lib/shipmentMarketplaceSync";
 
 // Nadanie przesyłki UPS (Shipping API) — tylko Admin, Manager i Zamówienia. Etykieta ZPL 4x6 wraca od razu w odpowiedzi i jest zapisywana
@@ -36,9 +36,12 @@ export async function POST(request: Request) {
   const shipper = await loadUpsShipper(db);
   if (!shipper) return NextResponse.json({ error: "Brak danych nadawcy (tabela shipping_settings) — uruchom supabase/shipping.sql." }, { status: 500 });
 
+  const cod = parseUpsCod(b?.cod, receiver.countryCode, shipper.countryCode);
+  if (!cod.ok) return NextResponse.json({ error: cod.error }, { status: 400 });
+
   let created;
   try {
-    created = await upsCreate(cfg, { serviceCode, shipper, receiver: upsReceiver(receiver), packages: [pack, ...extra.value], description: pack.description, reference });
+    created = await upsCreate(cfg, { serviceCode, shipper, receiver: upsReceiver(receiver), packages: [pack, ...extra.value], description: pack.description, reference, cod: cod.value });
   } catch (e: any) {
     return NextResponse.json({ error: e.message || "Nie udało się nadać przesyłki." }, { status: e instanceof UpsError ? 422 : 502 });
   }
@@ -64,7 +67,8 @@ export async function POST(request: Request) {
       tracking_url: trackingUrl,
       planned_shipping_date: plannedDate,
       receiver: { ...receiver },
-      package: [pack, ...extra.value],
+      // Obiekt (nie sama tablica jak w DHL Parcel): paczki + pobranie (kwota COD, gdy zażądano) — lista przesyłek pokazuje znacznik COD.
+      package: { pieces: [pack, ...extra.value], cod: cod.value },
       charges,
       label_format: created.labelBase64 ? "zpl" : null,
       label_data: created.labelBase64,
