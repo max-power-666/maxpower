@@ -445,7 +445,12 @@ function OrdersList({
     setLoading(true);
     const from = (page - 1) * pageSize;
     let q = supabase.from("sales_orders").select(SALES_COLUMNS, { count: "exact" });
-    if (search) q = q.ilike("external_id", `%${escapeLike(search)}%`);
+    // Szukanie po numerze zamówienia ALBO po SKU (sales_orders.sku trzyma SKU wszystkich pozycji po przecinku, więc fragment SKU trafia też w zamówienia
+    // z kilkoma pozycjami). Wartość w cudzysłowie, żeby przecinek/nawias wpisany w wyszukiwarce nie rozwalił składni filtra .or().
+    if (search) {
+      const pat = `"%${escapeLike(search).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}%"`;
+      q = q.or(`external_id.ilike.${pat},sku.ilike.${pat}`);
+    }
     // Filtr statusu liczony wprost ze statusu kanału (patrz statusBucket w lib/salesOrders.ts), nie z osobnej
     // kolumny — "Nowe" to NOT (wysłane OR anulowane), stąd `not.or=(...)`. supabase-js nie ma wprost metody na
     // złożone "not.or", więc nadużywamy parametru foreignTable w .or() (`key = foreignTable + ".or"` w źródle
@@ -567,7 +572,7 @@ function OrdersList({
       <input
         value={searchInput}
         onChange={(e) => setSearchInput(e.target.value)}
-        placeholder="Szukaj po numerze zamówienia"
+        placeholder="Szukaj po numerze zamówienia lub SKU"
         className="w-72 border border-line bg-white px-3 py-2 rounded text-sm font-mono mb-3"
       />
       <div className="flex items-center gap-2 flex-wrap mb-3">
@@ -624,7 +629,7 @@ function OrdersList({
           </thead>
           <tbody>
             {!loading && rows.length === 0 && (
-              <tr><td colSpan={13} className="p-6 text-center text-inksoft text-sm">{search ? "Nic nie znaleziono dla tego numeru." : "Brak zamówień — kliknij Odśwież, żeby pobrać je z Back Market."}</td></tr>
+              <tr><td colSpan={13} className="p-6 text-center text-inksoft text-sm">{search ? "Nic nie znaleziono dla tego numeru zamówienia ani SKU." : "Brak zamówień — kliknij Odśwież, żeby pobrać je z Back Market."}</td></tr>
             )}
             {rows.map((r) => {
               // Zamówienie bez pozycji (jeszcze nie zsynchronizowane) pokazujemy jednym wierszem z samym SKU.
