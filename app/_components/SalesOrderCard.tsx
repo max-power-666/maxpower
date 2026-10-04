@@ -407,7 +407,7 @@ export default function SalesOrderCard({
         .select("charges")
         .eq("marketplace", marketplace)
         .eq("order_external_id", externalId)
-        .in("carrier", ["dhl_express", "dhl_parcel"])
+        .in("carrier", ["dhl_express", "dhl_parcel", "ups"])
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle(),
@@ -636,7 +636,7 @@ export default function SalesOrderCard({
               )}
               {onShip && shipPrefill && (
                 <button onClick={() => onShip(shipPrefill)} className="text-xs font-semibold text-teal hover:underline">
-                  Nadaj przesyłkę DHL →
+                  Nadaj przesyłkę (DHL / UPS) →
                 </button>
               )}
               {marketplace === "backmarket" && (

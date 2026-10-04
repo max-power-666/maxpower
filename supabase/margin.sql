@@ -106,12 +106,12 @@ left join lateral (
   limit 1
 ) p on true
 left join buyback_orders bo on bo.order_public_id = btrim(p.description)
--- wysyłka: najnowsza nieanulowana przesyłka DHL tego zamówienia, cena BILLC z wyceny (patrz dhlCharge w lib/shipping.ts)
+-- wysyłka: najnowsza nieanulowana przesyłka DHL/UPS tego zamówienia, cena BILLC z wyceny (patrz dhlCharge w lib/shipping.ts)
 left join lateral (
   select (c ->> 'price')::numeric as price, upper(c ->> 'priceCurrency') as currency
   from shipments s, jsonb_array_elements(case when jsonb_typeof(s.charges) = 'array' then s.charges else '[]'::jsonb end) c
   where s.marketplace = it.marketplace and s.order_external_id = it.external_id
-    and s.cancelled_at is null and s.carrier in ('dhl_express', 'dhl_parcel') and c ->> 'currencyType' = 'BILLC'
+    and s.cancelled_at is null and s.carrier in ('dhl_express', 'dhl_parcel', 'ups') and c ->> 'currencyType' = 'BILLC'
   order by s.created_at desc
   limit 1
 ) ship on true

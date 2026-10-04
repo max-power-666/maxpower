@@ -37,7 +37,8 @@ export class BmShipError extends Error {
 // Back Market wymaga jednej z ustalonych nazw przewoźnika (schemat "Shipper" w dokumentacji). Nie ma tam wpisu
 // specyficznego dla DHL Parcel Polska (DHL24) — najbliższa dostępna wartość to ogólne "DHL". Jeśli w back office
 // Back Marketu wygląda to źle, popraw tę mapę (np. na "Other").
-export const BM_SHIPPER_BY_CARRIER = { dhl_express: "DHL Express", dhl_parcel: "DHL" } as const;
+// UPS (04.10.2026): nazwa "UPS" — nie potwierdzona na żywym API Back Market; gdyby odrzucili, błąd widać przy przesyłce z przyciskiem "Ponów".
+export const BM_SHIPPER_BY_CARRIER = { dhl_express: "DHL Express", dhl_parcel: "DHL", ups: "UPS" } as const;
 
 // POST /ws/orders/{order_id}: zgłasza numer przesyłki i przestawia zamówienie na "Do wysyłki" (3, patrz uwaga
 // wyżej — 9 nie jest dopuszczalne w tym zapytaniu). imei/serial_number

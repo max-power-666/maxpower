@@ -21,7 +21,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { bmShipConfigFromEnv, bmMarkOrderShipped, bmSetOrderlineIdentifier, BM_SHIPPER_BY_CARRIER } from "./backmarket";
 import { refurbedListCarriers, refurbedMarkItemsShipped } from "./refurbed";
 
-export type ShipmentCarrier = "dhl_express" | "dhl_parcel";
+export type ShipmentCarrier = "dhl_express" | "dhl_parcel" | "ups";
 
 // IMEI ma zawsze dokładnie 15 cyfr (norma GSMA) — inaczej traktujemy wartość jako zwykły numer seryjny. Puste/białe
 // znaki -> brak identyfikatora (nic do zgłoszenia, nie błąd).
@@ -112,8 +112,9 @@ export async function notifyMarketplace(
       try {
         const carriers = await refurbedListCarriers(client);
         carrierSlug =
+          (opts.carrier === "ups" ? carriers.find((c) => /\bups\b/i.test(c.name))?.slug : undefined) ??
           (opts.carrier === "dhl_express" ? carriers.find((c) => /dhl/i.test(c.name) && /express/i.test(c.name))?.slug : undefined) ??
-          carriers.find((c) => /dhl/i.test(c.name))?.slug ??
+          (opts.carrier === "ups" ? undefined : carriers.find((c) => /dhl/i.test(c.name))?.slug) ??
           null;
       } catch {
         // best-effort — parcel_tracking_url (wymagany) i tak zostanie ustawiony

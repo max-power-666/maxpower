@@ -116,7 +116,7 @@ export function buildShipPrefill(marketplace: string, externalId: string, raw: a
   return { marketplace, externalId, ...p };
 }
 
-// shipments.charges ma kształt DHL (tablica) tylko dla dhl_express/dhl_parcel — dla erli_paczkomat to co innego
+// shipments.charges ma kształt DHL (tablica) tylko dla dhl_express/dhl_parcel/ups — dla erli_paczkomat to co innego
 // (id paczki Erli, potrzebny do anulowania), więc nigdy nie zakładamy tablicy bez sprawdzenia. Współdzielone
 // między ShippingView.tsx (lista "Nadane przesyłki") i SalesOrderCard.tsx (pole "Koszt wysyłki", 01.10.2026).
 export function dhlCharge(charges: unknown): { currencyType: string; priceCurrency: string; price: number } | null {

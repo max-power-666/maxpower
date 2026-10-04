@@ -44,8 +44,9 @@ type Settings = {
   a4_printer_name: string | null;
 };
 type Template = { id: number; name: string; weight_kg: number; length_cm: number; width_cm: number; height_cm: number; description: string | null };
-type Carrier = "parcel" | "express";
-const CARRIER_LABEL: Record<Carrier, string> = { parcel: "DHL Parcel", express: "DHL Express" };
+type Carrier = "parcel" | "express" | "ups";
+const CARRIER_LABEL: Record<Carrier, string> = { parcel: "DHL Parcel", express: "DHL Express", ups: "UPS" };
+const CARRIER_API: Record<Carrier, string> = { parcel: "dhl-parcel", express: "dhl-express", ups: "ups" };
 
 // Wspólny kształt wiersza wyceny dla obu przewoźników (tabela wyboru produktu).
 type QuoteRow = {
@@ -102,6 +103,7 @@ export default function ShippingView({
   const auth = { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" };
   const [express, setExpress] = useState<{ configured: boolean; env: string | null } | null>(null);
   const [parcel, setParcel] = useState<{ configured: boolean; sandbox: boolean; version: string | null } | null>(null);
+  const [ups, setUps] = useState<{ configured: boolean; env: string | null } | null>(null);
   const [carrier, setCarrier] = useState<Carrier>("parcel");
   const [settings, setSettings] = useState<Settings | null>(null);
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -139,6 +141,10 @@ export default function ShippingView({
       .then((r) => r.json())
       .then((d) => setParcel({ configured: !!d.configured, sandbox: !!d.sandbox, version: d.version ?? null }))
       .catch(() => setParcel({ configured: false, sandbox: false, version: null }));
+    fetch("/api/shipping/ups/check", { headers: auth })
+      .then((r) => r.json())
+      .then((d) => setUps({ configured: !!d.configured, env: d.env ?? null }))
+      .catch(() => setUps({ configured: false, env: null }));
     loadSettings();
     loadTemplates();
     // Przełącznik drukowania bezpośredniego: wybór per przeglądarkę/stanowisko, nie współdzielone ustawienie.
@@ -298,13 +304,13 @@ export default function ShippingView({
     setQuoting(true);
     try {
       const p = packagePayload();
-      const res = await fetch(`/api/shipping/${carrier === "parcel" ? "dhl-parcel" : "dhl-express"}/check`, {
+      const res = await fetch(`/api/shipping/${CARRIER_API[carrier]}/check`, {
         method: "POST",
         headers: auth,
         body: JSON.stringify({
           receiver: receiverPayload(),
           package: p,
-          extraPackages: carrier === "parcel" ? extraPackagesPayload() : undefined,
+          extraPackages: carrier === "parcel" || carrier === "ups" ? extraPackagesPayload() : undefined,
           plannedDate,
           // pola płaskie dla wyceny DHL Express (route sprawdza połączenie po tej trasie)
           destinationCountryCode: form.countryCode,
@@ -350,6 +356,21 @@ export default function ShippingView({
             unavailable: q.ok ? undefined : q.error || "niedostępny na tej trasie",
           };
         });
+      } else if (carrier === "ups") {
+        // UPS (Rating API, Shop): cena z wyceny jest już kwotą do zapłaty w walucie konta (PLN, netto) — wynegocjowaną, gdy konto ją ma.
+        const quotes = data.quotes as { code: string; name: string; price: number; currency: string; negotiated: boolean; chargeableWeight: number | null; breakdown: { name: string; price: number }[]; warnings: string[] }[];
+        rows = quotes.map((q) => ({
+          code: q.code,
+          name: `${q.name} (${q.code})`,
+          billing: { price: q.price, currency: q.currency },
+          local: { price: q.price, currency: q.currency },
+          chargeableWeight: q.chargeableWeight,
+          transitDays: null,
+          estimatedDelivery: null,
+          breakdown: q.breakdown,
+        }));
+        warnings = [...new Set(quotes.flatMap((q) => q.warnings))];
+        if (quotes.length > 0 && quotes.some((q) => !q.negotiated)) warnings.push("część usług pokazana wg cennika katalogowego (brak stawki wynegocjowanej)");
       } else {
         rows = (data.products as DhlProduct[]).map((p2) => ({ ...p2, economy: isEconomySelect(p2) }));
         warnings = data.warnings || [];
@@ -369,12 +390,12 @@ export default function ShippingView({
   async function create() {
     const product = quote?.products.find((p) => p.code === chosen);
     if (!product || !quote) return;
-    const isParcel = quote.carrier === "parcel";
+    const multiPiece = quote.carrier === "parcel" || quote.carrier === "ups"; // wiele paczek w jednej przesyłce
 
     setError("");
     setCreating(true);
     try {
-      const res = await fetch(`/api/shipping/${isParcel ? "dhl-parcel" : "dhl-express"}/create`, {
+      const res = await fetch(`/api/shipping/${CARRIER_API[quote.carrier]}/create`, {
         method: "POST",
         headers: auth,
         body: JSON.stringify({
@@ -385,7 +406,7 @@ export default function ShippingView({
           plannedDate,
           receiver: receiverPayload(),
           package: packagePayload(),
-          extraPackages: isParcel ? extraPackagesPayload() : undefined,
+          extraPackages: multiPiece ? extraPackagesPayload() : undefined,
           reference: form.reference,
           order,
           billing: product.billing,
@@ -447,10 +468,10 @@ export default function ShippingView({
 
   // Anulowanie przesyłki DHL Parcel (DHL Express nie udostępnia tego w API).
   async function cancelShipment(s: ShipmentRow) {
-    const carrierName = s.carrier === "erli_paczkomat" ? "Erli" : "DHL";
+    const carrierName = s.carrier === "erli_paczkomat" ? "Erli" : s.carrier === "ups" ? "UPS" : "DHL";
     if (!confirm(`Anulować przesyłkę ${s.tracking_number}?\n\n${carrierName} pozwala na to tylko wtedy, gdy nie zamówiono po nią kuriera / nie trafiła do sieci.`)) return;
     setError("");
-    const endpoint = s.carrier === "erli_paczkomat" ? "/api/shipping/erli/cancel" : "/api/shipping/dhl-parcel/cancel";
+    const endpoint = s.carrier === "erli_paczkomat" ? "/api/shipping/erli/cancel" : s.carrier === "ups" ? "/api/shipping/ups/cancel" : "/api/shipping/dhl-parcel/cancel";
     const res = await fetch(endpoint, { method: "POST", headers: auth, body: JSON.stringify({ id: s.id, confirm: true }) });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return setError(data?.error || "Nie udało się anulować przesyłki.");
@@ -608,7 +629,8 @@ export default function ShippingView({
       {((parcel && !parcel.configured) ||
         (parcel?.configured && !parcel.version) ||
         (express && !express.configured) ||
-        ((parcel?.configured || express?.configured) && !settings)) && (
+        (ups && !ups.configured) ||
+        ((parcel?.configured || express?.configured || ups?.configured) && !settings)) && (
         <div className="border border-line bg-white p-4 mb-6">
           <h2 className="text-xs font-semibold text-inksoft mb-2">PRZEWOŹNICY</h2>
           {parcel && !parcel.configured && (
@@ -626,13 +648,18 @@ export default function ShippingView({
               <span className="font-semibold">DHL Express:</span> nie skonfigurowany — ustaw DHL_EXPRESS_API_KEY, DHL_EXPRESS_API_SECRET, DHL_EXPRESS_ACCOUNT i DHL_EXPRESS_ENV.
             </p>
           )}
-          {(parcel?.configured || express?.configured) && !settings && <p className="text-xs text-rust">Brak danych nadawcy — uruchom supabase/shipping.sql.</p>}
+          {ups && !ups.configured && (
+            <p className="text-xs text-rust mt-1">
+              <span className="font-semibold">UPS:</span> nie skonfigurowany — ustaw w Vercel UPS_CLIENT_ID, UPS_CLIENT_SECRET, UPS_ACCOUNT_NUMBER i (dla prawdziwych przesyłek) UPS_ENV=production, potem Redeploy.
+            </p>
+          )}
+          {(parcel?.configured || express?.configured || ups?.configured) && !settings && <p className="text-xs text-rust">Brak danych nadawcy — uruchom supabase/shipping.sql.</p>}
         </div>
       )}
 
       {error && <p className="text-rust text-xs mb-4">{error}</p>}
 
-      {(parcel?.configured || express?.configured) && settings && (
+      {(parcel?.configured || express?.configured || ups?.configured) && settings && (
         <>
           {/* Wybór trybu: drukowanie bezpośrednie (QZ Tray, bez okna drukowania) vs generowanie PDF (dzisiejszy
               ręczny wydruk) — "na wszelki wypadek", gdyby drukowanie bezpośrednie nie zadziałało. Wybór per
@@ -697,8 +724,8 @@ export default function ShippingView({
             </div>
             <div className="flex items-center gap-2 mb-4">
               <span className="text-xs font-semibold text-inksoft mr-1">Przewoźnik:</span>
-              {(["parcel", "express"] as Carrier[]).map((c) => {
-                const on = c === "parcel" ? parcel?.configured : express?.configured;
+              {(["parcel", "express", "ups"] as Carrier[]).map((c) => {
+                const on = c === "parcel" ? parcel?.configured : c === "express" ? express?.configured : ups?.configured;
                 return (
                   <button
                     key={c}
@@ -751,7 +778,7 @@ export default function ShippingView({
               <div className="col-span-2 md:col-span-6"><label className={label}>Opis zawartości</label><input value={form.description} onChange={(e) => setField("description", e.target.value)} placeholder={settings.default_description} className={inputCls} /></div>
             </div>
 
-            {carrier === "parcel" && (
+            {(carrier === "parcel" || carrier === "ups") && (
               <div className="mb-3">
                 {extraPackages.map((p, i) => (
                   <div key={i} className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-2 items-end">
@@ -767,7 +794,7 @@ export default function ShippingView({
               </div>
             )}
 
-            <button onClick={getQuote} disabled={quoting || !formReady || !(carrier === "parcel" ? parcel?.configured : express?.configured)} className={btnPrimary}>{quoting ? "Pytanie DHL…" : `Wyceń (${CARRIER_LABEL[carrier]})`}</button>
+            <button onClick={getQuote} disabled={quoting || !formReady || !(carrier === "parcel" ? parcel?.configured : carrier === "express" ? express?.configured : ups?.configured)} className={btnPrimary}>{quoting ? `Pytanie ${carrier === "ups" ? "UPS" : "DHL"}…` : `Wyceń (${CARRIER_LABEL[carrier]})`}</button>
           </div>
 
           {/* wycena i wybór produktu */}
@@ -780,15 +807,15 @@ export default function ShippingView({
                       <th className="p-3"></th>
                       <th className="p-3">Kod</th>
                       <th className="p-3">Produkt</th>
-                      <th className="p-3 text-right">Cena{quote.carrier === "parcel" ? " (netto)" : ""}</th>
-                      <th className="p-3 text-right">Cena (PLN{quote.carrier === "parcel" ? ", netto" : ""})</th>
+                      <th className="p-3 text-right">Cena{quote.carrier !== "express" ? " (netto)" : ""}</th>
+                      <th className="p-3 text-right">Cena (PLN{quote.carrier !== "express" ? ", netto" : ""})</th>
                       <th className="p-3 text-right">Waga taryfowa</th>
                       <th className="p-3 text-right">Dni</th>
                       <th className="p-3">Szacowana dostawa</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {quote.products.length === 0 && <tr><td colSpan={8} className="p-6 text-center text-inksoft text-sm">DHL nie zwrócił produktów dla tej trasy.</td></tr>}
+                    {quote.products.length === 0 && <tr><td colSpan={8} className="p-6 text-center text-inksoft text-sm">Przewoźnik nie zwrócił produktów dla tej trasy.</td></tr>}
                     {quote.products.map((p) => (
                       <Fragment key={p.code + p.name}>
                         <tr
@@ -833,11 +860,15 @@ export default function ShippingView({
                   </tbody>
                 </table>
               </div>
-              {quote.warnings.length > 0 && <p className="text-xs text-inksoft mb-2">Ostrzeżenia DHL: {quote.warnings.join("; ")}</p>}
+              {quote.warnings.length > 0 && <p className="text-xs text-inksoft mb-2">Ostrzeżenia przewoźnika: {quote.warnings.join("; ")}</p>}
               <button onClick={create} disabled={creating || !chosen} className={btnPrimary}>{creating ? "Nadawanie…" : `Nadaj przesyłkę (${CARRIER_LABEL[quote.carrier]}) i wygeneruj etykietę`}</button>
               <p className="text-xs text-inksoft mt-2">
-Cena to wycena wg cennika konta (DHL Parcel: kwota NETTO w PLN, już z doliczoną dopłatą paliwową — bez VAT); ostateczną kwotę (VAT, ewentualne opłaty dodatkowe) potwierdza faktura DHL.
-                {quote.carrier === "parcel"
+Cena to wycena wg cennika konta ({quote.carrier === "ups" ? "UPS: kwota NETTO w PLN, stawka wynegocjowana, już z dopłatą paliwową — bez VAT" : "DHL Parcel: kwota NETTO w PLN, już z doliczoną dopłatą paliwową — bez VAT"}); ostateczną kwotę (VAT, ewentualne opłaty dodatkowe) potwierdza faktura przewoźnika.
+                {quote.carrier === "ups"
+                  ? ups?.env === "production"
+                    ? " Nadanie jest prawdziwe i płatne — możesz je anulować na liście przesyłek, dopóki UPS nie odbierze paczki."
+                    : " Środowisko testowe UPS: nadanie nie jest prawdziwe."
+                  : quote.carrier === "parcel"
                   ? parcel?.sandbox
                     ? " Środowisko testowe: nadanie nie jest prawdziwe."
                     : " Nadanie jest prawdziwe i płatne — możesz je anulować na liście przesyłek, dopóki nie zamówisz kuriera."
@@ -919,7 +950,7 @@ Cena to wycena wg cennika konta (DHL Parcel: kwota NETTO w PLN, już z doliczon�
                           </div>
                         )}
                       </td>
-                      <td className="p-3 text-xs whitespace-nowrap">{s.carrier === "dhl_parcel" ? "DHL Parcel" : s.carrier === "erli_paczkomat" ? "Erli Paczkomat" : "DHL Express"}{s.cancelled_at && <div className="text-rust font-semibold no-underline">ANULOWANA</div>}</td>
+                      <td className="p-3 text-xs whitespace-nowrap">{s.carrier === "dhl_parcel" ? "DHL Parcel" : s.carrier === "erli_paczkomat" ? "Erli Paczkomat" : s.carrier === "ups" ? "UPS" : "DHL Express"}{s.cancelled_at && <div className="text-rust font-semibold no-underline">ANULOWANA</div>}</td>
                       <td className="p-3 font-mono whitespace-nowrap">
                         {s.tracking_url ? <a href={s.tracking_url} target="_blank" rel="noreferrer" className="text-teal hover:underline">{s.tracking_number}</a> : s.tracking_number}
                       </td>
@@ -946,7 +977,7 @@ Cena to wycena wg cennika konta (DHL Parcel: kwota NETTO w PLN, już z doliczon�
                             {s.has_label === false ? "Pobierz etykietę" : directPrint ? "Drukuj" : "Etykieta"}
                           </button>
                         )}
-                        {!s.cancelled_at && (s.carrier === "dhl_parcel" || s.carrier === "erli_paczkomat") && (
+                        {!s.cancelled_at && (s.carrier === "dhl_parcel" || s.carrier === "erli_paczkomat" || s.carrier === "ups") && (
                           <button onClick={() => cancelShipment(s)} className="ml-3 text-xs font-semibold text-rust hover:underline">Anuluj</button>
                         )}
                       </td>
