@@ -256,7 +256,7 @@ export default function MarginView({ session, members }: { session: Session; mem
                   {fmtPLN(r.commissionPln)}
                   {r.commissionSource === "szacunek" && <div className="text-[10px] text-amber font-sans" title="Zamówienie jeszcze nie jest na wgranej fakturze — prowizja ze średnich stawek">szacunek</div>}
                 </td>
-                <td className="p-3 text-right font-mono text-inksoft" title="Koszty serwisu jeszcze nie wchodzą do marży">—</td>
+                <td className={`p-3 text-right font-mono ${r.servicePln === null ? "text-inksoft" : ""}`} title="Części przypisane do numeru seryjnego (Serwis → Części), cena netto">{fmtPLN(r.servicePln)}</td>
                 <td className={`p-3 text-right font-mono font-semibold whitespace-nowrap ${marginCls(r.marginPln)}`}>
                   {fmtPLN(r.marginPln)}
                   {r.flags.length > 0 && <span className="text-amber ml-1 cursor-help" title={r.flags.join("; ")}>⚠</span>}
@@ -314,8 +314,8 @@ export default function MarginView({ session, members }: { session: Session; mem
         </div>
       )}
       <p className="text-[11px] text-inksoft mt-3 max-w-4xl">
-        Marża = cena sprzedaży (PLN, brutto) − cena zakupu − VAT od marży ({"("}sprzedaż − zakup{")"} × 23/123, bez kosztów dodatkowych) − wysyłka − koszty dodatkowe (Trade-in) − prowizja marketplace&apos;u.
-        Koszty serwisu jeszcze nie są uwzględniane. Koszty zamówień z wieloma pozycjami dzielone wg ceny pozycji; waluty przeliczone kursem NBP z dnia poprzedniego względem daty zamówienia.
+        Marża = cena sprzedaży (PLN, brutto) − cena zakupu − VAT od marży ({"("}sprzedaż − zakup{")"} × 23/123, bez kosztów dodatkowych) − wysyłka − koszty dodatkowe (Trade-in) − prowizja marketplace&apos;u − koszty serwisu.
+        Koszty serwisu = ceny netto części przypisanych do numeru seryjnego (Serwis → Części). Koszty zamówień z wieloma pozycjami dzielone wg ceny pozycji; waluty przeliczone kursem NBP z dnia poprzedniego względem daty zamówienia.
       </p>
 
       {openOrder && <SalesOrderCard marketplace={openOrder.marketplace} externalId={openOrder.externalId} session={session} members={members} onClose={() => setOpenOrder(null)} />}

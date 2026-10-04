@@ -99,7 +99,7 @@ export type MarginResult = {
   extraPln: number | null;
   commissionPln: number | null;
   commissionSource: "faktura" | "szacunek" | "refurbed" | null;
-  servicePln: number | null; // zawsze null — koszty serwisu jeszcze nie wchodzą do marży
+  servicePln: number | null; // koszt części wbudowanych w sztukę (Serwis -> Części); null = brak przypisanych części
   marginPln: number | null;
   marginPct: number | null; // marża / cena sprzedaży
   flags: string[]; // czego brakuje (marża wtedy niepełna) — pokazywane w UI
@@ -177,10 +177,15 @@ export function deriveBmRates(lines: BmLine[], weeks = 8): BmRates | null {
   };
 }
 
+// Część z Serwis -> Części przypisana do urządzenia (04.10.2026). share = udział tej części w danym numerze seryjnym
+// (1, a gdy w polu urządzenia było kilka numerów — 1/liczba numerów, żeby koszt nie liczył się wielokrotnie).
+export type ServicePart = { name: string | null; pln: number | null; receivedAt: string | null; status: string | null; share: number };
+
 export type MarginContext = {
   eurRates: NbpRate[];
   dkkRates: NbpRate[];
   bmRates: BmRates | null;
+  partsBySerial?: Map<string, ServicePart[]>; // klucz: numer seryjny WIELKIMI literami
 };
 
 function toPln(amount: number, currency: string | null | undefined, date: string, ctx: MarginContext): number | null {
@@ -350,18 +355,48 @@ export function computeMargin(row: MarginDbRow, ctx: MarginContext): MarginResul
   else if (commissionSource === "szacunek") flags.push("prowizja szacowana wg reguł");
   details.push({ key: "commission", label: "Prowizja marketplace", sign: "-", amountPln: commissionPln === null ? null : round2(commissionPln), note: commNote });
 
-  details.push({ key: "service", label: "Koszty serwisu", sign: "-", amountPln: null, note: "Jeszcze nieuwzględniane w marży (dodamy po wprowadzeniu kosztów części)." });
+  // --- koszty serwisu: części z rejestru Serwis -> Części przypisane do numeru seryjnego sztuki (cena netto w PLN).
+  // Bierzemy części przyjęte NIE PÓŹNIEJ niż w dniu zamówienia (część kupiona po sprzedaży należy do późniejszej naprawy) i bez
+  // wierszy "Demontaż" (część wyjęta z innego urządzenia — nie była kupiona).
+  let servicePln: number | null = null;
+  {
+    const all = ctx.partsBySerial?.get((row.serial_number || "").trim().toUpperCase()) ?? [];
+    const orderDay = row.order_date ? warsawDate(row.order_date) : "";
+    const used = all.filter((p) => (p.status || "").toLowerCase() !== "demontaż" && (!p.receivedAt || !orderDay || p.receivedAt <= orderDay));
+    if (used.length === 0) {
+      details.push({
+        key: "service",
+        label: "Koszty serwisu",
+        sign: "-",
+        amountPln: null,
+        note: ctx.partsBySerial ? "Do tego numeru seryjnego nie przypisano żadnych części (Serwis → Części) — koszt serwisu 0." : "Brak danych o częściach.",
+      });
+    } else {
+      const priced = used.filter((p) => p.pln !== null);
+      servicePln = priced.reduce((sum, p) => sum + (p.pln as number) * p.share, 0);
+      const noPrice = used.length - priced.length;
+      if (noPrice > 0) flags.push(`${noPrice} ${noPrice === 1 ? "część bez ceny" : "części bez ceny"} (serwis)`);
+      const list = used.slice(0, 6).map((p) => `${p.name || "część"} ${p.pln === null ? "(brak ceny)" : `${f2(p.pln * p.share)} zł`}`).join("; ");
+      details.push({
+        key: "service",
+        label: "Koszty serwisu",
+        sign: "-",
+        amountPln: round2(servicePln),
+        note: `${used.length} ${used.length === 1 ? "część" : "części"} przypisanych do tego numeru seryjnego (cena netto w PLN z rejestru Serwis → Części): ${list}${used.length > 6 ? `; … (+${used.length - 6})` : ""}.${noPrice > 0 ? ` ${noPrice} bez ceny — pominięte w sumie.` : ""}`,
+      });
+    }
+  }
 
   const marginPln =
     salePln !== null && purchase !== null && vatPln !== null
-      ? round2(salePln - purchase - vatPln - (shippingPln ?? 0) - (extraPln ?? 0) - (commissionPln ?? 0))
+      ? round2(salePln - purchase - vatPln - (shippingPln ?? 0) - (extraPln ?? 0) - (commissionPln ?? 0) - (servicePln ?? 0))
       : null;
   details.push({
     key: "margin",
     label: "Marża",
     sign: "=",
     amountPln: marginPln,
-    note: marginPln === null ? "Nie do policzenia — brakuje ceny sprzedaży (lub kursu) albo ceny zakupu." : "sprzedaż − zakup − VAT od marży − wysyłka − koszty dodatkowe − prowizja (− serwis). Brakujące koszty liczone jako 0 (patrz ostrzeżenia).",
+    note: marginPln === null ? "Nie do policzenia — brakuje ceny sprzedaży (lub kursu) albo ceny zakupu." : "sprzedaż − zakup − VAT od marży − wysyłka − koszty dodatkowe − prowizja − serwis. Brakujące koszty liczone jako 0 (patrz ostrzeżenia).",
   });
 
   return {
@@ -381,7 +416,7 @@ export function computeMargin(row: MarginDbRow, ctx: MarginContext): MarginResul
     extraPln: extraPln === null ? null : round2(extraPln),
     commissionPln: commissionPln === null ? null : round2(commissionPln),
     commissionSource,
-    servicePln: null,
+    servicePln: servicePln === null ? null : round2(servicePln),
     marginPln,
     marginPct: marginPln !== null && salePln ? marginPln / salePln : null,
     flags,

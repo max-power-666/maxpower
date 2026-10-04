@@ -1,7 +1,7 @@
 // Wspólne, serwerowe ładowanie i liczenie marży (używają go route'y margin/list i margin/summary — jedna definicja, te same liczby w zakładce Marża i na Przeglądzie).
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isCountedOrder } from "@/lib/salesOrders";
-import { computeMargin, deriveBmRates, MARGIN_MARKETPLACES, type BmLine, type BmRates, type MarginDbRow, type MarginResult } from "@/lib/margin";
+import { computeMargin, deriveBmRates, MARGIN_MARKETPLACES, type BmLine, type BmRates, type MarginDbRow, type MarginResult, type ServicePart } from "@/lib/margin";
 import type { NbpRate } from "@/lib/nbp";
 
 async function fetchAll<T>(build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
@@ -15,7 +15,29 @@ async function fetchAll<T>(build: (from: number, to: number) => PromiseLike<{ da
   return out;
 }
 
+// Części z Serwis -> Części przypisane do urządzeń, zgrupowane po numerze seryjnym (WIELKIE litery). Brak tabeli (nieuruchomione service-parts.sql) = pusta mapa.
+async function loadPartsBySerial(db: SupabaseClient<any, any, any>): Promise<{ map: Map<string, ServicePart[]>; available: boolean }> {
+  const map = new Map<string, ServicePart[]>();
+  try {
+    const rows = await fetchAll<{ device_ref: string; name: string | null; price_pln: number | string | null; received_at: string | null; status: string | null }>((from, to) =>
+      db.from("service_parts").select("device_ref, name, price_pln, received_at, status").not("device_ref", "is", null).order("id").range(from, to)
+    );
+    for (const r of rows) {
+      const tokens = (r.device_ref || "").split(/[\s,;]+/).map((t) => t.trim().toUpperCase()).filter(Boolean);
+      for (const t of tokens) {
+        const list = map.get(t) ?? [];
+        list.push({ name: r.name, pln: r.price_pln === null ? null : Number(r.price_pln), receivedAt: r.received_at, status: r.status, share: 1 / tokens.length });
+        map.set(t, list);
+      }
+    }
+    return { map, available: true };
+  } catch {
+    return { map, available: false };
+  }
+}
+
 export async function loadMarginResults(db: SupabaseClient<any, any, any>): Promise<{ results: MarginResult[]; bmRates: BmRates | null; invoiceCount: number; purchasesCount: number }> {
+  const parts = await loadPartsBySerial(db);
   const [rowsRaw, rateRows, lines] = await Promise.all([
     fetchAll<MarginDbRow>((from, to) => db.from("margin_items").select("*").in("marketplace", [...MARGIN_MARKETPLACES]).order("order_id").order("position").range(from, to)),
     fetchAll<{ currency: string; rate_date: string; mid: number | string }>((from, to) => db.from("nbp_rates").select("currency, rate_date, mid").in("currency", ["EUR", "DKK"]).range(from, to)),
@@ -25,7 +47,7 @@ export async function loadMarginResults(db: SupabaseClient<any, any, any>): Prom
   const { count: purchasesCount } = await db.from("fakturownia_purchases").select("id", { count: "exact", head: true });
   const toRates = (cur: string): NbpRate[] => rateRows.filter((r) => r.currency === cur).map((r) => ({ currency: r.currency, rateDate: r.rate_date, mid: Number(r.mid) }));
   const bmRates = deriveBmRates(lines);
-  const ctx = { eurRates: toRates("EUR"), dkkRates: toRates("DKK"), bmRates };
+  const ctx = { eurRates: toRates("EUR"), dkkRates: toRates("DKK"), bmRates, partsBySerial: parts.available ? parts.map : undefined };
   // tylko zamówienia, które liczą się jako sprzedaż (bez anulowanych/zwróconych/nieopłaconych — ten sam isCountedOrder co Przegląd)
   const results = rowsRaw.filter((r) => isCountedOrder(r.marketplace, r.status)).map((r) => computeMargin(r, ctx));
   return { results, bmRates, invoiceCount: new Set(lines.map((l) => l.invoice_ref)).size, purchasesCount: purchasesCount ?? 0 };

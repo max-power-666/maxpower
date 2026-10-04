@@ -22,7 +22,7 @@ import ReturnsView from "./_components/ReturnsView";
 import ShopProductsView from "./_components/ShopProductsView";
 import ShopStockView from "./_components/ShopStockView";
 import type { ShipPrefill } from "@/lib/shipping";
-import ServiceView from "./_components/ServiceView";
+import ServiceHub from "./_components/ServiceHub";
 import TestsView from "./_components/TestsView";
 import InventoryRawView from "./_components/InventoryRawView";
 import ThemeSwitcher from "./_components/ThemeSwitcher";
@@ -636,7 +636,7 @@ export default function Home() {
             />
           )}
 
-          {view === "service" && <ServiceView session={session} members={members} isAdmin={role === "Admin"} isAdminOrManager={role === "Admin" || role === "Manager"} />}
+          {view === "service" && <ServiceHub session={session} members={members} isAdmin={role === "Admin"} isAdminOrManager={role === "Admin" || role === "Manager"} />}
 
           {view === "tests" && <TestsView session={session} members={members} isAdmin={role === "Admin"} isAdminOrManager={role === "Admin" || role === "Manager"} />}
 
