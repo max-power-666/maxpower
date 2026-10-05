@@ -4,7 +4,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { COUNTRY_NAMES, DHL_EU_COUNTRIES, isEconomySelect, type DhlMoney, type DhlProduct } from "@/lib/dhlExpress";
-import { base64ToBlobUrl, defaultShippingDate, dhlCharge, parcelQuoteTotal, type ShipPrefill } from "@/lib/shipping";
+import { base64ToBlobUrl, defaultShippingDate, dhlCharge, parcelQuoteTotal, stripPhoneSpaces, type ShipPrefill } from "@/lib/shipping";
 import { MARKETPLACES } from "@/lib/salesOrders";
 import { escapeLike } from "@/lib/search";
 import { printRawToZebra, printPdf, listPrinters, PrintAgentError } from "@/lib/printAgent";
@@ -180,7 +180,7 @@ export default function ShippingView({
   // Wejście z karty zamówienia: adres odbiorcy i numer zamówienia wypełniają formularz.
   useEffect(() => {
     if (!prefill) return;
-    setForm({ ...EMPTY_FORM, name: prefill.name, company: prefill.company, street: prefill.street, houseNumber: prefill.houseNumber, apartment: prefill.apartment, postalCode: prefill.postalCode, city: prefill.city, countryCode: prefill.countryCode, phone: prefill.phone, email: prefill.email, reference: prefill.externalId });
+    setForm({ ...EMPTY_FORM, name: prefill.name, company: prefill.company, street: prefill.street, houseNumber: prefill.houseNumber, apartment: prefill.apartment, postalCode: prefill.postalCode, city: prefill.city, countryCode: prefill.countryCode, phone: stripPhoneSpaces(prefill.phone), email: prefill.email, reference: prefill.externalId });
     setExtraPackages([]);
     // Zamówienie za pobraniem (Erli/Allegro): proponujemy UPS z włączonym pobraniem na kwotę z zamówienia (można zmienić przewoźnika i wyłączyć).
     setCodOn(!!prefill.cod);
@@ -784,7 +784,7 @@ export default function ShippingView({
                   {DHL_EU_COUNTRIES.map((c) => <option key={c} value={c}>{COUNTRY_NAMES[c]} ({c})</option>)}
                 </select>
               </div>
-              <div><label className={label}>Telefon odbiorcy *</label><input value={form.phone} onChange={(e) => setField("phone", e.target.value)} className={inputCls} /></div>
+              <div><label className={label}>Telefon odbiorcy *</label><input value={form.phone} onChange={(e) => setField("phone", stripPhoneSpaces(e.target.value))} className={inputCls} /></div>
               <div className="md:col-span-2"><label className={label}>E-mail odbiorcy (opcjonalnie)</label><input value={form.email} onChange={(e) => setField("email", e.target.value)} className={inputCls} /></div>
               <div><label className={label}>Numer zamówienia (referencja)</label><input value={form.reference} onChange={(e) => setField("reference", e.target.value)} className={inputCls} /></div>
             </div>

@@ -2,7 +2,7 @@
 // każde pole jest sprawdzane i przycinane, a braki wracają jako jedna czytelna lista.
 
 import { DHL_EU_COUNTRIES } from "./dhlExpress";
-import { splitStreet } from "./shipping";
+import { splitStreet, stripPhoneSpaces } from "./shipping";
 
 const str = (v: unknown, max: number): string | null => (typeof v === "string" && v.trim() && v.trim().length <= max ? v.trim() : null);
 const num = (v: unknown, min: number, max: number): number | null => {
@@ -82,7 +82,7 @@ export function parseShipmentBody(b: any): { ok: true; value: ParsedShipment } |
     postalCode: str(r.postalCode, 12),
     city: str(r.city, 45),
     countryCode: DHL_EU_COUNTRIES.includes(country) ? country : null,
-    phone: str(r.phone, 40),
+    phone: typeof r.phone === "string" ? str(stripPhoneSpaces(r.phone), 40) : null, // spacje w numerze usuwamy także po stronie serwera
     email: str(r.email, 70) ?? undefined,
   };
   const pack = { weight: num(p.weight, 0.1, 70), length: num(p.length, 1, 300), width: num(p.width, 1, 300), height: num(p.height, 1, 300), description: str(p.description, 70) };

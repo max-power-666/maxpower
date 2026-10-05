@@ -20,6 +20,9 @@ export type ShipPrefill = {
   cod?: { amount: number; currency: string } | null;
 };
 
+// Numer telefonu odbiorcy bez zbędnych spacji (też twardych i niewidocznych, które marketplace'y potrafią wkleić): "06 66 97 01 81" -> "0666970181", "+48 600 100 200" -> "+48600100200".
+export const stripPhoneSpaces = (v: string): string => v.replace(/[\s\u200b-\u200d\ufeff]+/g, "");
+
 const clean = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 
 // Rozdziela "ulica numer" na ulicę i numer domu (DHL Parcel wymaga osobnych pól). Obsługuje numer na końcu ("Hauptstr. 5", "Rue X, 12b")
