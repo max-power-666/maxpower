@@ -10,7 +10,7 @@ import type { BmRates, MarginResult } from "@/lib/margin";
 // Zakładka Marża (03.10.2026, Admin i Manager): lista sprzedanych sztuk z numerem seryjnym i marżą po kosztach. Układ jak lista Zamówień,
 // ale kolumny finansowe. Całość liczy serwer (app/api/margin/list, lib/margin.ts); tu tylko wyświetlamy, filtrujemy i wgrywamy faktury BM.
 
-type Totals = { count: number; withMargin: number; sale: number; purchase: number; vat: number; shipping: number; extra: number; commission: number; margin: number; incomplete: number };
+type Totals = { count: number; withMargin: number; sale: number; purchase: number; vat: number; shipping: number; extra: number; commission: number; netMargin: number; margin: number; incomplete: number };
 const PAGE_SIZES = [25, 50, 100];
 // Filtr okresu: miesiące kalendarzowe wg czasu polskiego (granice liczy serwer); w podpowiedzi nazwy miesięcy.
 const monthName = (offset: number) => {
@@ -219,6 +219,7 @@ export default function MarginView({ session, members }: { session: Session; mem
               <th className="p-3 text-right">Cena sprzedaży</th>
               <th className="p-3 text-right">Cena zakupu</th>
               <th className="p-3 text-right">VAT od marży</th>
+              <th className="p-3 text-right" title="Cena sprzedaży − cena zakupu − VAT od marży">Marża netto</th>
               <th className="p-3 text-right">Wysyłka</th>
               <th className="p-3 text-right">Koszty dodatkowe</th>
               <th className="p-3 text-right">Prowizja</th>
@@ -230,7 +231,7 @@ export default function MarginView({ session, members }: { session: Session; mem
           </thead>
           <tbody>
             {!loading && rows.length === 0 && (
-              <tr><td colSpan={15} className="p-6 text-center text-inksoft text-sm">{search || marketplace || period !== "all" ? "Brak wyników." : "Brak sprzedanych sztuk z numerem seryjnym (Back Market, refurbed i Octopia)."}</td></tr>
+              <tr><td colSpan={16} className="p-6 text-center text-inksoft text-sm">{search || marketplace || period !== "all" ? "Brak wyników." : "Brak sprzedanych sztuk z numerem seryjnym (Back Market, refurbed i Octopia)."}</td></tr>
             )}
             {rows.map((r) => {
               const rowKey = `${r.marketplace}:${r.orderId}:${r.itemKey}`;
@@ -251,6 +252,7 @@ export default function MarginView({ session, members }: { session: Session; mem
                 </td>
                 <td className="p-3 text-right font-mono">{fmtPLN(r.purchasePln)}</td>
                 <td className="p-3 text-right font-mono text-inksoft">{fmtPLN(r.vatPln)}</td>
+                <td className={`p-3 text-right font-mono ${marginCls(r.netMarginPln)}`}>{fmtPLN(r.netMarginPln)}</td>
                 <td className="p-3 text-right font-mono">{fmtPLN(r.shippingPln)}</td>
                 <td className="p-3 text-right font-mono">{fmtPLN(r.extraPln)}</td>
                 <td className="p-3 text-right font-mono whitespace-nowrap">
@@ -276,7 +278,7 @@ export default function MarginView({ session, members }: { session: Session; mem
               </tr>
               {open && (
                 <tr className="border-b border-line bg-paper">
-                  <td colSpan={15} className="px-6 py-4">
+                  <td colSpan={16} className="px-6 py-4">
                     <div className="text-xs font-semibold text-inksoft mb-2">WYLICZENIE MARŻY — {r.productName || r.sku || r.serial} · {r.serial}</div>
                     <table className="w-full max-w-5xl text-sm bg-white border border-line">
                       <tbody>
@@ -308,6 +310,7 @@ export default function MarginView({ session, members }: { session: Session; mem
       {totals && (
         <div className="border border-line border-t-0 bg-white px-4 py-3 flex flex-wrap items-center gap-x-8 gap-y-1 text-sm">
           <span className="text-xs font-semibold text-inksoft">PODSUMOWANIE WYNIKU — wszystkie strony, {totals.withMargin} z {totals.count} pozycji z policzoną marżą</span>
+          <span>Marża netto łącznie: <span className={`font-mono font-semibold ${marginCls(totals.netMargin)}`}>{fmtPLN(totals.netMargin)} zł</span></span>
           <span>Marża łącznie: <span className={`font-mono font-bold ${marginCls(totals.margin)}`}>{fmtPLN(totals.margin)} zł</span></span>
           <span>Marża %: <span className="font-mono font-semibold">{totals.sale > 0 ? ((totals.margin / totals.sale) * 100).toLocaleString("pl-PL", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : "—"}%</span></span>
           <span>Marża na produkcie (średnio): <span className={`font-mono font-bold ${marginCls(totals.margin)}`}>{totals.withMargin > 0 ? `${fmtPLN(totals.margin / totals.withMargin)} zł` : "—"}</span></span>

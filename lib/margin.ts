@@ -97,6 +97,7 @@ export type MarginResult = {
   salePln: number | null;
   purchasePln: number | null;
   vatPln: number | null;
+  netMarginPln: number | null; // "Marża netto" = cena sprzedaży − cena zakupu − VAT od marży (bez wysyłki, kosztów dodatkowych, prowizji i serwisu)
   shippingPln: number | null;
   extraPln: number | null;
   commissionPln: number | null;
@@ -257,6 +258,15 @@ export function computeMargin(row: MarginDbRow, ctx: MarginContext): MarginResul
         : salePln! - purchase! <= 0
           ? "Sprzedaż nie przekracza zakupu — VAT od marży wynosi 0."
           : `(sprzedaż ${f2(salePln!)} − zakup ${f2(purchase!)}) × ${MARGIN_VAT_RATE}/${100 + MARGIN_VAT_RATE}, bez kosztów dodatkowych.`,
+  });
+  // --- Marża netto: sprzedaż − zakup − VAT od marży (przed kosztami wysyłki, dodatkowymi, prowizją i serwisem)
+  const netMarginPln = salePln !== null && purchase !== null && vatPln !== null ? round2(salePln - purchase - vatPln) : null;
+  details.push({
+    key: "net_margin",
+    label: "Marża netto",
+    sign: "=",
+    amountPln: netMarginPln,
+    note: netMarginPln === null ? "Nie do policzenia bez ceny sprzedaży i zakupu." : "sprzedaż − zakup − VAT od marży (przed kosztami wysyłki, dodatkowymi, prowizją i serwisu).",
   });
 
   // --- wysyłka: cena z wyceny DHL jest autorytatywna, ręczny koszt tylko gdy jej nie ma (jak na karcie zamówienia)
@@ -423,6 +433,7 @@ export function computeMargin(row: MarginDbRow, ctx: MarginContext): MarginResul
     salePln: salePln === null ? null : round2(salePln),
     purchasePln: purchase,
     vatPln,
+    netMarginPln,
     shippingPln: shippingPln === null ? null : round2(shippingPln),
     extraPln: extraPln === null ? null : round2(extraPln),
     commissionPln: commissionPln === null ? null : round2(commissionPln),

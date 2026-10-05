@@ -42,6 +42,7 @@ export async function GET(request: Request) {
       shipping: sum((r) => r.shippingPln),
       extra: sum((r) => r.extraPln),
       commission: sum((r) => r.commissionPln),
+      netMargin: sum((r) => r.netMarginPln),
       margin: sum((r) => r.marginPln),
       incomplete: withMargin.filter((r) => r.flags.length > 0).length,
     };
