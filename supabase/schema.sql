@@ -17,6 +17,11 @@ create table if not exists members (
 );
 alter table members add column if not exists view_access text[];
 alter table members add column if not exists employment_type text;
+-- Drukarki pracownika (05.10.2026): nazwy drukarek (dokładnie jak w Windowsie na jego komputerze) do drukowania bezpośredniego z Wysyłki przez QZ Tray.
+-- Puste = używane są drukarki domyślne z shipping_settings (jedna wspólna para dla wszystkich). Ustawia Admin w Zespół -> Edytuj (polityka
+-- "admin update members" obejmuje nowe kolumny bez zmian).
+alter table members add column if not exists zebra_printer_name text;
+alter table members add column if not exists a4_printer_name text;
 -- ON DELETE CASCADE (30.09.2026) — bez tego usunięcie użytkownika w Supabase Auth (Authentication -> Users ->
 -- Delete) kończyło się "Database error deleting user": auth.users jest referencjonowane stąd i z kilku innych
 -- tabel (units.created_by, service_log/test_log.employee_user_id, buyback_order_intake.entered_by_user_id,

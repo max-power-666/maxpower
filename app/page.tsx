@@ -94,7 +94,7 @@ const ROLE_ACCESS: Record<string, ViewKey[]> = {
 
 const spaceOf = (k: ViewKey): Space => TABS.find((t) => t.key === k)?.space ?? "erp";
 
-type Member = { user_id: string; role: string; email: string; name: string; view_access: string[] | null; employment_type: string | null };
+type Member = { user_id: string; role: string; email: string; name: string; view_access: string[] | null; employment_type: string | null; zebra_printer_name?: string | null; a4_printer_name?: string | null };
 
 // Forma zatrudnienia — zwykły tekst w bazie (jak rola), ta lista to tylko opcje w rozwijanej liście
 // w UI; dodanie kolejnej formy nie wymaga SQL.
@@ -337,9 +337,19 @@ export default function Home() {
     const { data } = await supabase.from("units").select("*").order("created_at", { ascending: false });
     setUnits((data as Unit[]) || []);
   }
+  async function changeMemberPrinter(userId: string, field: "zebra_printer_name" | "a4_printer_name", value: string | null) {
+    await supabase.from("members").update({ [field]: value }).eq("user_id", userId);
+    await loadMembers();
+  }
   async function loadMembers() {
-    const { data } = await supabase.from("members").select("user_id, role, email, name, view_access, employment_type").order("email");
-    setMembers((data as Member[]) || []);
+    // Kolumny drukarek (schema.sql, 05.10.2026) mogą jeszcze nie istnieć — wtedy zwykły odczyt bez nich, żeby lista zespołu nie zniknęła.
+    const full = await supabase.from("members").select("user_id, role, email, name, view_access, employment_type, zebra_printer_name, a4_printer_name").order("email");
+    if (full.error && full.error.code === "42703") {
+      const basic = await supabase.from("members").select("user_id, role, email, name, view_access, employment_type").order("email");
+      setMembers((basic.data as Member[]) || []);
+      return;
+    }
+    setMembers((full.data as Member[]) || []);
   }
   // Supabase (PostgREST) domyślnie zwraca max 1000 wierszy na zapytanie — przy > 1000
   // sztukach trzeba dociągać kolejne strony przez .range(), inaczej wynik się urywa.
@@ -633,6 +643,7 @@ export default function Home() {
               onChangeName={changeMemberName}
               onChangeAccess={changeMemberAccess}
               onChangeEmploymentType={changeMemberEmploymentType}
+              onChangePrinter={changeMemberPrinter}
             />
           )}
 
@@ -767,6 +778,7 @@ function TeamView({
   onChangeName,
   onChangeAccess,
   onChangeEmploymentType,
+  onChangePrinter,
 }: {
   members: Member[];
   currentUserId: string;
@@ -775,6 +787,7 @@ function TeamView({
   onChangeName: (userId: string, name: string) => void;
   onChangeAccess: (userId: string, access: ViewKey[] | null) => void;
   onChangeEmploymentType: (userId: string, employmentType: string | null) => void;
+  onChangePrinter: (userId: string, field: "zebra_printer_name" | "a4_printer_name", value: string | null) => void;
 }) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
 
@@ -892,6 +905,7 @@ function TeamView({
           canEdit={canEdit}
           onChangeAccess={onChangeAccess}
           onChangeEmploymentType={onChangeEmploymentType}
+          onChangePrinter={onChangePrinter}
           onClose={() => setEditingAccessId(null)}
         />
       )}
@@ -907,12 +921,14 @@ function MemberEditDrawer({
   canEdit,
   onChangeAccess,
   onChangeEmploymentType,
+  onChangePrinter,
   onClose,
 }: {
   member: Member;
   canEdit: boolean;
   onChangeAccess: (userId: string, access: ViewKey[] | null) => void;
   onChangeEmploymentType: (userId: string, employmentType: string | null) => void;
+  onChangePrinter: (userId: string, field: "zebra_printer_name" | "a4_printer_name", value: string | null) => void;
   onClose: () => void;
 }) {
   // Przegląd nie jest już twardo wymuszony (od 02.10.2026 to zwykła zakładka jak każda inna — domyślnie
@@ -952,6 +968,27 @@ function MemberEditDrawer({
               <option key={t} value={t}>{t}</option>
             ))}
           </select>
+        </div>
+
+        <h3 className="text-xs font-semibold text-inksoft mb-2">DRUKARKI (drukowanie bezpośrednie z Wysyłki)</h3>
+        <div className="border border-line bg-white p-4 mb-6">
+          <p className="text-xs text-inksoft mb-3">Nazwy dokładnie jak w Windowsie na komputerze tej osoby (QZ Tray musi tam działać). Puste = drukarki domyślne z Wysyłki → „Zmień dane nadawcy”.</p>
+          {([["zebra_printer_name", "Drukarka etykiet (Zebra)"], ["a4_printer_name", "Drukarka A4 (packing slip)"]] as const).map(([field, labelText]) => (
+            <div key={field} className="mb-3 last:mb-0">
+              <label className="text-xs font-semibold text-inksoft block mb-1">{labelText}</label>
+              <input
+                key={`${member.user_id}-${field}`}
+                defaultValue={member[field] ?? ""}
+                disabled={!canEdit}
+                placeholder="— domyślna —"
+                onBlur={(e) => {
+                  const v = e.target.value.trim() || null;
+                  if (v !== (member[field] ?? null)) onChangePrinter(member.user_id, field, v);
+                }}
+                className="w-full border border-line bg-white px-2 py-2 rounded text-sm disabled:opacity-60"
+              />
+            </div>
+          ))}
         </div>
 
         <h3 className="text-xs font-semibold text-inksoft mb-2">DOSTĘP DO ZAKŁADEK</h3>

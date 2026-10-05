@@ -107,6 +107,8 @@ export default function ShippingView({
   const [ups, setUps] = useState<{ configured: boolean; env: string | null } | null>(null);
   const [carrier, setCarrier] = useState<Carrier>("parcel");
   const [settings, setSettings] = useState<Settings | null>(null);
+  // Drukarki TEJ osoby (members.zebra_printer_name / a4_printer_name, ustawia Admin w Zespół -> Edytuj); puste = domyślne z ustawień nadawcy.
+  const [myPrinters, setMyPrinters] = useState<{ zebra: string | null; a4: string | null }>({ zebra: null, a4: null });
   const [templates, setTemplates] = useState<Template[]>([]);
   const [shipments, setShipments] = useState<ShipmentRow[]>([]);
   const [shipSearchInput, setShipSearchInput] = useState("");
@@ -150,6 +152,7 @@ export default function ShippingView({
       .then((d) => setUps({ configured: !!d.configured, env: d.env ?? null }))
       .catch(() => setUps({ configured: false, env: null }));
     loadSettings();
+    loadMyPrinters();
     loadTemplates();
     // Przełącznik drukowania bezpośredniego: wybór per przeglądarkę/stanowisko, nie współdzielone ustawienie.
     setDirectPrint(localStorage.getItem("shipping-direct-print") === "1");
@@ -209,6 +212,14 @@ export default function ShippingView({
     onPrefillUsed();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefill]);
+
+  const printerZebra = myPrinters.zebra || settings?.zebra_printer_name || null;
+  const printerA4 = myPrinters.a4 || settings?.a4_printer_name || null;
+
+  async function loadMyPrinters() {
+    const { data, error: err } = await supabase.from("members").select("zebra_printer_name, a4_printer_name").eq("user_id", session.user.id).maybeSingle();
+    if (!err && data) setMyPrinters({ zebra: (data.zebra_printer_name as string | null) ?? null, a4: (data.a4_printer_name as string | null) ?? null });
+  }
 
   async function loadSettings() {
     const { data } = await supabase.from("shipping_settings").select("*").eq("id", 1).maybeSingle();
@@ -555,16 +566,16 @@ export default function ShippingView({
       if (!data) throw new Error("Brak etykiety dla tej przesyłki.");
 
       if (directPrint) {
-        if (!settings?.zebra_printer_name) throw new Error("Ustaw nazwę drukarki Zebra w danych nadawcy (Admin), żeby drukować bezpośrednio.");
+        if (!printerZebra) throw new Error("Brak drukarki Zebra — Admin ustawia ją w Zespół → Edytuj (dla tej osoby) albo w danych nadawcy (domyślna).");
         if (fmt === "zpl") {
-          await printRawToZebra(atob(data), settings.zebra_printer_name);
+          await printRawToZebra(atob(data), printerZebra);
         } else if (id !== undefined && carrierType === "dhl_parcel") {
           const res = await fetch("/api/shipping/dhl-parcel/label", { method: "POST", headers: auth, body: JSON.stringify({ id, format: "zpl" }) });
           const j = await res.json().catch(() => ({}));
           if (!res.ok) throw new Error(j?.error || "Nie udało się pobrać etykiety ZPL.");
-          await printRawToZebra(atob(j.zplBase64), settings.zebra_printer_name);
+          await printRawToZebra(atob(j.zplBase64), printerZebra);
         } else {
-          await printPdf(data, settings.zebra_printer_name);
+          await printPdf(data, printerZebra);
         }
       } else {
         let pdfBase64 = data;
@@ -588,7 +599,7 @@ export default function ShippingView({
   async function testPrint(kind: "label" | "a4") {
     setError("");
     setTestPrintMsg("");
-    const printer = kind === "label" ? settings?.zebra_printer_name : settings?.a4_printer_name;
+    const printer = kind === "label" ? printerZebra : printerA4;
     if (!printer) return setError(`Ustaw nazwę drukarki ${kind === "label" ? "Zebra" : "A4"} w danych nadawcy (Admin), żeby wykonać test.`);
     setPrintBusy(true);
     try {
@@ -607,13 +618,13 @@ export default function ShippingView({
   async function handlePackingSlip(url: string) {
     if (!directPrint) return void window.open(url, "_blank");
     setError("");
-    if (!settings?.a4_printer_name) return setError("Ustaw nazwę drukarki A4 w danych nadawcy (Admin), żeby drukować bezpośrednio.");
+    if (!printerA4) return setError("Brak drukarki A4 — Admin ustawia ją w Zespół → Edytuj (dla tej osoby) albo w danych nadawcy (domyślna).");
     setPrintBusy(true);
     try {
       const res = await fetch("/api/shipping/fetch-remote-pdf", { method: "POST", headers: auth, body: JSON.stringify({ url }) });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j?.error || "Nie udało się pobrać packing slipu.");
-      await printPdf(j.base64, settings.a4_printer_name);
+      await printPdf(j.base64, printerA4);
     } catch (e: any) {
       setError(e instanceof PrintAgentError ? e.message : e.message || "Nie udało się wydrukować packing slipu.");
     } finally {

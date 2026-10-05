@@ -754,7 +754,9 @@ widać, który stan jest który, tylko sam tekst się zmieniał (zgłoszone prze
 drukują się same, od razu po udanym nadaniu (`create()` w `ShippingView.tsx` woła `handleLabel`/`handlePackingSlip`
 zaraz po `setDone(...)`), bez czekania na osobne kliknięcie — zgłoszone przez właściciela: wcześniej trzeba było
 kliknąć "Drukuj etykietę"/"Drukuj packing slip" ręcznie, tak jak w trybie PDF. Przyciski w panelu "Przesyłka
-nadana" zostają jako ręczny fallback (np. gdyby auto-druk się nie udał). **Nazwy drukarek** (dokładnie jak w Windowsie) w `shipping_settings.zebra_printer_name`/`a4_printer_name` —
+nadana" zostają jako ręczny fallback (np. gdyby auto-druk się nie udał). **Drukarki per pracownik (05.10.2026, na prośbę właściciela — pola z nazwami drukarek są tylko w Admin-owym panelu "Zmień dane nadawcy" na dole Wysyłki i dotyczyły wszystkich naraz):** `members.zebra_printer_name`/`a4_printer_name` (`schema.sql`), Admin ustawia je w Zespół → Edytuj (sekcja "Drukarki", zapis przy wyjściu z pola; polityka `admin update members` obejmuje nowe kolumny). Wysyłka bierze drukarki ZALOGOWANEJ osoby, a gdy puste — wspólne z `shipping_settings`
+(`printerZebra`/`printerA4` w `ShippingView.tsx`); lista zespołu ma awaryjny odczyt bez nowych kolumn (do uruchomienia `schema.sql`). Nazwy trzeba wpisać ręcznie — "Wykryj drukarki" widzi tylko komputer, na którym klika Admin.
+**Nazwy drukarek** (dokładnie jak w Windowsie) w `shipping_settings.zebra_printer_name`/`a4_printer_name` —
 nowe nullable kolumny, Admin ustawia w panelu "Zmień dane nadawcy", z przyciskiem "Wykryj drukarki" (`listPrinters()`
 w `lib/printAgent.ts`, wymaga uruchomionego QZ Tray na komputerze, na którym klika Admin). **Delivery note przez
 serwerowy proxy** (`app/api/shipping/fetch-remote-pdf`) zamiast fetch wprost z przeglądarki — omija nieprzewidywalne
