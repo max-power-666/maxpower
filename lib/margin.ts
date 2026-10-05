@@ -21,14 +21,28 @@ import { tradeInCategory, TRADEIN_CATEGORY_LABELS, type TradeInCategory } from "
 export const BM_ACCELERATOR = { markets: ["FR", "DE", "ES", "IT"], from: "2026-08-15", to: "2026-12-31", reductionPp: 5 };
 export const BM_STANDARD_PCT = 11;
 export const BM_ACCESSORY_PCT = 20;
-export type BmKind = "console" | "accessory" | "other";
+// Rozszerzenie programu Accelerator na smartwatche (mail BM, 05.10.2026): 0% prowizji od 01.09 do 30.11.2026 w FR/DE/ES/IT; NIE dotyczy zegarków Apple
+// (SKU zaczynające się od "AW" — Apple Watch ma takie SKU, więc po tym je odróżniamy; dodatkowo nazwa z "Apple"). Opłata płatnicza i CCBM bez zmian.
+export const BM_ACCELERATOR_SMARTWATCH = { markets: ["FR", "DE", "ES", "IT"], from: "2026-09-01", to: "2026-11-30", pct: 0 };
+export type BmKind = "console" | "accessory" | "smartwatch" | "other";
+
+const WATCH_RE = /watch|montre|\buhr\b|reloj|orologio|fitbit|garmin|amazfit/i;
+const WATCH_ACCESSORY_RE = /c[âa]ble|kabel|charg|ladeger|bracelet|armband|strap|correa|cinturino|coque|hülle|funda|case|protecteur|screen/i;
+// Smartwatch (nie Apple): nazwa z "watch"/"montre"/... i bez słów akcesoriów; Apple Watch (SKU "AW…" albo "Apple" w nazwie) świadomie wyłączony z programu.
+export function isNonAppleSmartwatch(sku: string | null | undefined, title: string | null | undefined): boolean {
+  const p = (sku || "").split("-")[0];
+  const t = title || "";
+  if (/^aw/i.test(p) || /apple/i.test(t)) return false;
+  return WATCH_RE.test(t) && !WATCH_ACCESSORY_RE.test(t);
+}
 
 export function bmKind(sku: string | null | undefined, title: string | null | undefined): BmKind {
   const p = (sku || "").split("-")[0].toLowerCase();
   const t = (title || "").toLowerCase();
   if (/^(pad|ds4|nsjc|ps5pad|joy)/.test(p) || /manette|controller|joy-?con|joystick|dualshock|dualsense|gamepad|\bpad\b/.test(t)) return "accessory";
   if (/macbook|laptop/.test(t)) return "other";
-  return tradeInCategory(title, sku) === "consoles_laptops" ? "console" : "other";
+  if (tradeInCategory(title, sku) === "consoles_laptops") return "console";
+  return isNonAppleSmartwatch(sku, title) ? "smartwatch" : "other"; // konsole sprawdzamy pierwsze: tytuł zestawu z grą (np. "Watch Dogs") nie robi z konsoli zegarka
 }
 
 // Stawka prowizji (% ceny sprzedaży) wg reguł wyżej; `date` = data zamówienia (YYYY-MM-DD), `country` = kraj odbiorcy.
@@ -37,6 +51,9 @@ export function bmCommissionPct(o: { sku: string | null | undefined; title: stri
   if (kind === "accessory") return { pct: BM_ACCESSORY_PCT, kind, accelerator: false };
   if (kind === "console" && o.country && BM_ACCELERATOR.markets.includes(o.country.toUpperCase()) && o.date >= BM_ACCELERATOR.from && o.date <= BM_ACCELERATOR.to) {
     return { pct: BM_STANDARD_PCT - BM_ACCELERATOR.reductionPp, kind, accelerator: true };
+  }
+  if (kind === "smartwatch" && o.country && BM_ACCELERATOR_SMARTWATCH.markets.includes(o.country.toUpperCase()) && o.date >= BM_ACCELERATOR_SMARTWATCH.from && o.date <= BM_ACCELERATOR_SMARTWATCH.to) {
+    return { pct: BM_ACCELERATOR_SMARTWATCH.pct, kind, accelerator: true };
   }
   return { pct: BM_STANDARD_PCT, kind, accelerator: false };
 }
@@ -368,7 +385,11 @@ export function computeMargin(row: MarginDbRow, ctx: MarginContext): MarginResul
             ? c.accelerator
               ? `konsola do ${row.country_code} w okresie programu Accelerator (11% − 5 pkt proc.)`
               : `konsola${row.country_code && BM_ACCELERATOR.markets.includes(row.country_code.toUpperCase()) ? " poza okresem programu Accelerator" : ` do ${row.country_code || "nieznanego kraju"} (poza FR/DE/ES/IT)`} — stawka standardowa 11%`
-            : "produkt spoza konsol — stawka standardowa 11%";
+            : c.kind === "smartwatch"
+              ? c.accelerator
+                ? `smartwatch (nie Apple) do ${row.country_code} w okresie rozszerzonego programu Accelerator (1.09–30.11.2026) — 0% prowizji`
+                : `smartwatch (nie Apple)${row.country_code && BM_ACCELERATOR_SMARTWATCH.markets.includes(row.country_code.toUpperCase()) ? " poza okresem programu Accelerator" : ` do ${row.country_code || "nieznanego kraju"} (poza FR/DE/ES/IT)`} — stawka standardowa 11%`
+              : "produkt spoza konsol — stawka standardowa 11%";
       commNote = `SZACUNEK (zamówienia nie ma jeszcze na wgranej fakturze): ${f2(price)} € × (${c.pct}% prowizji [${why}] + ${f2(payPct)}% opłaty płatniczej) + CCBM ${f2(ccbm)} € = ${f2(eur)} €${rateTxt}.`;
     }
   }
