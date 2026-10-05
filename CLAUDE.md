@@ -266,6 +266,9 @@ max ~2 min; kursor to `last_attempt_at < run.started_at`. `in_progress_since` pi
 przywrócenia cen po ubitej funkcji. Historia cen tylko przy zmianie ceny. Stary program na
 Macu jest wyłączony; bidder działa na produkcji, włącznik: `buyback_settings.enabled`.
 
+**Pary "nasza cena / cena do wygrania" i status wygrywania (05.10.2026, na prośbę właściciela; Bidder -> Ceny SKU):** kolumny rynków (DE/ES/FR/IT) pokazują `nasza / do wygrania` z ostatniego przebiegu, nasza cena zielona, gdy wygrywa (cena >= cena do wygrania), czerwona, gdy cena max jest za niska (bidder ustawia `min(do wygrania, max)`, więc przegrywa tylko przy `max < do wygrania`).
+Cena do wygrania zapisuje się w nowej kolumnie `buyback_skus.last_ptw` (jsonb jak `last_set`; `tradein.sql`) — **osobnym, nieblokującym zapisem** w `processSku` (`lib/buyback.ts`), żeby brak kolumny przed uruchomieniem SQL nie zepsuł głównego zapisu cen/`last_set`. **Status:** "wygrywa" (wszystkie rynki z parą), "wygrywa n/m" albo "nie wygrywa" (amber), "błąd" (`last_error`, w podpowiedzi treść) — jak dotąd; wiersze bez pary (przebieg sprzed zmiany) pokazują stare "OK" i same ceny do następnego przebiegu.
+Rynek, na którym API nie podało ceny do wygrania (zostaje 10 €), nie liczy się do wygrywania. Nowa pigułka filtra **"Nie wygrywają"** (SKU w wycenie, bez błędu, wygrywające mniej niż na wszystkich rynkach z parą).
 **Hurtowa zmiana ceny max** (03.10.2026, na prośbę właściciela; zakładka Bidder -> Ceny SKU): kolumna checkboxów po lewej (nagłówek =
 zaznacz/odznacz WSZYSTKIE WIDOCZNE wiersze, ze stanem "częściowo"), a po zaznaczeniu pojawia się pasek z polem "Zmień cenę max o" (kwota w €,
 ujemna obniża, np. `5` albo `-10`) i przyciskiem "Zastosuj". **Zmiana jest o wartość (nowa = obecna + delta), nie ustawieniem jednej ceny.**

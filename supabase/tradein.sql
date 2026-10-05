@@ -68,6 +68,10 @@ create table if not exists buyback_settings (
 );
 insert into buyback_settings (id) values (1) on conflict (id) do nothing;
 
+-- Cena do wygrania z ostatniego przebiegu (05.10.2026): {"DE": 520, "FR": 498, ...} — para do ostatnio ustawionej ceny (last_set); lista Bidder pokazuje
+-- "nasza / do wygrania" i status "wygrywa" (nasza cena >= cena do wygrania) albo "nie wygrywa" (cena max niższa niż cena do wygrania). Zapisuje serwer.
+alter table buyback_skus add column if not exists last_ptw jsonb;
+
 alter table buyback_skus enable row level security;
 alter table buyback_runs enable row level security;
 alter table buyback_log enable row level security;

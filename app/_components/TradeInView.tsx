@@ -22,6 +22,7 @@ type Sku = {
   max_price: number | null;
   ignored: boolean;
   last_set: Record<string, number> | null;
+  last_ptw?: Record<string, number> | null; // cena do wygrania z ostatniego przebiegu (para do last_set)
   last_run_at: string | null;
   last_attempt_at: string | null;
   last_error: string | null;
@@ -31,7 +32,21 @@ type LogRow = { id: number; at: string; level: string; sku: string | null; messa
 type HistoryRow = { market: string; price: number; price_to_win: number | null; at: string };
 type Competitor = { market: string; price?: { amount: string } | null; price_to_win?: { amount: string } | null };
 
-type Filter = "withMax" | "noMax" | "ignored" | "errors" | "all";
+type Filter = "withMax" | "noMax" | "ignored" | "errors" | "losing" | "all";
+
+// Czy nasza oferta wygrywa na danym rynku: nasza cena >= cena do wygrania (cena = min(do wygrania, max), więc przegrywamy tylko, gdy max jest niższa).
+// null = brak pary (np. przebieg sprzed zapisu last_ptw albo rynek bez ceny do wygrania).
+function winsOn(s: Pick<Sku, "last_set" | "last_ptw">, m: string): boolean | null {
+  const mine = Number(s.last_set?.[m]);
+  const ptw = Number(s.last_ptw?.[m]);
+  if (s.last_set?.[m] == null || s.last_ptw?.[m] == null || !Number.isFinite(mine) || !Number.isFinite(ptw)) return null;
+  return mine >= ptw - 0.005;
+}
+// Podsumowanie wygrywania SKU na rynkach, dla których znamy parę: ile wygrywamy z ilu.
+function winSummary(s: Pick<Sku, "last_set" | "last_ptw">): { wins: number; total: number } | null {
+  const res = MARKETS.map((m) => winsOn(s, m)).filter((x): x is boolean => x !== null);
+  return res.length ? { wins: res.filter(Boolean).length, total: res.length } : null;
+}
 
 function fmtPrice(n: number | string | null | undefined) {
   if (n === null || n === undefined || n === "") return "—";
@@ -220,6 +235,7 @@ export default function TradeInView({ session, members }: { session: Session; me
     noMax: skus.filter((s) => !hasMax(s)).length,
     ignored: skus.filter((s) => s.ignored).length,
     errors: skus.filter((s) => s.last_error).length,
+    losing: skus.filter((s) => !s.ignored && !s.last_error && hasMax(s) && (() => { const w = winSummary(s); return !!w && w.wins < w.total; })()).length,
     all: skus.length,
   };
 
@@ -231,6 +247,7 @@ export default function TradeInView({ session, members }: { session: Session; me
       if (filter === "noMax") return !hasMax(s);
       if (filter === "ignored") return s.ignored;
       if (filter === "errors") return !!s.last_error;
+      if (filter === "losing") { const w = winSummary(s); return !s.ignored && !s.last_error && hasMax(s) && !!w && w.wins < w.total; }
       return true;
     });
   }, [skus, search, filter]);
@@ -305,6 +322,7 @@ export default function TradeInView({ session, members }: { session: Session; me
                 ["noMax", "Bez ceny max"],
                 ["ignored", "Ignorowane"],
                 ["errors", "Z błędem"],
+                ["losing", "Nie wygrywają"],
                 ["all", "Wszystkie"],
               ] as [Filter, string][]
             ).map(([k, label]) => (
@@ -313,6 +331,7 @@ export default function TradeInView({ session, members }: { session: Session; me
               </button>
             ))}
           </div>
+          <p className="text-[11px] text-inksoft mb-3">W kolumnach rynków: <span className="font-semibold">nasza cena / cena do wygrania</span> z ostatniego przebiegu — <span className="text-teal font-semibold">zielona</span> = wygrywamy, <span className="text-rust font-semibold">czerwona</span> = cena max jest za niska, żeby wygrać.</p>
 
           {selected.size > 0 && (
             <div className="flex flex-wrap items-center gap-3 mb-3 border border-line bg-white px-4 py-3">
@@ -408,14 +427,29 @@ export default function TradeInView({ session, members }: { session: Session; me
                         </div>
                       </td>
                       {MARKETS.map((m) => (
-                        <td key={m} className="p-3 text-right font-mono">{fmtPrice(s.last_set?.[m])}</td>
+                        <td key={m} className="p-3 text-right font-mono whitespace-nowrap" title="nasza cena / cena do wygrania">
+                          {s.last_ptw?.[m] != null && s.last_set?.[m] != null ? (
+                            <>
+                              <span className={`font-semibold ${winsOn(s, m) ? "text-teal" : "text-rust"}`}>{fmtPrice(s.last_set?.[m])}</span>
+                              <span className="text-inksoft"> / {fmtPrice(s.last_ptw?.[m])}</span>
+                            </>
+                          ) : (
+                            fmtPrice(s.last_set?.[m])
+                          )}
+                        </td>
                       ))}
                       <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDateTime(s.last_run_at)}</td>
                       <td className="p-3">
                         {s.last_error ? (
                           <span title={s.last_error} className="text-xs font-semibold px-2 py-1 rounded-full bg-rustsoft text-rust">błąd</span>
                         ) : s.last_run_at ? (
-                          <span className="text-xs font-semibold px-2 py-1 rounded-full bg-tealsoft text-teal">OK</span>
+                          (() => {
+                            const w = winSummary(s);
+                            if (!w) return <span className="text-xs font-semibold px-2 py-1 rounded-full bg-tealsoft text-teal">OK</span>; // przebieg sprzed zapisu cen do wygrania
+                            if (w.wins === w.total) return <span title="Nasza oferta wygrywa na wszystkich rynkach" className="text-xs font-semibold px-2 py-1 rounded-full bg-tealsoft text-teal">wygrywa</span>;
+                            if (w.wins === 0) return <span title="Cena max jest niższa niż cena do wygrania na wszystkich rynkach" className="text-xs font-semibold px-2 py-1 rounded-full bg-ambersoft text-amber">nie wygrywa</span>;
+                            return <span title={`Wygrywamy na ${w.wins} z ${w.total} rynków (cena max niższa niż cena do wygrania na pozostałych)`} className="text-xs font-semibold px-2 py-1 rounded-full bg-ambersoft text-amber">wygrywa {w.wins}/{w.total}</span>;
+                          })()
                         ) : (
                           <span className="text-xs text-inksoft">—</span>
                         )}

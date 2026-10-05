@@ -308,6 +308,9 @@ async function processSku(db: SupabaseClient, runId: number, row: SkuRow): Promi
       .from("buyback_skus")
       .update({ last_set: prices, last_run_at: new Date().toISOString(), last_error: null, in_progress_since: null })
       .eq("sku", row.sku);
+    // Cena do wygrania z tego przebiegu (para do last_set) — OSOBNY zapis, bez sprawdzania wyniku: gdy kolumny last_ptw jeszcze nie ma (nie uruchomiono
+    // tradein.sql), nie może zepsuć głównego zapisu powyżej (ceny, last_set, last_error), od którego zależy przywracanie cen po przerwaniu.
+    await db.from("buyback_skus").update({ last_ptw: ptws }).eq("sku", row.sku);
     const summary = MARKETS.map((m) => `${m} ${prices[m] ?? "10 (brak ptw)"}`).join(" · ");
     await log(db, runId, missing.length ? "warn" : "info", row.sku, summary);
     return true;
