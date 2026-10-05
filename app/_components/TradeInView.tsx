@@ -90,6 +90,7 @@ export default function TradeInView({ session, members }: { session: Session; me
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkDelta, setBulkDelta] = useState("");
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [selectedRunBusy, setSelectedRunBusy] = useState(false);
 
   // Zmiana wyszukiwania/filtra czyści zaznaczenie — inaczej hurtowa zmiana mogłaby dotknąć SKU, których już nie widać.
   useEffect(() => {
@@ -147,9 +148,9 @@ export default function TradeInView({ session, members }: { session: Session; me
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRun?.id, pending, session.access_token]);
 
-  function flash(msg: string) {
+  function flash(msg: string, ms = 3500) {
     setMessage(msg);
-    setTimeout(() => setMessage(""), 3500);
+    setTimeout(() => setMessage(""), ms);
   }
 
   async function runNow() {
@@ -163,6 +164,37 @@ export default function TradeInView({ session, members }: { session: Session; me
       flash(e.message);
     } finally {
       setRunBusy(false);
+      loadAll();
+    }
+  }
+
+  // Przebieg biddera tylko dla zaznaczonych SKU (05.10.2026): serwer od razu ustawia ceny na Back Market dla wskazanych SKU (nie rusza reszty katalogu).
+  async function runSelected() {
+    const list = Array.from(selected);
+    if (list.length === 0 || selectedRunBusy) return;
+    if (!confirm(`Uruchomić bidder tylko dla ${list.length} zaznaczonych SKU?\n\nCeny zostaną od razu ustawione na żywym Back Markecie (min(cena do wygrania, cena max)). Potrwa ok. ${Math.max(5, list.length * 5)} s — nie zamykaj karty.`)) return;
+    setSelectedRunBusy(true);
+    try {
+      const res = await fetch("/api/tradein/bidder", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ skus: list }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Błąd uruchomienia");
+      if (data.ok === false && data.reason === "locked") {
+        flash("Bidder właśnie pracuje (przebieg w tle) — spróbuj za chwilę.");
+      } else {
+        const parts = [`Zaktualizowano ${data.updated} z ${data.processed}`];
+        if (data.failed) parts.push(`błędy: ${data.failed}`);
+        if (data.skipped) parts.push(`pominięto ${data.skipped} (ignorowane/bez ceny max)`);
+        if (data.remaining) parts.push(`niewykonane: ${data.remaining} — uruchom ponownie`);
+        flash(parts.join(" · "), 10000);
+      }
+    } catch (e: any) {
+      flash(e.message);
+    } finally {
+      setSelectedRunBusy(false);
       loadAll();
     }
   }
@@ -349,7 +381,16 @@ export default function TradeInView({ session, members }: { session: Session; me
               <button onClick={applyBulk} disabled={bulkBusy || parseDelta(bulkDelta) === null} className="text-sm font-semibold px-3 py-1.5 rounded bg-ink text-paper disabled:opacity-50">
                 {bulkBusy ? "Zapisywanie…" : "Zastosuj"}
               </button>
-              <button onClick={() => setSelected(new Set())} disabled={bulkBusy} className="text-xs font-semibold text-teal hover:underline disabled:opacity-50">Odznacz</button>
+              <span className="text-line">|</span>
+              <button
+                onClick={runSelected}
+                disabled={selectedRunBusy || bulkBusy}
+                title="Ustawia ceny na Back Market tylko dla zaznaczonych SKU, od razu"
+                className="text-sm font-semibold px-3 py-1.5 rounded border border-ink text-ink disabled:opacity-50"
+              >
+                {selectedRunBusy ? "Bidder pracuje…" : "Uruchom bidder dla zaznaczonych"}
+              </button>
+              <button onClick={() => setSelected(new Set())} disabled={bulkBusy || selectedRunBusy} className="text-xs font-semibold text-teal hover:underline disabled:opacity-50">Odznacz</button>
             </div>
           )}
 

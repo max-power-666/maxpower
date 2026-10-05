@@ -218,6 +218,76 @@ export async function bidderTick(opts: { requestRun?: boolean } = {}): Promise<T
   }
 }
 
+// Przebieg TYLKO dla wskazanych SKU (05.10.2026, przycisk "Uruchom dla zaznaczonych" w Ceny SKU): od razu, w jednym wywołaniu, bez czekania na cron i bez ruszania reszty
+// katalogu. Bierze ten sam zamek co zwykły tick (nie nakłada się z cronem — wtedy zwraca "locked") i te same reguły co przebieg: tylko SKU nieignorowane i z ceną max > 0.
+// Zapisuje własny, od razu zakończony wpis w buyback_runs (source "selected"), żeby widać go w "Przebiegi i log" i żeby nie zostawić "trwającego" przebiegu po ubitej funkcji
+// (cron dociągałby wtedy cały katalog). Limit SELECTED_MAX_SKUS na jedno kliknięcie i budżet czasu; reszta wraca jako `remaining`.
+const SELECTED_MAX_SKUS = 60;
+const SELECTED_BUDGET_MS = 240_000;
+
+export type SelectedRunResult =
+  | { ok: false; reason: "locked" }
+  | { ok: true; runId: number | null; requested: number; processed: number; updated: number; failed: number; skipped: number; remaining: number };
+
+export async function bidderRunSkus(skus: string[]): Promise<SelectedRunResult> {
+  const db = supabaseAdmin();
+  const startedAt = Date.now();
+  const unique = Array.from(new Set(skus.filter((s) => typeof s === "string" && s.trim()).map((s) => s.trim()))).slice(0, SELECTED_MAX_SKUS);
+
+  const nowIso = new Date().toISOString();
+  const { data: locked, error: lockError } = await db
+    .from("buyback_settings")
+    .update({ lock_until: new Date(startedAt + LOCK_MS).toISOString() })
+    .eq("id", 1)
+    .or(`lock_until.is.null,lock_until.lt.${nowIso}`)
+    .select("id");
+  if (lockError) throw new Error(`Supabase: ${lockError.message}`);
+  if (!locked || locked.length === 0) return { ok: false, reason: "locked" };
+
+  try {
+    // Jak w ticku: jeśli poprzednia funkcja została ubita między "10 €" a właściwą ceną, najpierw przywróć ostatnie ceny (zamek trzymamy, więc nikt inny nie pracuje).
+    await recoverInterrupted(db, null);
+
+    const { data, error } = await db
+      .from("buyback_skus")
+      .select("sku, listing_id, max_price, last_set, in_progress_since")
+      .in("sku", unique)
+      .eq("ignored", false)
+      .gt("max_price", 0)
+      .order("sku");
+    if (error) throw new Error(`Supabase: ${error.message}`);
+    const queue = (data as SkuRow[]) || [];
+    const skipped = unique.length - queue.length; // ignorowane albo bez ceny max
+    if (queue.length === 0) return { ok: true, runId: null, requested: unique.length, processed: 0, updated: 0, failed: 0, skipped, remaining: 0 };
+
+    const { data: created, error: insErr } = await db
+      .from("buyback_runs")
+      .insert({ source: "selected", status: "finished", total: queue.length, finished_at: new Date().toISOString() })
+      .select("id")
+      .single();
+    if (insErr) throw new Error(`Supabase: ${insErr.message}`);
+    const runId = (created as { id: number }).id;
+    await log(db, runId, "info", null, `Przebieg dla zaznaczonych SKU: ${queue.length}${skipped ? ` (pominięto ${skipped}: ignorowane albo bez ceny max)` : ""}`);
+
+    let updated = 0;
+    let failed = 0;
+    let processed = 0;
+    for (const sku of queue) {
+      if (Date.now() - startedAt > SELECTED_BUDGET_MS) break;
+      if (processed > 0) await sleep(SLEEP_BETWEEN_SKUS_MS);
+      const ok = await processSku(db, runId, sku);
+      processed += 1;
+      if (ok) updated += 1;
+      else failed += 1;
+    }
+    await db.from("buyback_runs").update({ updated, failed, total: processed }).eq("id", runId);
+    await log(db, runId, "info", null, `Koniec przebiegu dla zaznaczonych. Zaktualizowano: ${updated}. Błędy: ${failed}${queue.length > processed ? `. Niewykonane (limit czasu): ${queue.length - processed}` : ""}`);
+    return { ok: true, runId, requested: unique.length, processed, updated, failed, skipped, remaining: queue.length - processed };
+  } finally {
+    await db.from("buyback_settings").update({ lock_until: null }).eq("id", 1);
+  }
+}
+
 async function getActiveRun(db: SupabaseClient): Promise<Run | null> {
   const { data } = await db
     .from("buyback_runs")
