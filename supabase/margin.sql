@@ -174,7 +174,10 @@ from (
     coalesce(nullif(btrim(c.vat), ''), case when exists (select 1 from buyback_orders bo where bo.order_public_id = btrim(p.description)) then 'VM' end) as vat,
     p.stock_level,
     (p.stock_level = 1) as available,
+    -- Ręczne przypisanie (05.10.2026): serial_skus ze source = 'manual' ma najwyższy priorytet (jak w fakturownia_stock_with_sku, inventory.sql).
     coalesce((
+      select m.sku from serial_skus m where m.source = 'manual' and lower(btrim(m.serial_number)) = lower(btrim(p.name)) limit 1
+    ), (
       select x.sku
       from (
         select btrim(t.sku) as sku, t.started_at as at

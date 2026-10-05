@@ -84,7 +84,10 @@ select
   -- VAT (05.10.2026): wpis ręczny z cache ma pierwszeństwo; dla sztuk z Trade-in (opis = numer zamówienia skupu BuyBack) automatycznie "VM" = VAT-marża
   -- (zakup od osoby prywatnej). Wartość wyliczana w widoku, nie zapisywana — ręczna zmiana w cache nadal ją nadpisuje.
   coalesce(nullif(btrim(c.vat), ''), case when exists (select 1 from buyback_orders bo where bo.order_public_id = btrim(c.description)) then 'VM' end) as vat,
+  -- Ręczne przypisanie (05.10.2026): wpis serial_skus ze source = 'manual' (poprawka właściciela) ma NAJWYŻSZY priorytet — wygrywa nawet z SKU z Testów/Trade-in (poprawia pomyłki w ich wpisach, nic w nich nie zmieniając).
   coalesce((
+    select m.sku from serial_skus m where m.source = 'manual' and lower(btrim(m.serial_number)) = lower(btrim(c.name)) limit 1
+  ), (
     select x.sku
     from (
       select btrim(t.sku) as sku, t.started_at as at
