@@ -27,6 +27,7 @@ const FILTERS = [
   { key: "", label: "Wszystkie" },
   { key: "backmarket", label: "Back Market" },
   { key: "refurbed", label: "Refurbed" },
+  { key: "octopia", label: "Octopia" },
 ];
 
 const fmtPLN = (n: number | null) => (n === null ? "—" : n.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
@@ -150,7 +151,7 @@ export default function MarginView({ session, members }: { session: Session; mem
           )}
           <div className="text-[11px] text-inksoft mt-1">
             Prowizja szacowana wg reguł (sprawdzone na zamówieniach z faktur): <span className="font-semibold">konsole do FR/DE/ES/IT — 6%</span> (program Accelerator, −5 pkt proc., 15.08–31.12.2026),
-            konsole do pozostałych krajów 11%, akcesoria (pady) 20%, pozostałe produkty 11%. refurbed — prowizja wprost z danych zamówienia. Średnie z ostatnich 8 tygodni faktur; wgrywaj kolejne co tydzień.
+            konsole do pozostałych krajów 11%, akcesoria (pady) 20%, pozostałe produkty 11%. refurbed i Octopia — prowizja wprost z danych zamówienia. Średnie z ostatnich 8 tygodni faktur; wgrywaj kolejne co tydzień.
           </div>
         </div>
         <div className="shrink-0">
@@ -229,7 +230,7 @@ export default function MarginView({ session, members }: { session: Session; mem
           </thead>
           <tbody>
             {!loading && rows.length === 0 && (
-              <tr><td colSpan={15} className="p-6 text-center text-inksoft text-sm">{search || marketplace || period !== "all" ? "Brak wyników." : "Brak sprzedanych sztuk z numerem seryjnym (Back Market i refurbed)."}</td></tr>
+              <tr><td colSpan={15} className="p-6 text-center text-inksoft text-sm">{search || marketplace || period !== "all" ? "Brak wyników." : "Brak sprzedanych sztuk z numerem seryjnym (Back Market, refurbed i Octopia)."}</td></tr>
             )}
             {rows.map((r) => {
               const rowKey = `${r.marketplace}:${r.orderId}:${r.itemKey}`;

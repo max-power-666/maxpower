@@ -3,7 +3,7 @@
 // Definicja (decyzja właściciela): marża = cena sprzedaży (PLN, brutto) − cena zakupu − VAT od marży − wysyłka − koszty dodatkowe (Trade-in)
 //   − prowizja marketplace'u − koszty serwisu. VAT liczony OD MARŻY: (cena sprzedaży − cena zakupu, BEZ kosztów dodatkowych) × 23/123,
 //   nigdy ujemny. Koszty serwisu na razie zawsze puste (decyzja: dodamy po wprowadzeniu kosztów części).
-// Zakres: tylko Back Market i refurbed (tam mamy rzetelne źródło prowizji): BM z wgranych faktur tygodniowych (dokładnie dla zamówień z faktury,
+// Zakres: Back Market, refurbed i Octopia (tam mamy rzetelne źródło prowizji): BM z wgranych faktur tygodniowych (dokładnie dla zamówień z faktury,
 // resztę szacujemy średnią z faktur), refurbed z danych zamówienia. Inne kanały nie są na liście, dopóki nie znamy ich prowizji.
 //
 // Koszty poziomu ZAMÓWIENIA (wysyłka, opłaty z faktury BM) dzielimy na pozycje proporcjonalnie do ceny pozycji.
@@ -43,7 +43,7 @@ export function bmCommissionPct(o: { sku: string | null | undefined; title: stri
 
 
 export const MARGIN_VAT_RATE = 23; // % — VAT od marży (23/123 marży brutto), ta sama stała stawka co faktury (INVOICE_VAT_RATE)
-export const MARGIN_MARKETPLACES = ["backmarket", "refurbed"] as const;
+export const MARGIN_MARKETPLACES = ["backmarket", "refurbed", "octopia"] as const;
 
 export type MarginDbRow = {
   marketplace: string;
@@ -76,6 +76,8 @@ export type MarginDbRow = {
   shipping_manual: number | string | null;
   refurbed_commission: number | string | null;
   refurbed_commission_currency: string | null;
+  octopia_commission?: number | string | null; // prowizja Octopii na sztukę (z danych zamówienia), waluta zamówienia
+  octopia_commission_currency?: string | null;
   bm_sales_fees: number | string | null;
   bm_payment_fees: number | string | null;
   bm_ccbm_fees: number | string | null;
@@ -98,7 +100,7 @@ export type MarginResult = {
   shippingPln: number | null;
   extraPln: number | null;
   commissionPln: number | null;
-  commissionSource: "faktura" | "szacunek" | "refurbed" | null;
+  commissionSource: "faktura" | "szacunek" | "refurbed" | "octopia" | null;
   servicePln: number | null; // koszt części wbudowanych w sztukę (Serwis -> Części); null = brak przypisanych części
   marginPln: number | null;
   marginPct: number | null; // marża / cena sprzedaży
@@ -317,6 +319,15 @@ export function computeMargin(row: MarginDbRow, ctx: MarginContext): MarginResul
       const ri = (row.refurbed_commission_currency || "EUR").toUpperCase() === "PLN" ? null : rateOf((row.refurbed_commission_currency || "EUR").toUpperCase());
       commNote = `Z danych zamówienia refurbed (prowizja bazowa + płatność + dynamiczna): ${f2(c)} ${(row.refurbed_commission_currency || "").toUpperCase()}${ri ? ` × kurs NBP ${f4(ri.mid)} (z ${dm(ri.rateDate)})` : ""}.`;
     } else commNote = "Brak kwoty prowizji w danych zamówienia refurbed.";
+  } else if (row.marketplace === "octopia") {
+    const c = num(row.octopia_commission);
+    if (c !== null && date) {
+      const ccur = (row.octopia_commission_currency || "EUR").toUpperCase();
+      commissionPln = toPln(c, ccur, date, ctx);
+      commissionSource = "octopia";
+      const ri = ccur === "PLN" ? null : rateOf(ccur);
+      commNote = `Z danych zamówienia Octopia (prowizja pozycji z API, liczona od ceny i dostawy zapłaconej przez kupującego; bez VAT): ${f2(c)} ${ccur}${ri ? ` × kurs NBP ${f4(ri.mid)} (z ${dm(ri.rateDate)})` : ""}.`;
+    } else commNote = "Brak kwoty prowizji w danych zamówienia Octopia.";
   } else if (row.marketplace === "backmarket" && date) {
     const salesFees = num(row.bm_sales_fees);
     const ri = rateOf("EUR");

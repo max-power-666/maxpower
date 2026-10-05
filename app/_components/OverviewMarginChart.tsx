@@ -13,7 +13,7 @@ type Agg = { count: number; withMargin: number; sale: number; margin: number; in
 type Summary = Record<string, { total: Agg; byMarketplace: Record<string, Agg> }>;
 type PeriodKey = "current" | "previous" | "all";
 
-const COLORS: Record<string, string> = { backmarket: "#e4572e", refurbed: "#1baf7a" };
+const COLORS: Record<string, string> = { backmarket: "#e4572e", refurbed: "#1baf7a", octopia: "#8a4fff" };
 const monthName = (offset: number) => {
   const now = new Date();
   return new Date(now.getFullYear(), now.getMonth() + offset, 1).toLocaleDateString("pl-PL", { month: "long", year: "numeric" });

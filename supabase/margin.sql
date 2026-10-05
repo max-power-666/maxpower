@@ -93,7 +93,9 @@ select
   inv.sales_fees as bm_sales_fees,
   inv.payment_fees as bm_payment_fees,
   inv.ccbm_fees as bm_ccbm_fees,
-  inv.has_invoice as bm_has_invoice
+  inv.has_invoice as bm_has_invoice,
+  oct.commission as octopia_commission,
+  oct.currency as octopia_commission_currency
 from sales_order_items it
 join sales_orders o on o.marketplace = it.marketplace and o.external_id = it.external_id
 join order_agg oa on oa.marketplace = it.marketplace and oa.external_id = it.external_id
@@ -122,6 +124,17 @@ left join lateral (
   where it.marketplace = 'refurbed' and r.id = it.external_id and i ->> 'id' = it.item_key
   limit 1
 ) rf on true
+-- Octopia (Cdiscount, 05.10.2026): prowizja wprost z danych zamówienia — lines[].offerPrice.commission.amountWithoutVat to kwota dla CAŁEJ pozycji (stawka rate w setnych
+-- procenta: 800 = 8%, liczona od ceny × ilość PLUS koszt dostawy zapłacony przez kupującego — sprawdzone na wszystkich 902 liniach), więc na sztukę dzielimy przez ilość.
+-- Pozycje rozbite z ilości > 1 mają klucze "id", "id-2"... — łączymy po podstawie klucza (orderLineId). Waluta z zamówienia (EUR).
+left join lateral (
+  select (l -> 'offerPrice' -> 'commission' ->> 'amountWithoutVat')::numeric / greatest(coalesce(nullif(l ->> 'quantity', '')::numeric, 1), 1) as commission,
+         upper(oc.raw ->> 'currencyCode') as currency
+  from octopia_orders oc, jsonb_array_elements(case when jsonb_typeof(oc.raw -> 'lines') = 'array' then oc.raw -> 'lines' else '[]'::jsonb end) l
+  where it.marketplace = 'octopia' and oc.id = it.external_id
+    and (l ->> 'orderLineId') = regexp_replace(it.item_key, '-[0-9]+$', '')
+  limit 1
+) oct on true
 -- Back Market: opłaty z wgranych faktur tygodniowych, zsumowane na zamówienie (wartości ujemne = koszt)
 left join lateral (
   select
