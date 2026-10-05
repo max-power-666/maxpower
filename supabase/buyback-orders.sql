@@ -188,6 +188,45 @@ drop trigger if exists buyback_order_intake_require_complete on buyback_order_in
 create trigger buyback_order_intake_require_complete before insert or update on buyback_order_intake
   for each row execute function buyback_order_intake_require_complete();
 
+-- Punktacja naliczana TYLKO RAZ (05.10.2026, na prośbę właściciela): zmiana statusu między statusami punktowanymi
+-- (np. "Ok. Dok." -> "Obsłużona") nie może liczyć paczki ponownie ani przesuwać jej punktów do nowego dnia/miesiąca.
+-- Wiersz (paczka) jest jeden (unique na order_public_id), ale UI przy KAŻDEJ zmianie statusu nadpisywał finished_at
+-- bieżącą chwilą, a podsumowanie Dziś/7/30 dni liczyło po finished_at — więc paczka zaliczona wczoraj pojawiała się
+-- znów "dziś", a punkty za ubiegły miesiąc przeskakiwały do bieżącego. Teraz:
+--   * points_awarded_at = chwila PIERWSZEGO wejścia w status punktowany (obsluzona/kontroferta/ok_dok/problem); ustawia je
+--     wyłącznie trigger (zegar serwera), nikt nie zmienia go ręcznie i nie jest czyszczone przy cofnięciu do "w_trakcie"
+--     (powrót do punktowanego statusu nie daje nowej daty — to ta sama paczka);
+--   * finished_at zostaje na pierwszym zakończeniu, gdy paczka przechodzi między statusami zakończenia; czyści je tylko
+--     powrót do "w_trakcie" (jak dotąd), a "Czas obsługi" liczy się do pierwszego zakończenia.
+-- Podsumowanie punktów liczy po points_awarded_at.
+alter table buyback_order_intake add column if not exists points_awarded_at timestamptz;
+update buyback_order_intake set points_awarded_at = finished_at
+  where points_awarded_at is null and finished_at is not null and status in ('obsluzona', 'kontroferta', 'ok_dok', 'problem');
+create index if not exists buyback_order_intake_awarded_idx on buyback_order_intake (points_awarded_at desc);
+
+create or replace function buyback_order_intake_points_once() returns trigger
+language plpgsql as $$
+begin
+  if tg_op = 'INSERT' then
+    new.points_awarded_at := case when new.status in ('obsluzona', 'kontroferta', 'ok_dok', 'problem') then now() else null end;
+  else
+    if auth.role() = 'authenticated' then
+      new.points_awarded_at := old.points_awarded_at; -- zalogowani nie zmieniają daty zaliczenia (SQL Editor/serwer mogą, np. backfill poniżej)
+    end if;
+    if new.points_awarded_at is null and new.status in ('obsluzona', 'kontroferta', 'ok_dok', 'problem') then
+      new.points_awarded_at := now();
+    end if;
+    -- pierwsze zakończenie zostaje; zmiana między statusami zakończenia nie przesuwa daty
+    if old.finished_at is not null and new.status <> 'w_trakcie' then
+      new.finished_at := old.finished_at;
+    end if;
+  end if;
+  return new;
+end $$;
+drop trigger if exists buyback_order_intake_points_once on buyback_order_intake;
+create trigger buyback_order_intake_points_once before insert or update on buyback_order_intake
+  for each row execute function buyback_order_intake_points_once();
+
 alter table buyback_order_intake enable row level security;
 
 drop policy if exists "authenticated read buyback_order_intake" on buyback_order_intake;

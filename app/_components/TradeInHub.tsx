@@ -221,14 +221,14 @@ function IntakeView({
       listQuery = search
         ? listQuery.or(`order_public_id.ilike.%${escapeLike(search)}%,serial_number.ilike.%${escapeLike(search)}%`).limit(200)
         : listQuery.limit(50);
-      const [{ data: rangeData, error: rangeErr }, { data: listData, error: listErr }] = await Promise.all([
-        supabase
-          .from("buyback_order_intake")
-          .select("entered_by_email, points")
-          .in("status", POINTS_STATUSES)
-          .gte("finished_at", rangeStart(interval)),
-        listQuery,
-      ]);
+      // Punkty liczymy po points_awarded_at (pierwsze zaliczenie paczki, ustawiane triggerem w bazie) — zmiana statusu między statusami
+      // punktowanymi nie liczy paczki ponownie ani nie przesuwa jej do innego dnia. Przed uruchomieniem aktualizacji buyback-orders.sql
+      // kolumny jeszcze nie ma — wtedy awaryjnie po finished_at (stare zachowanie), żeby podsumowanie nie zniknęło.
+      const rangeQuery = (col: string) =>
+        supabase.from("buyback_order_intake").select("entered_by_email, points").in("status", POINTS_STATUSES).gte(col, rangeStart(interval));
+      const [rangeRes, { data: listData, error: listErr }] = await Promise.all([rangeQuery("points_awarded_at"), listQuery]);
+      let { data: rangeData, error: rangeErr } = rangeRes;
+      if (rangeErr && rangeErr.code === "42703") ({ data: rangeData, error: rangeErr } = await rangeQuery("finished_at"));
       if (rangeErr) throw rangeErr;
       if (listErr) throw listErr;
       setRangeRows(rangeData || []);

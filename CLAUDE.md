@@ -308,7 +308,10 @@ dostaje `members` z `page.tsx` (do skróconych imion).
   `counter_offer_reasons` na poziomie zamówienia, ale świadomie z nią nie integrujemy — to był jawny wybór
   przy dodawaniu statusu, nie przeoczenie). "Ok. Dok." oznacza paczkę z kompletną, poprawną dokumentacją
   (potwierdzone przy dodawaniu tej funkcji, że ma wymagać tego samego kompletu numer seryjny/SKU/pady co
-  "Obsłużona" i "Kontroferta" — nie osobny, luźniejszy warunek). Numer przesyłki służy tylko do
+  "Obsłużona" i "Kontroferta" — nie osobny, luźniejszy warunek). **Punktacja liczona TYLKO RAZ (05.10.2026, na prośbę właściciela — "zmiana statusu nie może naliczać punktów kilka razy, np. Ok. Dok. -> punkty, potem Obsłużona -> punkty"):** paczka to jeden wiersz (unique na `order_public_id`), więc punkty nigdy nie sumowały się podwójnie, ale UI przy KAŻDEJ zmianie statusu nadpisywał `finished_at` bieżącą chwilą, a podsumowanie Dziś/7/30 liczyło po `finished_at` — paczka zaliczona wczoraj pojawiała się znów "dziś", a punkty z ubiegłego miesiąca przeskakiwały do bieżącego.
+Teraz kolumna `points_awarded_at` (chwila PIERWSZEGO wejścia w status punktowany: obsłużona/kontroferta/ok. dok./problem) ustawiana wyłącznie triggerem `buyback_order_intake_points_once` (zegar serwera; zalogowani nie zmieniają jej ręcznie, nie czyści jej cofnięcie do "W trakcie" — powrót do punktowanego statusu nie daje nowej daty); `finished_at` też zostaje na pierwszym zakończeniu przy przejściach między statusami zakończenia
+(czyści je tylko powrót do "W trakcie", a "Czas obsługi" liczy do pierwszego zakończenia). Podsumowanie punktów (`IntakeView` w `TradeInHub.tsx`) liczy po `points_awarded_at` (przed uruchomieniem `buyback-orders.sql` awaryjnie po `finished_at`). Wiersze sprzed zmiany dostały `points_awarded_at = finished_at` (ich pierwotna data zaliczenia, jeśli były już przestawiane, jest nieodtwarzalna — przyjmujemy ostatnią zmianę statusu). Punkty za paczkę nadal liczą się tylko dopóki status jest punktowany.
+Numer przesyłki służy tylko do
   znalezienia zamówienia przy rozpoczynaniu (w liście nie ma kolumny przesyłki; jest na karcie).
   **Lista "Ostatnie paczki" pokazuje bez wyszukiwania tylko najświeższe 50 wpisów** (`.limit(50)`, bez pełnej
   paginacji jak w Raw data — świadomie, to lista roboczo-przeglądowa, nie archiwum); wyszukiwarka nad listą
