@@ -151,7 +151,7 @@ export default function MarginView({ session, members }: { session: Session; mem
           )}
           <div className="text-[11px] text-inksoft mt-1">
             Prowizja szacowana wg reguł (sprawdzone na zamówieniach z faktur): <span className="font-semibold">konsole do FR/DE/ES/IT — 6%</span> (program Accelerator, −5 pkt proc., 15.08–31.12.2026),
-            konsole do pozostałych krajów 11%, akcesoria (pady) 20%, pozostałe produkty 11%. refurbed i Octopia — prowizja wprost z danych zamówienia. Średnie z ostatnich 8 tygodni faktur; wgrywaj kolejne co tydzień.
+            <span className="font-semibold">smartwatche (nie Apple) do FR/DE/ES/IT — 0%</span> (1.09–30.11.2026), konsole do pozostałych krajów 11%, akcesoria (pady) 20%, pozostałe produkty (w tym Apple Watch) 11%. refurbed i Octopia — prowizja wprost z danych zamówienia. Średnie z ostatnich 8 tygodni faktur; wgrywaj kolejne co tydzień.
           </div>
         </div>
         <div className="shrink-0">
