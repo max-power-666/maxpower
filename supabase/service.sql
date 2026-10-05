@@ -91,6 +91,34 @@ drop trigger if exists service_log_require_device_ref_trg on service_log;
 create trigger service_log_require_device_ref_trg before insert on service_log
   for each row execute function service_log_require_device_ref();
 
+
+-- Punktacja naliczana TYLKO RAZ (05.10.2026, tak jak w Trade-in — patrz buyback-orders.sql): `points_awarded_at` = chwila PIERWSZEGO wejścia w status
+-- "naprawiony", ustawiana wyłącznie triggerem (zegar serwera). Zmiana statusu tam i z powrotem (np. naprawiony -> inny -> naprawiony) nie przesuwa
+-- punktów do nowego dnia/miesiąca; podsumowanie Dziś/7/30 dni liczy po tej dacie, nie po finished_at (które UI ustawia przy każdej zmianie statusu).
+-- Zalogowani nie zmieniają tej daty (SQL Editor/serwer mogą — np. backfill poniżej).
+alter table service_log add column if not exists points_awarded_at timestamptz;
+update service_log set points_awarded_at = finished_at where points_awarded_at is null and finished_at is not null and status = 'naprawiony';
+create index if not exists service_log_awarded_idx on service_log (points_awarded_at desc);
+
+create or replace function service_log_points_once() returns trigger
+language plpgsql as $$
+begin
+  if tg_op = 'INSERT' then
+    new.points_awarded_at := case when new.status = 'naprawiony' then now() else null end;
+  else
+    if auth.role() = 'authenticated' then
+      new.points_awarded_at := old.points_awarded_at;
+    end if;
+    if new.points_awarded_at is null and new.status = 'naprawiony' then
+      new.points_awarded_at := now();
+    end if;
+  end if;
+  return new;
+end $$;
+drop trigger if exists service_log_points_once on service_log;
+create trigger service_log_points_once before insert or update on service_log
+  for each row execute function service_log_points_once();
+
 alter table service_log enable row level security;
 
 drop policy if exists "authenticated read service_log" on service_log;

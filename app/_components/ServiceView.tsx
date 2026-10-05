@@ -113,15 +113,14 @@ export default function ServiceView({
     setLoading(true);
     setError("");
     try {
-      const [{ data: rangeData, error: rangeErr }, { data: recentData, error: recentErr }] = await Promise.all([
-        (() => {
-          const q = supabase
-            .from("service_log")
-            .select("employee_email, points")
-            .eq("status", "naprawiony")
-            .gte("finished_at", rangeStart(interval));
-          return ownOnly ? q.eq("employee_user_id", session.user.id) : q;
-        })(),
+      // Punkty po points_awarded_at (pierwsze zaliczenie, trigger w bazie) — zmiana statusu nie przesuwa naprawy do innego dnia. Przed uruchomieniem
+      // aktualizacji service.sql kolumny nie ma — wtedy awaryjnie po finished_at (stare zachowanie).
+      const rangeQuery = (col: string) => {
+        const q = supabase.from("service_log").select("employee_email, points").eq("status", "naprawiony").gte(col, rangeStart(interval));
+        return ownOnly ? q.eq("employee_user_id", session.user.id) : q;
+      };
+      const [rangeRes, { data: recentData, error: recentErr }] = await Promise.all([
+        rangeQuery("points_awarded_at"),
         (() => {
           let q = supabase
             .from("service_log")
@@ -132,6 +131,8 @@ export default function ServiceView({
           return q.order("started_at", { ascending: false }).limit(search ? 200 : 50);
         })(),
       ]);
+      let { data: rangeData, error: rangeErr } = rangeRes;
+      if (rangeErr && rangeErr.code === "42703") ({ data: rangeData, error: rangeErr } = await rangeQuery("finished_at"));
       if (rangeErr) throw rangeErr;
       if (recentErr) throw recentErr;
       setRangeRows(rangeData || []);

@@ -65,6 +65,34 @@ create index if not exists test_log_employee_idx on test_log (employee_user_id, 
 create index if not exists test_log_started_idx on test_log (started_at desc);
 create index if not exists test_log_finished_idx on test_log (finished_at desc);
 
+
+-- Punktacja naliczana TYLKO RAZ (05.10.2026, tak jak w Trade-in — patrz buyback-orders.sql): `points_awarded_at` = chwila PIERWSZEGO wejścia w status
+-- "przetestowane", ustawiana wyłącznie triggerem (zegar serwera). Zmiana statusu tam i z powrotem (np. przetestowane -> inny -> przetestowane) nie przesuwa
+-- punktów do nowego dnia/miesiąca; podsumowanie Dziś/7/30 dni liczy po tej dacie, nie po finished_at (które UI ustawia przy każdej zmianie statusu).
+-- Zalogowani nie zmieniają tej daty (SQL Editor/serwer mogą — np. backfill poniżej).
+alter table test_log add column if not exists points_awarded_at timestamptz;
+update test_log set points_awarded_at = finished_at where points_awarded_at is null and finished_at is not null and status = 'przetestowane';
+create index if not exists test_log_awarded_idx on test_log (points_awarded_at desc);
+
+create or replace function test_log_points_once() returns trigger
+language plpgsql as $$
+begin
+  if tg_op = 'INSERT' then
+    new.points_awarded_at := case when new.status = 'przetestowane' then now() else null end;
+  else
+    if auth.role() = 'authenticated' then
+      new.points_awarded_at := old.points_awarded_at;
+    end if;
+    if new.points_awarded_at is null and new.status = 'przetestowane' then
+      new.points_awarded_at := now();
+    end if;
+  end if;
+  return new;
+end $$;
+drop trigger if exists test_log_points_once on test_log;
+create trigger test_log_points_once before insert or update on test_log
+  for each row execute function test_log_points_once();
+
 alter table test_log enable row level security;
 
 drop policy if exists "authenticated read test_log" on test_log;

@@ -1184,6 +1184,8 @@ ma gwiazdkę, przycisk "Rozpocznij naprawę" jest zablokowany, dopóki pole jest
 gdy pole niepuste) i da się go później poprawić albo nawet wyczyścić bez blokady — inaczej niż w Testach przed 02.10.2026, gdzie
 numer seryjny był tylko do odczytu po rozpoczęciu testu (dziś w Testach też jest edytowalny). Dzięki temu stare wpisy sprzed tej zmiany (z pustym
 `device_ref`) nadal da się normalnie edytować (status, uwagi, części) — trigger sprawdza tylko moment startu.
+**Punktacja tylko raz (05.10.2026, ten sam mechanizm co w Trade-in):** `service_log.points_awarded_at` = chwila PIERWSZEGO wejścia w status "naprawiony", ustawiana triggerem `service_log_points_once` (zalogowani nie zmieniają jej); podsumowanie Dziś/7/30 dni liczy po niej, nie po `finished_at` (które UI ustawia przy każdej zmianie statusu) — naprawiony -> uszkodzony/w naprawie -> naprawiony nie przesuwa punktów do nowego dnia/miesiąca
+(przed uruchomieniem `service.sql` awaryjnie po `finished_at`). Wiersze sprzed zmiany dostały datę z `finished_at`. W przeciwieństwie do Trade-in `finished_at` NIE jest zamrażane (naprawa "uszkodzona", potem naprawiona ma mieć czas do ostatniego zakończenia).
 **Kolumna "Części"** (30.09.2026, `part_serials text[]`) — numery seryjne części wykorzystanych w naprawie,
 dowolna liczba (często zero, czasem kilka). W odróżnieniu od Padów w Trade-in (pole "ilość" generuje tyle
 slotów) tu wprost przyciski **+/- przy każdym polu** (`PartsCell.tsx`, nowy współdzielony komponent): "+"
@@ -1230,6 +1232,7 @@ edytowalne w dowolnym momencie przez cały cykl życia testu, **całkowicie niez
 przetestowane / przerwany, który dalej sam rządzi punktami i unikalnością aktywnego wpisu) — np. wpis może być
 "przetestowane" + "RMA" naraz, to nie sprzeczność. Żadne z tych dwóch pól nie jest wymagane do żadnego
 statusu — czysto informacyjne, podobnie jak "Części" w Serwisie.
+**Punktacja tylko raz (05.10.2026):** `test_log.points_awarded_at` = chwila PIERWSZEGO wejścia w "przetestowane" (trigger `test_log_points_once`, niezmienne dla zalogowanych); podsumowanie liczy po niej (przed uruchomieniem `tests.sql` awaryjnie po `finished_at`), więc przetestowane -> przerwany -> przetestowane nie przesuwa punktów do nowego dnia/miesiąca. Kolejny, osobny test tego samego urządzenia (nowy wiersz) nadal liczy się jako nowa praca.
 **Kolumna "SKU"** (02.10.2026, `test_log.sku`, nullable tekst, edytowalna w wierszu przez `InlineEditCell`, zaraz po
 Numerze seryjnym) — ręcznie wpisywana, jak SKU w Trade-in; nic jej nie waliduje i nie wypełnia automatycznie.
 **Numer seryjny jest teraz edytowalny w wierszu** (02.10.2026, wcześniej tylko do odczytu po rozpoczęciu testu —

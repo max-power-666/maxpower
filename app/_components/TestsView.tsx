@@ -90,18 +90,19 @@ export default function TestsView({
     setLoading(true);
     setError("");
     try {
-      const [{ data: rangeData, error: rangeErr }, { data: recentData, error: recentErr }] = await Promise.all([
-        supabase
-          .from("test_log")
-          .select("employee_email, points")
-          .eq("status", "przetestowane")
-          .gte("finished_at", rangeStart(interval)),
+      // Punkty po points_awarded_at (pierwsze zaliczenie, trigger w bazie) — zmiana statusu nie przesuwa testu do innego dnia. Przed uruchomieniem
+      // aktualizacji tests.sql kolumny nie ma — wtedy awaryjnie po finished_at (stare zachowanie).
+      const rangeQuery = (col: string) => supabase.from("test_log").select("employee_email, points").eq("status", "przetestowane").gte(col, rangeStart(interval));
+      const [rangeRes, { data: recentData, error: recentErr }] = await Promise.all([
+        rangeQuery("points_awarded_at"),
         supabase
           .from("test_log")
           .select("id, employee_email, serial_number, sku, status, test_kind, result, notes, started_at, finished_at, points")
           .order("started_at", { ascending: false })
           .limit(50),
       ]);
+      let { data: rangeData, error: rangeErr } = rangeRes;
+      if (rangeErr && rangeErr.code === "42703") ({ data: rangeData, error: rangeErr } = await rangeQuery("finished_at"));
       if (rangeErr) throw rangeErr;
       if (recentErr) throw recentErr;
       setRangeRows(rangeData || []);
