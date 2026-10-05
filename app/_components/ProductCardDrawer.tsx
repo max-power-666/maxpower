@@ -7,7 +7,7 @@ import { escapeLike } from "@/lib/search";
 import { computeTradeInCosts, PCC_RATE, PCC_THRESHOLD_PLN } from "@/lib/buybackCosts";
 import { rateBeforeDate, warsawDate, type NbpRate } from "@/lib/nbp";
 import { TRADEIN_PAID_STATUSES } from "@/lib/stockCosts";
-import { SERVICE_STATUSES, SERVICE_TASKS, TEST_STATUSES, labelFor } from "@/lib/workLog";
+import { SERVICE_STATUSES, SERVICE_TASKS, TEST_STATUSES, labelFor, productStatusLabel } from "@/lib/workLog";
 
 // Karta produktu po numerze seryjnym. Nie ma własnej tabeli — składa się z tego, co system już wie
 // o tym numerze: stan z Fakturowni, testy (test_log), naprawy (service_log) i obsługa paczki
@@ -24,6 +24,9 @@ type StockRow = {
   sku: string | null;
   sku_category: string | null;
   sku_class: string | null;
+  product_status_source?: string | null;
+  product_status?: string | null;
+  product_status_at?: string | null;
 };
 type TestRow = { employee_email: string | null; status: string; notes: string | null; started_at: string; finished_at: string | null };
 type ServiceRow = {
@@ -118,10 +121,10 @@ export default function ProductCardDrawer({
       setError("");
       try {
         const pattern = escapeLike(serial.trim());
-        const [stockRes, testRes, serviceRes, intakeRes] = await Promise.all([
+        let [stockRes, testRes, serviceRes, intakeRes] = await Promise.all([
           supabase
             .from("fakturownia_stock_with_sku")
-            .select("name, category_name, description, purchase_price_gross, product_created_at, vat, sku, sku_category, sku_class")
+            .select("name, category_name, description, purchase_price_gross, product_created_at, vat, sku, sku_category, sku_class, product_status_source, product_status, product_status_at")
             .ilike("name", pattern),
           supabase
             .from("test_log")
@@ -133,6 +136,13 @@ export default function ProductCardDrawer({
             .ilike("device_ref", pattern),
           supabase.from("buyback_order_intake").select("order_public_id, history").ilike("serial_number", pattern),
         ]);
+        // Kolumn statusu produktu (inventory.sql, 05.10.2026) może jeszcze nie być w widoku — wtedy odczyt bez nich, żeby karta działała.
+        if (stockRes.error && stockRes.error.code === "42703") {
+          stockRes = (await supabase
+            .from("fakturownia_stock_with_sku")
+            .select("name, category_name, description, purchase_price_gross, product_created_at, vat, sku, sku_category, sku_class")
+            .ilike("name", pattern)) as unknown as typeof stockRes;
+        }
         for (const r of [stockRes, testRes, serviceRes, intakeRes]) if (r.error) throw r.error;
 
         const stockRows = (stockRes.data as StockRow[]) || [];
@@ -236,6 +246,7 @@ export default function ProductCardDrawer({
                     <Row label="Cena zakupu" value={fmtMoney(s.purchase_price_gross, "zł")} />
                     <Row label={`PCC (${Math.round(PCC_RATE * 100)}% od wartości > ${PCC_THRESHOLD_PLN.toLocaleString("pl-PL")} zł)`} value={pccText(s.description)} />
                     <Row label="VAT" value={s.vat} />
+                    <Row label="Status produktu" value={productStatusLabel(s.product_status_source, s.product_status)} />
                     <Row label="Dodano" value={s.product_created_at ? fmtDateTime(s.product_created_at) : null} />
                   </div>
                 ))}

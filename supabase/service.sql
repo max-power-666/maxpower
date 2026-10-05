@@ -119,6 +119,28 @@ drop trigger if exists service_log_points_once on service_log;
 create trigger service_log_points_once before insert or update on service_log
   for each row execute function service_log_points_once();
 
+-- Status produktu w Magazynie (05.10.2026): `status_changed_at` = chwila OSTATNIEJ zmiany statusu tego wpisu (ustawia trigger, zegar serwera). Widok magazynowy
+-- (inventory.sql, product_status_for) bierze po numerze seryjnym najświeższy status spośród Serwisu, Testów i Trade-in. Wiersze sprzed zmiany: najlepsze
+-- dostępne przybliżenie (coalesce(finished_at, paused_at, started_at)).
+alter table service_log add column if not exists status_changed_at timestamptz;
+update service_log set status_changed_at = coalesce(finished_at, paused_at, started_at) where status_changed_at is null;
+
+create or replace function service_log_status_changed() returns trigger
+language plpgsql as $$
+begin
+  if tg_op = 'INSERT' then
+    new.status_changed_at := coalesce(new.status_changed_at, now());
+  elsif new.status is distinct from old.status then
+    new.status_changed_at := now();
+  elsif old.status_changed_at is not null then
+    new.status_changed_at := old.status_changed_at;
+  end if;
+  return new;
+end $$;
+drop trigger if exists service_log_status_changed on service_log;
+create trigger service_log_status_changed before insert or update on service_log
+  for each row execute function service_log_status_changed();
+
 alter table service_log enable row level security;
 
 drop policy if exists "authenticated read service_log" on service_log;

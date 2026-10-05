@@ -36,10 +36,35 @@ create index if not exists buyback_order_intake_serial_norm_idx on buyback_order
 -- sku_category (02.10.2026) — "Kategoria z SKU" = pierwszy człon SKU przed pierwszym myślnikiem (XSX-1TB-BK-A -> XSX,
 -- PS4S-1TB-BK-AB -> PS4S, NS-32-V1-D -> NS); SKU bez myślnika -> cała wartość; brak SKU -> null. Kolumna dopisana NA KOŃCU
 -- widoku (create or replace view pozwala tylko dopisywać kolumny na końcu).
+-- Status produktu (05.10.2026, na prośbę właściciela): OSTATNI status ustawiony w Serwisie (kolumna Status), Testach (kolumna WYNIK) albo Trade-in (kolumna Status)
+-- dla danego numeru seryjnego (bez rozróżniania wielkości liter). Najświeższy wg chwili zmiany (status_changed_at / result_changed_at); zwraca źródło
+-- ('serwis' | 'testy' | 'trade_in'), klucz statusu/wyniku i chwilę zmiany. Test bez wyniku nie daje statusu.
+create index if not exists service_log_device_lower_idx on service_log (lower(btrim(device_ref)));
+create index if not exists test_log_serial_lower_idx on test_log (lower(btrim(serial_number)));
+create index if not exists buyback_order_intake_serial_lower_idx on buyback_order_intake (lower(btrim(serial_number)));
+
+create or replace function product_status_for(p_serial text)
+returns table (source text, status text, at timestamptz)
+language sql stable as $$
+  select x.source, x.status, x.at
+  from (
+    select 'serwis'::text as source, s.status, s.status_changed_at as at from service_log s where lower(btrim(s.device_ref)) = lower(btrim(p_serial))
+    union all
+    select 'testy', t.result, t.result_changed_at from test_log t where lower(btrim(t.serial_number)) = lower(btrim(p_serial)) and t.result is not null
+    union all
+    select 'trade_in', i.status, i.status_changed_at from buyback_order_intake i where lower(btrim(i.serial_number)) = lower(btrim(p_serial))
+  ) x
+  where x.at is not null
+  order by x.at desc
+  limit 1
+$$;
+grant execute on function product_status_for(text) to authenticated;
+
 create or replace view fakturownia_stock_with_sku as
 select v.*,
        nullif(btrim(split_part(v.sku, '-', 1)), '') as sku_category,
-       case when v.sku ~ '-[A-Za-z]+$' then substring(v.sku from '[A-Za-z]+$') end as sku_class
+       case when v.sku ~ '-[A-Za-z]+$' then substring(v.sku from '[A-Za-z]+$') end as sku_class,
+       ps.source as product_status_source, ps.status as product_status, ps.at as product_status_at
 from (
 select
   c.id,
@@ -69,7 +94,8 @@ select
     select b.sku from serial_skus b where lower(btrim(b.serial_number)) = lower(btrim(c.name)) limit 1
   )) as sku
 from fakturownia_stock_cache c
-) v;
+) v
+left join lateral product_status_for(v.name) ps on true;
 
 -- Widok czyta tabele czytelne dla każdego zalogowanego — nie dokłada nowej ekspozycji danych; grant jawny, bo PostgREST
 -- eksponuje widoki tak jak tabele.

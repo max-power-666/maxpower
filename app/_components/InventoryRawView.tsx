@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { escapeLike } from "@/lib/search";
 import type { MemberLite } from "@/lib/displayName";
 import ProductCardDrawer from "./ProductCardDrawer";
+import { PRODUCT_STATUS_SOURCES, productStatusParts } from "@/lib/workLog";
 
 // Lista sztuk ze stanem = 1 z cache Fakturowni (fakturownia_stock_cache), strona po stronie,
 // z wyszukiwaniem po numerze seryjnym. W Fakturowni numer seryjny to nazwa produktu, a opis
@@ -22,11 +23,28 @@ type Row = {
   sku_category: string | null;
   sku_class: string | null;
   stock_level?: number | string | null;
+  product_status_source?: string | null;
+  product_status?: string | null;
+  product_status_at?: string | null;
 };
 
 const PAGE_SIZES = [25, 50, 100];
 const NO_SKU = "__bez_sku__"; // w filtrze kategorii: sztuki bez SKU (brak kategorii z SKU)
 const NO_CLASS = "__bez_klasy__"; // w filtrze klasy: sztuki bez klasy
+const NO_STATUS = "__bez_statusu__"; // w filtrze statusu produktu: sztuki bez żadnego statusu z Serwisu/Testów/Trade-in
+const STATUS_OPTIONS = (Object.keys(PRODUCT_STATUS_SOURCES) as (keyof typeof PRODUCT_STATUS_SOURCES)[]).flatMap((src) =>
+  PRODUCT_STATUS_SOURCES[src].statuses.map((s) => ({ value: `${src}:${s.key}`, label: `${PRODUCT_STATUS_SOURCES[src].label}: ${s.label}` }))
+);
+// Filtr statusu produktu na zapytaniu PostgREST (widok z kolumnami product_status_source / product_status).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function applyStatusFilter<T extends { is: (c: string, v: null) => T; eq: (c: string, v: string) => T }>(q: T, f: string): T {
+  if (f === NO_STATUS) return q.is("product_status", null);
+  if (f) {
+    const [src, st] = f.split(":");
+    return q.eq("product_status_source", src).eq("product_status", st);
+  }
+  return q;
+}
 
 function fmtDate(iso: string | null) {
   if (!iso) return "—";
@@ -51,6 +69,10 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
   // Filtr "Klasa" (lista rozwijana), łączny z kategorią: oba działają jednocześnie (AND), a liczniki w każdej liście
   // uwzględniają wybór w drugiej (np. po wybraniu kategorii NS lista klas pokazuje tylko klasy sztuk z NS).
   const [skuClass, setSkuClass] = useState("");
+  // Filtr "Status produktu" (ostatni status z Serwisu/Testów/Trade-in, inventory.sql, 05.10.2026): "" = wszystkie, NO_STATUS = bez statusu, inaczej "źródło:status".
+  // hasStatusCols = false, gdy widoki nie mają jeszcze tych kolumn (nie uruchomiono inventory.sql/margin.sql) — wtedy kolumna i filtr znikają, lista działa.
+  const [statusFilter, setStatusFilter] = useState("");
+  const [hasStatusCols, setHasStatusCols] = useState(true);
   // Podsumowanie CAŁEGO wyniku filtra (nie tylko bieżącej strony): liczba sztuk, suma i średnia cena zakupu.
   const [summary, setSummary] = useState<{ count: number; sum: number } | null>(null);
   // Zakres listy: "Dostępne" (stan 1, fakturownia_stock_with_sku — jak dotąd) albo "Wszystkie" (też sprzedane, od 01.01.2025 + wszystkie dostępne,
@@ -157,6 +179,7 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
         else if (skuCategory) q = q.eq("sku_category", skuCategory);
         if (skuClass === NO_CLASS) q = q.is("sku_class", null);
         else if (skuClass) q = q.eq("sku_class", skuClass);
+        if (hasStatusCols) q = applyStatusFilter(q, statusFilter);
         const { data, error: err } = await q.order("id").range(from, from + PAGE - 1);
         if (err) {
           if (!cancelled) setSummary(null);
@@ -173,7 +196,7 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
     return () => {
       cancelled = true;
     };
-  }, [scope, search, skuCategory, skuClass, reloadTick, reloadKey]);
+  }, [scope, search, skuCategory, skuClass, statusFilter, hasStatusCols, reloadTick, reloadKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -183,12 +206,13 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
       const from = (page - 1) * pageSize;
       let q = supabase
         .from(VIEW)
-        .select(`id, name, category_name, description, purchase_price_gross, product_created_at, vat, sku, sku_category, sku_class${scope === "all" ? ", stock_level" : ""}`, { count: "exact" });
+        .select(`id, name, category_name, description, purchase_price_gross, product_created_at, vat, sku, sku_category, sku_class${scope === "all" ? ", stock_level" : ""}${hasStatusCols ? ", product_status_source, product_status, product_status_at" : ""}`, { count: "exact" });
       if (search) q = q.ilike("name", `%${escapeLike(search)}%`);
       if (skuCategory === NO_SKU) q = q.is("sku_category", null);
       else if (skuCategory) q = q.eq("sku_category", skuCategory);
       if (skuClass === NO_CLASS) q = q.is("sku_class", null);
       else if (skuClass) q = q.eq("sku_class", skuClass);
+      if (hasStatusCols) q = applyStatusFilter(q, statusFilter);
       const { data, error: err, count } = await q
         .order("product_created_at", { ascending: false, nullsFirst: false })
         .order("id", { ascending: false })
@@ -196,7 +220,10 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
       if (cancelled) return;
       if (err) {
         // strona poza zakresem (np. po synchronizacji ubyło wierszy) — wróć na początek
-        if (err.code === "PGRST103" && page > 1) setPage(1);
+        if (err.code === "42703" && hasStatusCols) {
+          setHasStatusCols(false);
+          setStatusFilter("");
+        } else if (err.code === "PGRST103" && page > 1) setPage(1);
         else setError(`Nie udało się wczytać listy: ${err.message}`);
       } else {
         setRows((data as unknown as Row[]) || []);
@@ -207,7 +234,7 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
     return () => {
       cancelled = true;
     };
-  }, [scope, page, pageSize, search, skuCategory, skuClass, reloadTick, reloadKey]);
+  }, [scope, page, pageSize, search, skuCategory, skuClass, statusFilter, hasStatusCols, reloadTick, reloadKey]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const needsBackfill = !search && rows.length > 0 && rows.every((r) => r.name === null);
@@ -273,6 +300,25 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
               <option key={o.name} value={o.name}>{o.name} ({o.count})</option>
             ))}
           </select>
+          {hasStatusCols && (
+            <>
+              <label className="text-xs text-inksoft">Status produktu</label>
+              <select
+                value={statusFilter}
+                onChange={(e) => {
+                  setStatusFilter(e.target.value);
+                  setPage(1);
+                }}
+                className="border border-line bg-white px-2 py-1.5 rounded text-sm font-semibold"
+              >
+                <option value="">Wszystkie</option>
+                <option value={NO_STATUS}>Bez statusu</option>
+                {STATUS_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </>
+          )}
           <label className="text-xs text-inksoft">Pokaż</label>
           <select
             value={pageSize}
@@ -327,6 +373,7 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
               <th className="p-3">Zamówienie</th>
               <th className="p-3 text-right">Cena zakupu</th>
               <th className="p-3">VAT</th>
+              {hasStatusCols && <th className="p-3">Status produktu</th>}
               <th className="p-3">Dodano</th>
               {scope === "all" && <th className="p-3">Stan</th>}
             </tr>
@@ -334,7 +381,7 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
           <tbody>
             {!loading && rows.length === 0 && (
               <tr>
-                <td colSpan={scope === "all" ? 10 : 9} className="p-6 text-center text-inksoft text-sm">
+                <td colSpan={(scope === "all" ? 10 : 9) + (hasStatusCols ? 1 : 0)} className="p-6 text-center text-inksoft text-sm">
                   {search || skuCategory || skuClass ? "Nic nie znaleziono dla tych kryteriów." : "Brak produktów — kliknij „Odśwież”, żeby pobrać dane z Fakturowni."}
                 </td>
               </tr>
@@ -355,6 +402,18 @@ export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey
                 <td className="p-3 font-mono text-xs">{r.description || "—"}</td>
                 <td className="p-3 text-right font-mono">{fmtPLN(r.purchase_price_gross)}</td>
                 <td className="p-3 text-xs">{r.vat || "—"}</td>
+                {hasStatusCols && (
+                  <td className="p-3 text-xs whitespace-nowrap">
+                    {r.product_status ? (
+                      <span title={r.product_status_at ? `ostatnia zmiana: ${new Date(r.product_status_at).toLocaleString("pl-PL")}` : undefined}>
+                        <span className="text-inksoft">{productStatusParts(r.product_status_source, r.product_status)?.source}: </span>
+                        <span className="font-semibold">{productStatusParts(r.product_status_source, r.product_status)?.status}</span>
+                      </span>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                )}
                 <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDate(r.product_created_at)}</td>
                 {scope === "all" && (
                   <td className="p-3 text-xs">

@@ -157,7 +157,8 @@ grant select on margin_items to service_role;
 create or replace view fakturownia_products_with_sku as
 select v.*,
        nullif(btrim(split_part(v.sku, '-', 1)), '') as sku_category,
-       case when v.sku ~ '-[A-Za-z]+$' then substring(v.sku from '[A-Za-z]+$') end as sku_class
+       case when v.sku ~ '-[A-Za-z]+$' then substring(v.sku from '[A-Za-z]+$') end as sku_class,
+       ps.source as product_status_source, ps.status as product_status, ps.at as product_status_at
 from (
   select
     p.id,
@@ -189,5 +190,6 @@ from (
     )) as sku
   from fakturownia_purchases p
   left join fakturownia_stock_cache c on c.id = p.id
-) v;
+) v
+left join lateral product_status_for(v.name) ps on true;
 grant select on fakturownia_products_with_sku to authenticated;

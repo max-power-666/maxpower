@@ -97,6 +97,24 @@ export const INTAKE_STATUSES = [
   { key: "problem", label: "Problem" },
 ] as const;
 
+// Status produktu w Magazynie (05.10.2026) — ostatni status z Serwisu (kolumna Status), Testów (kolumna Wynik) albo Trade-in (kolumna Status) (widok: product_status_source / product_status).
+export const PRODUCT_STATUS_SOURCES = {
+  serwis: { label: "Serwis", statuses: SERVICE_STATUSES },
+  testy: { label: "Testy", statuses: TEST_RESULTS }, // w Testach status produktu to kolumna "Wynik", nie status testu
+  trade_in: { label: "Trade-in", statuses: INTAKE_STATUSES },
+} as const;
+export type ProductStatusSource = keyof typeof PRODUCT_STATUS_SOURCES;
+export function productStatusParts(source: string | null | undefined, status: string | null | undefined): { source: string; status: string } | null {
+  if (!source || !status) return null;
+  const src = PRODUCT_STATUS_SOURCES[source as ProductStatusSource];
+  if (!src) return { source, status };
+  return { source: src.label, status: labelFor(src.statuses as readonly { key: string; label: string }[], status) };
+}
+export function productStatusLabel(source: string | null | undefined, status: string | null | undefined): string | null {
+  const p = productStatusParts(source, status);
+  return p ? `${p.source}: ${p.status}` : null;
+}
+
 export function labelFor(list: readonly { key: string; label: string }[], key: string): string {
   return list.find((x) => x.key === key)?.label ?? key;
 }

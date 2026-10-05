@@ -93,6 +93,31 @@ drop trigger if exists test_log_points_once on test_log;
 create trigger test_log_points_once before insert or update on test_log
   for each row execute function test_log_points_once();
 
+-- Status produktu w Magazynie (05.10.2026): w Testach to kolumna "Wynik" (test_log.result: Sprawny/Serwis/RMA/Do poprawy/Outlet), NIE status testu
+-- (w_trakcie/przetestowane/przerwany). `result_changed_at` = chwila ostatniej zmiany wyniku (ustawia trigger, zegar serwera); widok magazynowy
+-- (inventory.sql, product_status_for) bierze po numerze seryjnym najświeższy status spośród Serwisu (status), Testów (wynik) i Trade-in (status).
+-- Wiersze sprzed zmiany: najlepsze dostępne przybliżenie (finished_at albo started_at).
+alter table test_log add column if not exists result_changed_at timestamptz;
+update test_log set result_changed_at = coalesce(finished_at, started_at) where result_changed_at is null and result is not null;
+
+create or replace function test_log_result_changed() returns trigger
+language plpgsql as $$
+begin
+  if tg_op = 'INSERT' then
+    new.result_changed_at := case when new.result is not null then coalesce(new.result_changed_at, now()) else null end;
+  elsif new.result is distinct from old.result then
+    new.result_changed_at := case when new.result is not null then now() else null end;
+  elsif old.result_changed_at is not null then
+    new.result_changed_at := old.result_changed_at;
+  end if;
+  return new;
+end $$;
+drop trigger if exists test_log_status_changed on test_log;
+drop function if exists test_log_status_changed();
+drop trigger if exists test_log_result_changed on test_log;
+create trigger test_log_result_changed before insert or update on test_log
+  for each row execute function test_log_result_changed();
+
 alter table test_log enable row level security;
 
 drop policy if exists "authenticated read test_log" on test_log;
