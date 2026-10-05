@@ -158,7 +158,9 @@ create or replace view fakturownia_products_with_sku as
 select v.*,
        nullif(btrim(split_part(v.sku, '-', 1)), '') as sku_category,
        case when v.sku ~ '-[A-Za-z]+$' then substring(v.sku from '[A-Za-z]+$') end as sku_class,
-       ps.source as product_status_source, ps.status as product_status, ps.at as product_status_at
+       (select ps.source from product_status_for(v.name) ps) as product_status_source,
+       (select ps.status from product_status_for(v.name) ps) as product_status,
+       (select ps.at from product_status_for(v.name) ps) as product_status_at
 from (
   select
     p.id,
@@ -190,6 +192,5 @@ from (
     )) as sku
   from fakturownia_purchases p
   left join fakturownia_stock_cache c on c.id = p.id
-) v
-left join lateral product_status_for(v.name) ps on true;
+) v;
 grant select on fakturownia_products_with_sku to authenticated;

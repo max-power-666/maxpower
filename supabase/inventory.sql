@@ -36,6 +36,8 @@ create index if not exists buyback_order_intake_serial_norm_idx on buyback_order
 -- sku_category (02.10.2026) — "Kategoria z SKU" = pierwszy człon SKU przed pierwszym myślnikiem (XSX-1TB-BK-A -> XSX,
 -- PS4S-1TB-BK-AB -> PS4S, NS-32-V1-D -> NS); SKU bez myślnika -> cała wartość; brak SKU -> null. Kolumna dopisana NA KOŃCU
 -- widoku (create or replace view pozwala tylko dopisywać kolumny na końcu).
+-- Kolumny statusu w widokach to PODZAPYTANIA skalarne (nie LATERAL JOIN): Postgres liczy je dopiero dla wierszy zwróconych na stronie (po sortowaniu i LIMIT)
+-- i pomija w zapytaniu zliczającym — lateral join liczyłby je dla wszystkich ~18 tys. produktów przy każdym wczytaniu listy.
 -- Status produktu (05.10.2026, na prośbę właściciela): OSTATNI status ustawiony w Serwisie (kolumna Status), Testach (kolumna WYNIK) albo Trade-in (kolumna Status)
 -- dla danego numeru seryjnego (bez rozróżniania wielkości liter). Najświeższy wg chwili zmiany (status_changed_at / result_changed_at); zwraca źródło
 -- ('serwis' | 'testy' | 'trade_in'), klucz statusu/wyniku i chwilę zmiany. Test bez wyniku nie daje statusu.
@@ -45,7 +47,10 @@ create index if not exists buyback_order_intake_serial_lower_idx on buyback_orde
 
 create or replace function product_status_for(p_serial text)
 returns table (source text, status text, at timestamptz)
-language sql stable as $$
+-- SECURITY DEFINER (05.10.2026): funkcja wołana z widoku wykonuje się z uprawnieniami WOŁAJĄCEGO, więc dla zalogowanych przechodziła przez RLS trzech tabel
+-- dla każdego wiersza listy (osobno przy każdym z ~18 tys. produktów) i lista Raw data kończyła się "statement timeout". Jako właściciel czyta tabele bez RLS (te same
+-- dane są i tak czytelne dla każdego zalogowanego); zwraca tylko status jednego numeru seryjnego.
+language sql stable security definer set search_path = public as $$
   select x.source, x.status, x.at
   from (
     select 'serwis'::text as source, s.status, s.status_changed_at as at from service_log s where lower(btrim(s.device_ref)) = lower(btrim(p_serial))
@@ -64,7 +69,9 @@ create or replace view fakturownia_stock_with_sku as
 select v.*,
        nullif(btrim(split_part(v.sku, '-', 1)), '') as sku_category,
        case when v.sku ~ '-[A-Za-z]+$' then substring(v.sku from '[A-Za-z]+$') end as sku_class,
-       ps.source as product_status_source, ps.status as product_status, ps.at as product_status_at
+       (select ps.source from product_status_for(v.name) ps) as product_status_source,
+       (select ps.status from product_status_for(v.name) ps) as product_status,
+       (select ps.at from product_status_for(v.name) ps) as product_status_at
 from (
 select
   c.id,
@@ -94,8 +101,7 @@ select
     select b.sku from serial_skus b where lower(btrim(b.serial_number)) = lower(btrim(c.name)) limit 1
   )) as sku
 from fakturownia_stock_cache c
-) v
-left join lateral product_status_for(v.name) ps on true;
+) v;
 
 -- Widok czyta tabele czytelne dla każdego zalogowanego — nie dokłada nowej ekspozycji danych; grant jawny, bo PostgREST
 -- eksponuje widoki tak jak tabele.
