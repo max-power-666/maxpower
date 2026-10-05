@@ -785,7 +785,7 @@ faktycznie rzuca wyjątek przy `require()`, tak jak qz-tray oczekuje. Nie testow
 (brak dostępu do sprzętu w środowisku asystenta) — zweryfikowane budowaniem projektu (`next build`, sukces) i
 testami jednostkowymi (`dhl.test.js`/`shipping.test.js`/`parcel.test.js` w scratchpadzie).
 
-**Test druku (TYMCZASOWY, 02.10.2026)** — ramka "Test druku" w Wysyłce, tuż pod pigułkami trybu druku, z dwoma przyciskami:
+**Test druku (02.10.2026; od 05.10.2026 UKRYTY za pigułką "Test druku" obok "Drukowanie bezpośrednie" — domyślnie schowany, pigułka go pokazuje/chowa)** — ramka "Test druku" w Wysyłce, tuż pod pigułkami trybu druku, z dwoma przyciskami:
 próbna etykieta ZPL 100x150 mm na Zebrę i próbny delivery note (ręcznie składany PDF A4) na drukarkę A4, zawsze
 BEZPOŚREDNIO przez QZ Tray (niezależnie od wybranego trybu), na drukarki z ustawień nadawcy. **Nic nie nadaje w DHL, nic
 nie zapisuje w bazie i nic nie zgłasza do marketplace'u** — to nie "zamówienie testowe", tylko same próbne dokumenty

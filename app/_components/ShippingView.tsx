@@ -134,6 +134,7 @@ export default function ShippingView({
   const [creating, setCreating] = useState(false);
   const [done, setDone] = useState<{ trackingNumber: string; trackingUrl: string | null; price: string; env: string; saved: boolean; labelBase64?: string | null; labelFormat?: string | null; id?: number; error?: string; carrier: Carrier; marketplaceSyncError?: string | null; deliveryNoteUrl?: string | null } | null>(null);
   const [directPrint, setDirectPrint] = useState(false);
+  const [showTestPrint, setShowTestPrint] = useState(false); // panel "Test druku" jest domyślnie ukryty; pokazuje go pigułka obok trybów druku
   const [testPrintMsg, setTestPrintMsg] = useState("");
   const [printBusy, setPrintBusy] = useState(false);
   const requestId = useRef<string>(crypto.randomUUID());
@@ -708,15 +709,25 @@ export default function ShippingView({
             >
               Drukowanie bezpośrednie
             </button>
+            <button
+              onClick={() => setShowTestPrint((v) => !v)}
+              title="Pokaż/ukryj próbny wydruk na drukarki (bez nadawania przesyłki)"
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold border border-dashed ${showTestPrint ? "bg-ink text-paper border-ink" : "bg-white border-line text-inksoft"}`}
+            >
+              Test druku
+            </button>
             {printBusy && <span className="text-xs text-inksoft">drukowanie…</span>}
-          </div>          {/* TYMCZASOWY test druku — do usunięcia po sprawdzeniu drukarek. Nic nie trafia do DHL ani marketplace'u. */}
+          </div>
+          {/* Test druku (ukryty za pigułką "Test druku"). Nic nie trafia do DHL ani marketplace'u. */}
+          {showTestPrint && (
           <div className="border border-dashed border-line bg-white p-3 mb-4 flex flex-wrap items-center gap-3">
-            <span className="text-xs font-semibold text-inksoft">Test druku (tymczasowy):</span>
+            <span className="text-xs font-semibold text-inksoft">Test druku:</span>
             <button onClick={() => testPrint("label")} disabled={printBusy} className={btnGhost}>Drukuj testową etykietę (Zebra)</button>
             <button onClick={() => testPrint("a4")} disabled={printBusy} className={btnGhost}>Drukuj testowy delivery note (A4)</button>
             <span className="text-xs text-inksoft">Wysyła próbny wydruk prosto na drukarki przez QZ Tray — bez nadawania przesyłki i bez marketplace'u.</span>
             {testPrintMsg && <span className="text-xs font-semibold text-teal w-full">{testPrintMsg}</span>}
           </div>
+          )}
           {/* wynik nadania */}
           {done && (
             <div className={`border p-4 mb-6 ${done.saved ? "border-teal bg-tealsoft" : "border-rust bg-rustsoft"}`}>
