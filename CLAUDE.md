@@ -230,6 +230,8 @@ W tabeli Raw data jest też kolumna **"Klasa"** (zaraz po "Kategoria z SKU").
 **Podsumowanie pod tabelą Raw data** (03.10.2026): pasek z liczbą sztuk, sumą cen zakupu i **średnią ceną zakupu** dla CAŁEGO wyniku bieżących filtrów
 (wyszukiwanie + kategoria z SKU + klasa), a nie tylko dla widocznej strony. Liczone w przeglądarce z cen wszystkich pasujących sztuk (osobne zapytanie
 paginowane po 1000, bez agregatów PostgREST), przeliczane tylko przy zmianie filtrów/odświeżeniu — nie przy zmianie strony. Pusty wynik pokazuje "—".
+**VAT "VM" automatycznie dla zakupów z Trade-in (05.10.2026, na prośbę właściciela):** sztuka, której opis w Fakturowni to numer zamówienia skupu BuyBack (`buyback_orders.order_public_id`, po `btrim`), dostaje w widokach `fakturownia_stock_with_sku` i `fakturownia_products_with_sku` (a więc w Magazynie -> Raw data, karcie produktu i filtrze "Wszystkie") VAT **"VM"** = VAT-marża (zakup od osoby prywatnej). Wartość jest WYLICZANA w widoku, nie zapisywana w cache; ręcznie wpisany VAT (`fakturownia_stock_cache.vat`) ma pierwszeństwo, pusty ręczny VAT też daje "VM".
+Sztuki spoza Trade-in (np. faktury "VAT marża" w opisie) nie dostają automatu — ich VAT zostaje do ręcznego uzupełnienia. Wymaga ponownego uruchomienia `inventory.sql` i `margin.sql`.
 **VAT** (`fakturownia_stock_cache.vat`, nullable tekst) ma być wpisywany RĘCZNIE przy dodawaniu produktu do
 magazynu — na razie nic go nie wypełnia (kolumna pokazuje "—"), synchronizacja z Fakturowni go nie rusza. Podsumowanie
 magazynu (kafelki, wykres kołowy) dalej czyta tabelę, nie widok — z wyjątkami: **drugi wykres obok pierwszego** (02.10.2026): oba pierścienie z tabelą mają teraz po pół szerokości
