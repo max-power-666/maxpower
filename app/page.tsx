@@ -28,7 +28,7 @@ import InventoryRawView from "./_components/InventoryRawView";
 import ThemeSwitcher from "./_components/ThemeSwitcher";
 import { displayNameForEmail } from "@/lib/displayName";
 
-const ROLES = ["Admin", "Manager", "Magazyn", "Zamówienia", "Serwis", "Testy", "Bidder", "Trade-in", "Sklep"];
+const ROLES = ["Admin", "Manager", "Magazyn", "Zamówienia", "Serwis", "Kierownik serwisu", "Testy", "Bidder", "Trade-in", "Sklep"];
 
 type ViewKey =
   | "overview" | "inventory" | "sales" | "team" | "service" | "tests" | "tradein" | "orders" | "backlog" | "shipping" | "invoices" | "margin" | "nbp" | "ai" | "rcp" | "returns"
@@ -85,6 +85,8 @@ const ROLE_ACCESS: Record<string, ViewKey[]> = {
   Magazyn: ["inventory", "backlog", "rcp", "returns"],
   Zamówienia: ["sales", "shipping", "invoices", "backlog", "rcp", "returns"],
   Serwis: ["service", "backlog", "rcp", "returns"],
+  // Kierownik serwisu (05.10.2026): te same zakładki co Serwis; w samym Serwisie widzi naprawy wszystkich i może edytować wiersz w KAŻDYM statusie (patrz ServiceView).
+  "Kierownik serwisu": ["service", "backlog", "rcp", "returns"],
   Testy: ["tests", "backlog", "rcp", "returns"],
   Bidder: ["tradein", "backlog", "rcp", "returns"],
   "Trade-in": ["orders", "backlog", "rcp", "returns"],
@@ -647,7 +649,7 @@ export default function Home() {
             />
           )}
 
-          {view === "service" && <ServiceHub session={session} members={members} isAdmin={role === "Admin"} isAdminOrManager={role === "Admin" || role === "Manager"} />}
+          {view === "service" && <ServiceHub session={session} members={members} isAdmin={role === "Admin"} isAdminOrManager={role === "Admin" || role === "Manager"} isServiceLead={role === "Kierownik serwisu"} />}
 
           {view === "tests" && <TestsView session={session} members={members} isAdmin={role === "Admin"} isAdminOrManager={role === "Admin" || role === "Manager"} />}
 

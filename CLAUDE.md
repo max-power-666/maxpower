@@ -42,7 +42,7 @@ numerach seryjnych, wielokanałowa synchronizacja stanów, naprawy, auto-wycena)
 
 ## Zakładki i role
 
-Role: **Admin, Manager, Magazyn, Zamówienia, Serwis, Testy, Bidder, Trade-in**. Rolę nadaje Admin w zakładce Zespół (tam też
+Role: **Admin, Manager, Magazyn, Zamówienia, Serwis, Kierownik serwisu (05.10.2026), Testy, Bidder, Trade-in** (+ Sklep). Rolę nadaje Admin w zakładce Zespół (tam też
 imię i nazwisko — `members.name`). Nowa osoba po pierwszym logowaniu dostaje pusty wiersz
 w `members` i ekran "poproś administratora o rolę" (`NoRoleScreen`); sama roli nie wybiera.
 Rola odświeża się sama po nadaniu/zmianie przez Admina (realtime na `members` — wymaga bloku publikacji z `schema.sql`;
@@ -1211,6 +1211,8 @@ dokłada kolejne puste pole zaraz pod tym, "-" usuwa TO pole; przy zerze częśc
 "+ część". Dodanie/usunięcie pola zapisuje całą tablicę od razu, sama treść pola dopiero przy wyjściu z
 niego/Enterem (`InlineEditCell` per pole, ten sam wzorzec zapisu co reszta kolumn edytowanych w wierszu).
 Nie wymagane do żadnego statusu — czysto informacyjne, nie wpływa na punkty ani na warunek "naprawiony".
+**Rola "Kierownik serwisu" (05.10.2026, na prośbę właściciela):** zakładki jak Serwis (`ROLE_ACCESS`: Serwis, Backlog, RCP, Zwroty). W Serwisie (`isServiceLead` w `ServiceHub`/`ServiceView`) **widzi naprawy wszystkich** (jak Admin/Manager, nie tylko własne) i **edytuje wiersz w KAŻDYM statusie** — numer seryjny, części i uwagi (zwykła blokada "tylko w statusie W naprawie" go nie obejmuje); zmiana statusu dostępna dla wszystkich jak dotąd.
+Nie widzi kolumny "Czas" (tylko Admin/Manager) i nie usuwa wpisów (tylko Admin). Typu czynności nie edytuje nikt (migawka punktów). Rola to zwykły tekst w `members.role` — bez SQL; nadaje ją Admin w Zespół. Tylko UI (RLS `service_log` i tak pozwala każdemu zalogowanemu na update, jak reszta uprawnień w MVP).
 **Każdy widzi tylko własne naprawy** (02.10.2026, na prośbę właściciela) — lista i podsumowanie punktów filtrowane po `employee_user_id = zalogowana osoba`, chyba że to Admin/Manager (widzą wszystkich; `ownOnly = !isAdminOrManager` w `ServiceView.tsx`). **Tylko UI/zapytanie, nie RLS** (zgodnie z resztą uprawnień w projekcie): polityka `select` na `service_log` dalej pozwala każdemu zalogowanemu czytać wszystko, a karta produktu (`ProductCardDrawer`) pokazuje naprawy danego numeru seryjnego niezależnie od autora. **Wyszukiwarka po numerze seryjnym** (02.10.2026) nad listą napraw, po lewej, bez nagłówka "Ostatnie naprawy" (usunięty na prośbę właściciela) — `device_ref ilike` (`escapeLike`, debounce 300 ms, jak w Trade-in); bez niej lista to najświeższe 50 wpisów, przy wyszukiwaniu limit rośnie do 200, żeby trafić we wpis spoza najświeższych.
 
 **Serwis -> Części** (04.10.2026, na prośbę właściciela; `ServiceHub.tsx` z pigułkami Naprawy / Części, `PartsView.tsx`, `supabase/service-parts.sql`, `scripts/import-parts.mjs`) — rejestr części do napraw z ceną zakupu i przypisanym numerem seryjnym/IMEI urządzenia.
