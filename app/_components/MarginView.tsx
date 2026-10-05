@@ -5,6 +5,7 @@ import type { Session } from "@supabase/supabase-js";
 import { MARKETPLACES } from "@/lib/salesOrders";
 import type { MemberLite } from "@/lib/displayName";
 import SalesOrderCard from "./SalesOrderCard";
+import ProductCardDrawer from "./ProductCardDrawer";
 import type { BmRates, MarginResult } from "@/lib/margin";
 
 // Zakładka Marża (03.10.2026, Admin i Manager): lista sprzedanych sztuk z numerem seryjnym i marżą po kosztach. Układ jak lista Zamówień,
@@ -54,6 +55,7 @@ export default function MarginView({ session, members }: { session: Session; mem
   const [uploadMsg, setUploadMsg] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set()); // rozwinięte wiersze (szczegółowe wyliczenie marży)
   const [openOrder, setOpenOrder] = useState<{ marketplace: string; externalId: string } | null>(null);
+  const [openSerial, setOpenSerial] = useState<string | null>(null); // karta produktu po numerze seryjnym
   const fileRef = useRef<HTMLInputElement>(null);
   const seq = useRef(0);
   const auth = { Authorization: `Bearer ${session.access_token}` };
@@ -244,7 +246,9 @@ export default function MarginView({ session, members }: { session: Session; mem
                 <td className="p-3 text-xs font-mono">
                   <button onClick={() => setOpenOrder({ marketplace: r.marketplace, externalId: r.orderId })} className="text-teal hover:underline">{r.orderId}</button>
                 </td>
-                <td className="p-3 font-mono text-xs font-semibold">{r.serial}</td>
+                <td className="p-3 font-mono text-xs font-semibold">
+                  <button onClick={() => setOpenSerial(r.serial)} title="Otwórz kartę produktu" className="text-teal hover:underline">{r.serial}</button>
+                </td>
                 <td className="p-3 font-mono text-xs">{r.sku || "—"}</td>
                 <td className="p-3 text-right font-mono whitespace-nowrap">
                   {fmtPLN(r.salePln)}
@@ -322,6 +326,7 @@ export default function MarginView({ session, members }: { session: Session; mem
         Koszty serwisu = ceny netto części przypisanych do numeru seryjnego (Serwis → Części). Koszty zamówień z wieloma pozycjami dzielone wg ceny pozycji; waluty przeliczone kursem NBP z dnia poprzedniego względem daty zamówienia.
       </p>
 
+      {openSerial && <ProductCardDrawer serial={openSerial} members={members} onClose={() => setOpenSerial(null)} />}
       {openOrder && <SalesOrderCard marketplace={openOrder.marketplace} externalId={openOrder.externalId} session={session} members={members} onClose={() => setOpenOrder(null)} />}
     </div>
   );

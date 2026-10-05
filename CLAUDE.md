@@ -1117,7 +1117,7 @@ asystenta) — pętla zweryfikowana na atrapie `fetch`, warstwa SQL w PGlite (od
 
 **Marża** (zakładka `margin`, `MarginView.tsx`, `lib/margin.ts`, `margin.sql`, `app/api/margin/{list,summary,bm-invoice}`; 03.10.2026, na prośbę właściciela; Admin i Manager).
 Lista SPRZEDANYCH sztuk z wprowadzonym numerem seryjnym/IMEI (jedna pozycja zamówienia = jeden wiersz, jak w Zamówieniach, ale kolumny finansowe) z marżą po kosztach:
-Data, Marketplace, Nr zamówienia (link do karty), Numer seryjny, SKU, Cena sprzedaży (PLN + oryginał), Cena zakupu, VAT od marży, Wysyłka, Koszty dodatkowe, Prowizja, Serwis, Marża, Marża %;
+Data, Marketplace, Nr zamówienia (link do karty), Numer seryjny (link do karty produktu, 05.10.2026), SKU, Cena sprzedaży (PLN + oryginał), Cena zakupu, VAT od marży, Wysyłka, Koszty dodatkowe, Prowizja, Serwis, Marża, Marża %;
 pod tabelą podsumowanie całego wyniku filtra (marża łącznie, marża %, **średnia marża na produkcie** = marża łączna ÷ liczba pozycji z policzoną marżą; sprzedaż/zakup/koszty usunięte z podsumowania 04.10.2026 na prośbę właściciela — widać je w wierszach i po rozwinięciu), filtry Wszystkie/Back Market/Refurbed, wyszukiwarka (numer seryjny, zamówienie, SKU), stronicowanie 25/50/100.
 **Zakres: Back Market, refurbed i (od 05.10.2026) Octopia** (decyzja właściciela — tam mamy rzetelne źródło prowizji; Allegro/Erli/Amazon dojdą po ustaleniu prowizji), tylko zamówienia liczone jako sprzedaż (`isCountedOrder`, bez anulowanych/zwróconych).
 **Wzór (decyzja właściciela):** Marża = cena sprzedaży (PLN, brutto) − cena zakupu − **VAT od marży** − wysyłka − koszty dodatkowe − prowizja − serwis, gdzie **VAT od marży = (cena sprzedaży − cena zakupu, BEZ kosztów dodatkowych) × 23/123**, nigdy ujemny.
