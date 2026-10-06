@@ -6,7 +6,7 @@ import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { SERVICE_TASKS } from "@/lib/workLog";
 import { emptyMonth, monthCount, monthTotal, POINTS_AREAS, type EmployeeMonth } from "@/lib/points";
 
-// Punktacja pracowników (06.10.2026, tylko Admin): miesięczne podsumowanie punktów z Serwisu, Testów i Trade-in wg Regulaminu premiowania —
+// Punktacja pracowników (06.10.2026, Admin i Manager): miesięczne podsumowanie punktów z Serwisu, Testów i Trade-in wg Regulaminu premiowania —
 // punkty tylko za prawidłowo zakończony proces, każda paczka/urządzenie raz (data zaliczenia), obszary sumują się w jeden wynik miesięczny (§2 ust. 6).
 // Czego tu jeszcze NIE ma: Zwroty (17 pkt — moduł nie istnieje) oraz wszystko, co wymaga godzin pracy (wydajność pkt/h, norma 45 pkt/h, kwota premii) — brak ewidencji RCP.
 

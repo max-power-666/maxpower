@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { requireRole } from "@/lib/serverAuth";
 import { addAreaRows, lastMonths, monthRange, type EmployeeMonth, type PointRow } from "@/lib/points";
 
-// Podsumowanie punktacji pracowników (zakładka Punktacja, 06.10.2026) — TYLKO Admin (też po stronie serwera, nie tylko ukrycie zakładki).
+// Podsumowanie punktacji pracowników (zakładka Punktacja, 06.10.2026) — Admin i Manager (też po stronie serwera, nie tylko ukrycie zakładki).
 // Ostatnie 6 miesięcy kalendarzowych wg czasu polskiego, punkty z Serwisu ("naprawiony"), Testów ("przetestowane") i Trade-in (obsłużona/kontroferta/ok. dok./problem)
 // wg DATY PIERWSZEGO ZALICZENIA (points_awarded_at — zmiana statusu nie przesuwa punktów; przed uruchomieniem SQL awaryjnie finished_at).
 
@@ -35,7 +35,7 @@ async function fetchRows(db: ReturnType<typeof admin>, s: Src, col: string, from
 
 export async function GET(request: Request) {
   const db = admin();
-  if (!(await requireRole(request, db, ["Admin"]))) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
+  if (!(await requireRole(request, db, ["Admin", "Manager"]))) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
   const months = lastMonths(6);
   const from = monthRange(months[0]).from;
   const to = monthRange(months[months.length - 1]).to;

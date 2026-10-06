@@ -55,7 +55,7 @@ const TABS: { key: ViewKey; label: string; space?: Space }[] = [
   { key: "shipping", label: "Wysyłka" },
   { key: "invoices", label: "Faktury" },
   { key: "margin", label: "Marża" },
-  { key: "points", label: "Punktacja" }, // podsumowanie punktacji pracowników wg regulaminu, tylko Admin (06.10.2026)
+  { key: "points", label: "Punktacja" }, // podsumowanie punktacji pracowników wg regulaminu, Admin i Manager (06.10.2026)
   { key: "nbp", label: "NBP" },
   { key: "ai", label: "AI" },
   { key: "rcp", label: "RCP" },
@@ -83,7 +83,7 @@ const TABS: { key: ViewKey; label: string; space?: Space }[] = [
 const ROLE_ACCESS: Record<string, ViewKey[]> = {
   // "ai" (asystent AI, 03.10.2026) — na tym etapie TYLKO Admin (także serwer: app/api/ai/ask); Manager go nie ma.
   Admin: ["overview", "inventory", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "margin", "points", "nbp", "ai", "rcp", "returns", "shop_products", "shop_stock"],
-  Manager: ["overview", "inventory", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "margin", "nbp", "rcp", "returns", "shop_products", "shop_stock"], // wszystko; Zespół tylko do odczytu, usuwa tylko Admin
+  Manager: ["overview", "inventory", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "margin", "points", "nbp", "rcp", "returns", "shop_products", "shop_stock"], // wszystko (poza AI); Zespół tylko do odczytu, usuwa tylko Admin
   Magazyn: ["inventory", "backlog", "rcp", "returns"],
   Zamówienia: ["sales", "shipping", "invoices", "backlog", "rcp", "returns"],
   Serwis: ["service", "backlog", "rcp", "returns"],
