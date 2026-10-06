@@ -3,7 +3,7 @@
 // od NAJWYŻSZEJ ceny ustawionej na pozostałych rynkach (czyli, przy cenie max, od ceny max). Czysta logika, wspólna dla biddera (serwer) i listy cen (UI).
 
 export const NO_COMPETITION_MARKETS = ["IT"] as const; // rynki, na których stosujemy regułę (zmiana listy = jedno miejsce)
-export const NO_COMPETITION_THRESHOLD = 0.5; // "brak konkurencji": cena do wygrania niższa niż 50% najwyższej ceny z pozostałych rynków
+export const NO_COMPETITION_THRESHOLD = 0.55; // "brak konkurencji": cena do wygrania niższa niż 55% najwyższej ceny z pozostałych rynków (było 50% — XSS-512-C-1M: 76 € przy 151,65 € to 50,1%)
 export const NO_COMPETITION_DISCOUNT = 0.15; // cena = (1 − 0,15) × najwyższa cena z pozostałych rynków
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
