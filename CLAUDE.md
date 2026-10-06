@@ -1336,7 +1336,7 @@ Zasady, które kształtują Serwis i Trade-in (pełny PDF ma właściciel):
   `ReturnsView.tsx` — więc 17 pkt za zwrot NIE jest jeszcze nigdzie naliczane w kodzie; do zrobienia
   razem z punktem 11 planu rozwoju), **Tester - urządzenie 15 pkt**. Serwis (bez zmian w zasadzie,
   tylko w tabeli — patrz `SERVICE_TASKS` w `lib/workLog.ts`): Joy-Con para 15, PS4 25, Xbox One 35,
-  **Xbox Series S/X 25 (nowy typ)**, PS5 12, czyszczenie konsoli **40 (obniżone z 45)**, **Trudne
+  **Xbox Series S/X 25 (nowy typ)**, PS5 12, czyszczenie konsoli **40 (obniżone z 45)** (od 06.10.2026 nazwa w UI: "Czyszczenie konsoli/naprawa", klucz `console_cleaning` i 40 pkt bez zmian — stare wpisy dostają nową nazwę), **Trudne
   konsole 60 (nowy typ)**. Zmieniamy tylko `default`/stałą dla NOWYCH wpisów — stare wpisy
   zachowują swoją migawkę punktów sprzed aktualizacji (ten sam wzorzec co przy każdej wcześniejszej
   zmianie stawek w tym projekcie, patrz komentarze w `tests.sql`/`buyback-orders.sql`);
