@@ -7,7 +7,7 @@ import { COUNTRY_NAMES, DHL_EU_COUNTRIES, isEconomySelect, type DhlMoney, type D
 import { base64ToBlobUrl, defaultShippingDate, dhlCharge, parcelQuoteTotal, stripPhoneSpaces, type ShipPrefill } from "@/lib/shipping";
 import { MARKETPLACES } from "@/lib/salesOrders";
 import { escapeLike } from "@/lib/search";
-import { printRawToZebra, printPdf, listPrinters, PrintAgentError } from "@/lib/printAgent";
+import { printRawToZebra, printPdf, listPrinters, printerNeedsImageLabel, PrintAgentError } from "@/lib/printAgent";
 import { testLabelZpl, testDeliveryNotePdfBase64 } from "@/lib/printTest";
 import type { MemberLite } from "@/lib/displayName";
 import SalesOrderCard from "./SalesOrderCard";
@@ -530,6 +530,17 @@ export default function ShippingView({
   // etykieciarkę Zebra przez QZ Tray: surowy ZPL, gdy jest dostępny (DHL Express od razu; DHL Parcel dociąga go
   // na żądanie, ZBLP, bez zmiany trybu tworzenia przesyłki — patrz dhl-parcel/label z format="zpl"), a dla
   // formatów bez ZPL (Erli) — PDF wprost na tę samą drukarkę przez jej sterownik Windows.
+  // Etykieta ZPL na drukarkę: na Zebrę wprost, na drukarki innych marek (np. HPRT w emulacji ZPL) jako obraz — patrz printerNeedsImageLabel.
+  async function printZplLabel(zpl: string, printer: string) {
+    if (printerNeedsImageLabel(printer)) {
+      const res = await fetch("/api/shipping/zpl-to-image", { method: "POST", headers: auth, body: JSON.stringify({ zpl }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j?.zpl) throw new Error(j?.error || "Nie udało się przygotować etykiety do druku na tej drukarce.");
+      return printRawToZebra(j.zpl, printer);
+    }
+    return printRawToZebra(zpl, printer);
+  }
+
   async function handleLabel(id: number | undefined, base64?: string | null, format?: string | null) {
     setError("");
     setPrintBusy(true);
@@ -569,12 +580,12 @@ export default function ShippingView({
       if (directPrint) {
         if (!printerZebra) throw new Error("Brak drukarki Zebra — Admin ustawia ją w Zespół → Edytuj (dla tej osoby) albo w danych nadawcy (domyślna).");
         if (fmt === "zpl") {
-          await printRawToZebra(atob(data), printerZebra);
+          await printZplLabel(atob(data), printerZebra);
         } else if (id !== undefined && carrierType === "dhl_parcel") {
           const res = await fetch("/api/shipping/dhl-parcel/label", { method: "POST", headers: auth, body: JSON.stringify({ id, format: "zpl" }) });
           const j = await res.json().catch(() => ({}));
           if (!res.ok) throw new Error(j?.error || "Nie udało się pobrać etykiety ZPL.");
-          await printRawToZebra(atob(j.zplBase64), printerZebra);
+          await printZplLabel(atob(j.zplBase64), printerZebra);
         } else {
           await printPdf(data, printerZebra);
         }

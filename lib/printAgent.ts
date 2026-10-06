@@ -113,3 +113,8 @@ export async function listPrinters(): Promise<string[]> {
     throw new PrintAgentError(`Nie udało się pobrać listy drukarek: ${e?.message || e}`);
   }
 }
+
+// Czy etykieta ZPL na tej drukarce ma iść jako OBRAZ (06.10.2026). Prawdziwe Zebry (sterownik "ZDesigner ...", "Zebra ...") drukują ZPL wprost, a drukarki
+// z "emulacją ZPL" innych marek (np. HPRT HD100) nie rozumieją fontów ZPL DHL (^A0N,,24 itp.) — tekst wychodzi nieczytelny, choć kody kreskowe są dobre.
+// Dla nich etykieta jest renderowana (Labelary) do obrazu i drukowana jako sama grafika ^GFA, którą obsługuje każda drukarka ZPL.
+export const printerNeedsImageLabel = (printerName: string | null | undefined) => !!printerName && !/zdesigner|zebra/i.test(printerName);
