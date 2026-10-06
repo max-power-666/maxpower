@@ -48,6 +48,15 @@ function winSummary(s: Pick<Sku, "last_set" | "last_ptw">): { wins: number; tota
   return res.length ? { wins: res.filter(Boolean).length, total: res.length } : null;
 }
 
+// Najwyższa oferta ustawiona w ostatnim przebiegu, gdy jest WYŻSZA niż obecna cena max (max obniżono po przebiegu) — liczby w wierszu są wtedy
+// nieaktualne względem ustawionej ceny max: oferta na Back Markecie zmieni się dopiero przy następnym przebiegu (a SKU ignorowane nie są przeliczane wcale).
+function offerAboveMax(s: Pick<Sku, "max_price" | "last_set">): number | null {
+  const max = Number(s.max_price);
+  if (!Number.isFinite(max) || max <= 0) return null;
+  const top = Math.max(...MARKETS.map((m) => Number(s.last_set?.[m])).filter((x) => Number.isFinite(x)), -Infinity);
+  return top > max + 0.005 ? top : null;
+}
+
 function fmtPrice(n: number | string | null | undefined) {
   if (n === null || n === undefined || n === "") return "—";
   const v = Number(n);
@@ -483,6 +492,15 @@ export default function TradeInView({ session, members }: { session: Session; me
                       <td className="p-3">
                         {s.last_error ? (
                           <span title={s.last_error} className="text-xs font-semibold px-2 py-1 rounded-full bg-rustsoft text-rust">błąd</span>
+                        ) : s.ignored ? (
+                          <div className="flex flex-col items-start gap-1">
+                            <span title="Bidder pomija ten SKU — liczby w wierszu pochodzą z ostatniego przebiegu, a oferta na Back Markecie nie jest aktualizowana" className="text-xs font-semibold px-2 py-1 rounded-full bg-paper border border-line text-inksoft">ignorowany</span>
+                            {offerAboveMax(s) !== null && (
+                              <span title={`Cena max (${fmtPrice(s.max_price)}) jest niższa niż ostatnio ustawiona oferta (${fmtPrice(offerAboveMax(s))}). SKU jest ignorowany, więc oferta na Back Markecie sama się nie obniży.`} className="text-xs font-semibold px-2 py-1 rounded-full bg-rustsoft text-rust">max &lt; oferta</span>
+                            )}
+                          </div>
+                        ) : offerAboveMax(s) !== null ? (
+                          <span title={`Cena max (${fmtPrice(s.max_price)}) jest niższa niż ostatnio ustawiona oferta (${fmtPrice(offerAboveMax(s))}) — oferta obniży się w następnym przebiegu biddera`} className="text-xs font-semibold px-2 py-1 rounded-full bg-ambersoft text-amber">max &lt; oferta</span>
                         ) : s.last_run_at ? (
                           (() => {
                             const w = winSummary(s);
