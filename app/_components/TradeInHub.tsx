@@ -609,9 +609,9 @@ function IntakeView({
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-inksoft border-b border-line">
+              {hasChannel && <th className="p-3">Kanał</th>}
               <th className="p-3">Rozpoczęto</th>
               <th className="p-3">Pracownik</th>
-              {hasChannel && <th className="p-3">Kanał</th>}
               <th className="p-3">Numer zamówienia / przesyłki</th>
               <th className="p-3">Imię i nazwisko</th>
               <th className="p-3">Numer seryjny</th>
@@ -635,13 +635,13 @@ function IntakeView({
             )}
             {entries.map((e) => (
               <tr key={e.id} className="border-b border-line last:border-b-0" style={{ backgroundColor: rowColorForUser(e.entered_by_email) }}>
-                <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDateTime(e.entered_at)}</td>
-                <td className="p-3">{displayNameForEmail(e.entered_by_email, members)}</td>
                 {hasChannel && (
                   <td className="p-3">
-                    <span className={`text-xs font-semibold px-2 py-1 rounded-full ${isBuyback(e) ? "bg-tealsoft text-teal" : "bg-ambersoft text-amber"}`}>{intakeChannelLabel(e.channel)}</span>
+                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${isBuyback(e) ? "bg-tealsoft text-teal" : "bg-ambersoft text-amber"}`}>{intakeChannelLabel(e.channel)}</span>
                   </td>
                 )}
+                <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDateTime(e.entered_at)}</td>
+                <td className="p-3">{displayNameForEmail(e.entered_by_email, members)}</td>
                 <td className="p-3">
                   <button onClick={() => onOpenOrder(e.order_public_id)} className="font-mono font-semibold text-teal hover:underline">
                     {e.order_public_id}
