@@ -76,6 +76,9 @@ create table if not exists shop_images (
   created_at timestamptz not null default now()
 );
 create index if not exists shop_images_model_idx on shop_images (model_id, position);
+-- Zdjęcie dla wartości opcji (07.10.2026): np. 'Biały' = zdjęcie pokazywane, gdy wybrany wariant ma w opcji wartość "Biały"
+-- (opcja "1 TB · Biały · 1 pad"); null = zdjęcie wspólne dla wszystkich wariantów.
+alter table shop_images add column if not exists option_value text;
 
 create table if not exists shop_log (
   id bigserial primary key,
@@ -312,8 +315,10 @@ begin
 end $$;
 
 -- Dane startowe: katalog przeniesiony 1:1 z lib/catalog.ts sklepu (te same slugi i SKU — koszyki klientów zostają ważne).
--- on conflict do nothing: ponowne uruchomienie pliku NIE nadpisuje zmian zrobionych w backoffice.
-insert into shop_categories (slug, name, tagline, hidden, sort) values
+-- Dane startowe wgrywają się TYLKO do pustej tabeli (07.10.2026; wcześniej "on conflict do nothing", co przy ponownym
+-- uruchomieniu przywracało usunięte w backoffice pozycje, a po zmianie SKU wariantu kończyło się błędem unikalności).
+insert into shop_categories (slug, name, tagline, hidden, sort)
+select * from (values
   ('konsole', 'Konsole', 'PlayStation, Xbox, Nintendo', false, 0),
   ('kontrolery', 'Kontrolery', 'DualSense, Xbox, Joy-Con', false, 1),
   ('akcesoria', 'Akcesoria', 'Słuchawki, ładowarki, stacje', false, 2),
@@ -323,9 +328,11 @@ insert into shop_categories (slug, name, tagline, hidden, sort) values
   ('tablety', 'Tablety', 'iPad i Galaxy Tab', true, 6),
   ('laptopy', 'Laptopy', 'MacBook i ultrabooki', true, 7),
   ('smartwatche', 'Smartwatche', 'Apple Watch, Galaxy Watch', true, 8)
-on conflict (slug) do nothing;
+) as v(slug, name, tagline, hidden, sort)
+where not exists (select 1 from shop_categories);
 
-insert into shop_models (slug, name, brand, category_slug, description, highlights, option_label, color, keywords, is_new, featured, published, sort) values
+insert into shop_models (slug, name, brand, category_slug, description, highlights, option_label, color, keywords, is_new, featured, published, sort)
+select * from (values
   ('iphone-13', 'iPhone 13', 'Apple', 'smartfony', 'Sprawdzony iPhone w świetnej cenie. Każdy egzemplarz przechodzi test ponad 40 punktów: ekran, aparaty, Face ID, głośniki, łączność i kondycję baterii.', array['Ekran 6,1" Super Retina XDR', 'Procesor A15 Bionic', 'Podwójny aparat 12 Mpx', 'Bateria min. 85%']::text[], null, '#E1F0FE', '', false, true, true, 0),
   ('iphone-14-pro', 'iPhone 14 Pro', 'Apple', 'smartfony', 'Flagowiec Apple z ekranem ProMotion 120 Hz i aparatem 48 Mpx. Przetestowany, wyczyszczony i gotowy do pracy od pierwszego uruchomienia.', array['Dynamic Island', 'Aparat 48 Mpx', 'Always-On Display', 'Bateria min. 85%']::text[], null, '#E7EBFA', '', true, false, true, 1),
   ('galaxy-s23', 'Galaxy S23', 'Samsung', 'smartfony', 'Kompaktowy flagowiec Samsunga z wydajnym procesorem i świetnym aparatem.', array['Snapdragon 8 Gen 2', 'Ekran 6,1" 120 Hz', 'Aparat 50 Mpx', 'IP68']::text[], null, '#E3FCEE', '', true, false, true, 2),
@@ -356,7 +363,8 @@ insert into shop_models (slug, name, brand, category_slug, description, highligh
   ('sony-alpha-a6400', 'Sony Alpha a6400', 'Sony', 'aparaty', 'Szybki autofokus i kompaktowe body — świetny do zdjęć i vlogów. Matryca i AF przetestowane.', array['Bezlusterkowiec APS-C 24,2 Mpx', 'Real-time Eye AF', 'Film 4K', 'Ekran do selfie/vlogów']::text[], 'Zestaw', '#E7EBFA', 'bezlusterkowiec', true, false, true, 27),
   ('fujifilm-x-t30-ii', 'Fujifilm X-T30 II', 'Fujifilm', 'aparaty', 'Kompaktowy bezlusterkowiec z legendarnymi kolorami Fujifilm.', array['Matryca X-Trans 26,1 Mpx', 'Symulacje filmów Fujifilm', 'Klasyczne pokrętła', 'Film 4K']::text[], 'Zestaw', '#E3FCEE', 'bezlusterkowiec fuji', false, false, true, 28),
   ('canon-powershot-g7x-iii', 'Canon PowerShot G7 X Mark III', 'Canon', 'aparaty', 'Kultowy kompakt vlogerów. Obiektyw i matryca sprawdzone, bateria w zestawie.', array['Matryca 1" 20,1 Mpx', 'Jasny obiektyw f/1.8–2.8', 'Film 4K, transmisje na żywo', 'Mieści się w kieszeni']::text[], null, '#E1F0FE', 'kompakt vlog', false, false, true, 29)
-on conflict (slug) do nothing;
+) as v(slug, name, brand, category_slug, description, highlights, option_label, color, keywords, is_new, featured, published, sort)
+where not exists (select 1 from shop_models);
 
 insert into shop_variants (model_id, sku, option_value, grade, price, old_price, stock, active, sort)
 select m.id, v.sku, v.option_value, v.grade, v.price, v.old_price, v.stock, true, v.sort from (values
@@ -491,7 +499,7 @@ select m.id, v.sku, v.option_value, v.grade, v.price, v.old_price, v.stock, true
   ('canon-powershot-g7x-iii', 'G7X3---B', null, 'dobry', 1929, 3499::numeric, 1, 2)
 ) as v(model_slug, sku, option_value, grade, price, old_price, stock, sort)
 join shop_models m on m.slug = v.model_slug
-on conflict (sku) do nothing;
+where not exists (select 1 from shop_variants);
 
 -- Zdjęcia startowe: pliki leżą w repo sklepu (public/produkty/...), więc url jest względny wobec domeny sklepu.
 -- Nowe zdjęcia z backoffice trafiają do Supabase Storage (bucket shop-images) z pełnym adresem.
@@ -506,4 +514,4 @@ select m.id, v.url, v.alt, v.position from (values
   ('playstation-5', '/produkty/playstation-5/z-napedem-pad.png', 'PlayStation 5 (pierwsza generacja) z napędem i padem DualSense', 0)
 ) as v(model_slug, url, alt, position)
 join shop_models m on m.slug = v.model_slug
-where not exists (select 1 from shop_images i where i.model_id = m.id and i.url = v.url);
+where not exists (select 1 from shop_images);

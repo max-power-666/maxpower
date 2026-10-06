@@ -8,6 +8,11 @@ import {
   SHOP_COLORS,
   SHOP_FIELD_LABELS,
   SHOP_GRADES,
+  imageOptionChoices,
+  joinOption,
+  normalizeOption,
+  optionDims,
+  splitOption,
   SHOP_URL,
   gradeLabel,
   imageSrc,
@@ -167,6 +172,8 @@ export default function ShopProductEditor({
     return first ? first.split("-")[0] : skuPrefixFor(draft.name);
   }, [original, draft.name]);
 
+  const dims = useMemo(() => optionDims(draft.option_label), [draft.option_label]);
+
   function addVariant() {
     const last = rows[rows.length - 1];
     const used = new Set(rows.filter((r) => r.option_value === (last?.option_value ?? "")).map((r) => r.grade));
@@ -213,7 +220,7 @@ export default function ShopProductEditor({
       if (!r.sku || !/^[A-Z0-9+-]+$/.test(r.sku)) return `SKU "${r.sku}" — dozwolone tylko wielkie litery, cyfry, "+" i "-".`;
       if (skus.has(r.sku)) return `SKU "${r.sku}" występuje dwa razy.`;
       skus.add(r.sku);
-      const combo = `${r.option_value.trim()}|${r.grade}`;
+      const combo = `${normalizeOption(r.option_value)}|${r.grade}`;
       if (combos.has(combo)) return `Dwa warianty mają tę samą opcję i stan (${r.option_value || "bez opcji"}, ${gradeLabel(r.grade)}).`;
       combos.add(combo);
       if (r.price === "" || !(Number(r.price) >= 0)) return `Wariant ${r.sku}: podaj cenę.`;
@@ -270,7 +277,7 @@ export default function ShopProductEditor({
       for (const [idx, r] of rows.entries()) {
         const rec = {
           sku: r.sku,
-          option_value: r.option_value.trim() || null,
+          option_value: normalizeOption(r.option_value) || null,
           grade: r.grade,
           price: Number(r.price),
           old_price: r.old_price === "" ? null : Number(r.old_price),
@@ -426,7 +433,7 @@ export default function ShopProductEditor({
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-left text-xs text-inksoft border-b border-line">
-                      <th className="p-2">{draft.option_label || "Pamięć"}</th>
+                      {dims.map((d) => <th key={d} className="p-2">{d}</th>)}
                       <th className="p-2">Stan wizualny</th>
                       <th className="p-2">SKU</th>
                       <th className="p-2">Cena (zł)</th>
@@ -438,11 +445,21 @@ export default function ShopProductEditor({
                   </thead>
                   <tbody>
                     {rows.length === 0 && (
-                      <tr><td colSpan={8} className="p-4 text-center text-inksoft">Brak wariantów — dodaj co najmniej jeden.</td></tr>
+                      <tr><td colSpan={7 + dims.length} className="p-4 text-center text-inksoft">Brak wariantów — dodaj co najmniej jeden.</td></tr>
                     )}
                     {rows.map((r) => (
                       <tr key={r.key} className={`border-b border-line last:border-b-0 ${r.active ? "" : "text-inksoft"}`}>
-                        <td className="p-1.5"><input value={r.option_value} onChange={(e) => updateRow(r.key, { option_value: e.target.value })} className="w-28 border border-line bg-white px-2 py-1 rounded" placeholder="—" /></td>
+                        {/* Opcja w kilku wymiarach ("Dysk · Kolor · Pady") = osobne pole na każdy wymiar, sklejane separatorem. */}
+                        {splitOption(r.option_value, dims.length).map((part, di, parts) => (
+                          <td key={di} className="p-1.5">
+                            <input
+                              value={part}
+                              onChange={(e) => updateRow(r.key, { option_value: dims.length > 1 ? joinOption(parts.map((x, j) => (j === di ? e.target.value : x))) : e.target.value })}
+                              className={`${dims.length > 1 ? "w-24" : "w-28"} border border-line bg-white px-2 py-1 rounded`}
+                              placeholder="—"
+                            />
+                          </td>
+                        ))}
                         <td className="p-1.5">
                           <select value={r.grade} onChange={(e) => updateRow(r.key, { grade: e.target.value as ShopGrade })} className="border border-line bg-white px-2 py-1 rounded">
                             {SHOP_GRADES.map((g) => <option key={g.value} value={g.value}>{g.label}</option>)}
@@ -483,7 +500,15 @@ export default function ShopProductEditor({
             {isNew ? (
               <p className="text-sm text-inksoft">Zdjęcia dodasz po utworzeniu produktu.</p>
             ) : (
-              model && <ImagesSection model={model} images={images} onChanged={() => load(model.id)} onError={setError} />
+              model && (
+                <ImagesSection
+                  model={model}
+                  images={images}
+                  choices={imageOptionChoices(draft.option_label, rows.map((r) => r.option_value))}
+                  onChanged={() => load(model.id)}
+                  onError={setError}
+                />
+              )
             )}
 
             {!isNew && (
@@ -582,11 +607,14 @@ async function trimTransparent(file: File): Promise<Blob> {
 function ImagesSection({
   model,
   images,
+  choices,
   onChanged,
   onError,
 }: {
   model: ShopModel;
   images: ShopImage[];
+  /** Wartości opcji wariantów do wyboru "Pokazuj dla" (np. "Kolor: Biały"). */
+  choices: { value: string; label: string }[];
   onChanged: () => void;
   onError: (e: string) => void;
 }) {
@@ -639,6 +667,18 @@ function ImagesSection({
     if (error) onError(error.message);
   }
 
+  async function saveOption(img: ShopImage, value: string) {
+    const { error } = await supabase.from("shop_images").update({ option_value: value || null }).eq("id", img.id);
+    if (error) {
+      return onError(
+        /option_value/.test(error.message)
+          ? "Przypisanie zdjęcia do wariantu wymaga uruchomienia aktualnego supabase/shop.sql (kolumna shop_images.option_value)."
+          : error.message,
+      );
+    }
+    onChanged();
+  }
+
   async function remove(img: ShopImage) {
     if (!confirm("Usunąć to zdjęcie?")) return;
     // Najpierw wiersz (sklep przestaje go pokazywać), potem plik ze Storage. Pliki startowe z repo sklepu nie mają storage_path.
@@ -665,7 +705,8 @@ function ImagesSection({
       >
         <span>
           Przeciągnij zdjęcia tutaj. Najlepiej PNG z przezroczystym tłem — puste marginesy przytniemy automatycznie.
-          Pierwsze zdjęcie to miniatura w sklepie.
+          Pierwsze zdjęcie to miniatura w sklepie. Pod zdjęciem wybierz, dla jakich wariantów je pokazywać (np. Kolor: Biały) —
+          sklep pokaże wtedy zdjęcia wybranego koloru i wszystkie wspólne.
         </span>
         <button type="button" onClick={() => inputRef.current?.click()} disabled={busy} className="px-3 py-1.5 border border-line bg-white rounded font-semibold text-ink disabled:opacity-50 whitespace-nowrap">
           {busy ? "Wysyłanie…" : "Wybierz pliki"}
@@ -682,9 +723,26 @@ function ImagesSection({
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={imageSrc(img.url)} alt={img.alt} className="max-h-full max-w-full object-contain p-2" />
                 {i === 0 && <span className="absolute left-1 top-1 text-[10px] font-semibold bg-ink text-paper px-1.5 py-0.5 rounded">MINIATURA</span>}
+                {img.option_value && <span className="absolute right-1 top-1 text-[10px] font-semibold bg-teal text-paper px-1.5 py-0.5 rounded">{img.option_value}</span>}
               </div>
               <div className="p-2 space-y-1.5">
                 <input defaultValue={img.alt} onBlur={(e) => saveAlt(img, e.target.value)} className="w-full border border-line bg-white px-1.5 py-1 rounded text-xs" placeholder="Opis zdjęcia (dla niewidomych i Google)" />
+                {(choices.length > 0 || img.option_value) && (
+                  <label className="block text-[11px] text-inksoft">
+                    Pokazuj dla
+                    <select
+                      value={img.option_value ?? ""}
+                      onChange={(e) => saveOption(img, e.target.value)}
+                      className={`mt-0.5 w-full border bg-white px-1.5 py-1 rounded text-xs text-ink ${img.option_value ? "border-teal" : "border-line"}`}
+                    >
+                      <option value="">Wszystkie warianty</option>
+                      {choices.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                      {img.option_value && !choices.some((c) => c.value === img.option_value) && (
+                        <option value={img.option_value}>{img.option_value} (brak takiego wariantu)</option>
+                      )}
+                    </select>
+                  </label>
+                )}
                 <div className="flex items-center justify-between text-xs">
                   <span>
                     <button onClick={() => move(i, -1)} disabled={i === 0} className="px-1.5 disabled:opacity-30" aria-label="Wcześniej">←</button>

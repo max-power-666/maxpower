@@ -50,7 +50,58 @@ export type ShopVariant = {
   sort: number;
 };
 
-export type ShopImage = { id: string; model_id: string; url: string; storage_path: string | null; alt: string; position: number };
+export type ShopImage = {
+  id: string;
+  model_id: string;
+  url: string;
+  storage_path: string | null;
+  alt: string;
+  position: number;
+  /** Wartość opcji, dla której pokazujemy zdjęcie (np. "Biały"); null/brak = wspólne dla wszystkich wariantów. */
+  option_value?: string | null;
+};
+
+/** Separator wymiarów opcji wariantu — ten sam co w sklepie (lib/catalog.ts): "1 TB · Biały · 1 pad" przy nazwie "Dysk · Kolor · Pady". */
+export const OPTION_SEPARATOR = " · ";
+
+/** Nazwy wymiarów opcji z nazwy opcji modelu ("Dysk · Kolor · Pady" -> 3 wymiary; puste = jeden, "Pamięć"). */
+export function optionDims(optionLabel: string): string[] {
+  const parts = (optionLabel.trim() || "Pamięć").split(OPTION_SEPARATOR).map((x) => x.trim());
+  return parts.length > 1 ? parts : [parts[0] || "Pamięć"];
+}
+
+/** Rozbija wartość opcji na części wg liczby wymiarów (brakujące = puste). */
+export function splitOption(value: string, n: number): string[] {
+  if (n <= 1) return [value];
+  const parts = value ? value.split(OPTION_SEPARATOR) : []; // bez trim: pole w edycji może chwilowo kończyć się spacją
+  return Array.from({ length: n }, (_, i) => parts[i] ?? "");
+}
+
+/** Skleja części z powrotem (bez obcinania spacji — to robi normalizeOption przy zapisie); same puste części = brak opcji. */
+export function joinOption(parts: string[]): string {
+  return parts.some((x) => x.trim()) ? parts.join(OPTION_SEPARATOR) : "";
+}
+
+/** Opcja do zapisu: każda część bez spacji na brzegach. */
+export function normalizeOption(value: string): string {
+  return value.split(OPTION_SEPARATOR.trim()).map((x) => x.trim()).join(OPTION_SEPARATOR).trim();
+}
+
+/** Wybory "Pokazuj dla" zdjęcia: każda wartość każdego wymiaru, w kolejności występowania w wariantach. */
+export function imageOptionChoices(optionLabel: string, values: string[]): { value: string; label: string }[] {
+  const dims = optionDims(optionLabel);
+  const seen = new Set<string>();
+  const out: { value: string; label: string }[] = [];
+  dims.forEach((dim, i) => {
+    for (const v of values) {
+      const part = splitOption(v, dims.length)[i]?.trim();
+      if (!part || seen.has(part)) continue;
+      seen.add(part);
+      out.push({ value: part, label: `${dim}: ${part}` });
+    }
+  });
+  return out;
+}
 
 export type ShopLogEntry = {
   id: number;
