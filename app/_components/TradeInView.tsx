@@ -57,6 +57,11 @@ function offerAboveMax(s: Pick<Sku, "max_price" | "last_set">): number | null {
   return top > max + 0.005 ? top : null;
 }
 
+// Strona oferty skupu produktu w panelu Back Market (jedna domena .fr dla wszystkich rynków; rynek wybiera countryCode). Adresuje się ją
+// product_id (jedna dla wszystkich SKU tego samego modelu), nie listing_id.
+const backMarketQuotationUrl = (productId: string, market: string) =>
+  `https://www.backmarket.fr/bo-seller/buyback/create-quotation/${encodeURIComponent(productId)}?countryCode=${encodeURIComponent(market)}`;
+
 function fmtPrice(n: number | string | null | undefined) {
   if (n === null || n === undefined || n === "") return "—";
   const v = Number(n);
@@ -723,6 +728,17 @@ function SkuDrawer({ sku, session, members, onClose }: { sku: Sku; session: Sess
                       <span className="flex items-center gap-2">
                         <span className="w-3 h-3 rounded-sm inline-block" style={{ background: MARKET_COLORS[m] }} />
                         {m}
+                        {sku.product_id && (
+                          <a
+                            href={backMarketQuotationUrl(sku.product_id, m)}
+                            target="_blank"
+                            rel="noreferrer"
+                            title={`Otwórz ofertę skupu w Back Market (${m})`}
+                            className="text-teal text-xs font-semibold hover:underline"
+                          >
+                            oferta ↗
+                          </a>
+                        )}
                       </span>
                     </td>
                     <td className="p-3 text-right font-mono">{competitors ? fmtPrice(c?.price_to_win?.amount) : "…"}</td>
