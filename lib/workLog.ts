@@ -44,7 +44,7 @@ export const SERVICE_TASKS = [
   { key: "xbox_controller", label: "Kontroler Xbox One / Xbox One X", points: 35 },
   { key: "xbox_series_controller", label: "Kontroler Xbox Series S/X", points: 25 },
   { key: "ps5_controller", label: "Kontroler PS5 (DualSense)", points: 12 },
-  { key: "console_cleaning", label: "Czyszczenie konsoli", points: 40 },
+  { key: "console_cleaning", label: "Czyszczenie konsoli/naprawa", points: 40 },
   { key: "difficult_console", label: "Trudne konsole", points: 60 },
   // Poprawka (02.10.2026, na prośbę właściciela) — czynność bez punktów (0 pkt); poza tabelą z regulaminu.
   { key: "correction", label: "Poprawka", points: 0 },
