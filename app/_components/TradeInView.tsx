@@ -10,6 +10,8 @@ import { parseDelta, planBulkChange } from "@/lib/bulkPrice";
 // Sam bidder działa na serwerze (lib/buyback.ts, cron Vercela) — tu tylko czytamy
 // jego stan z Supabase, edytujemy ceny max / ignorowanie i zlecamy przebiegi.
 
+import { isNoCompetition, noCompetitionReference } from "@/lib/noCompetition";
+
 const MARKETS = ["DE", "ES", "FR", "IT"] as const;
 // Kolejność stała (skill dataviz, zwalidowana): kolor idzie za rynkiem, nie za pozycją.
 const MARKET_COLORS: Record<string, string> = { DE: "#2a78d6", ES: "#eb6834", FR: "#1baf7a", IT: "#eda100" };
@@ -518,6 +520,9 @@ export default function TradeInView({ session, members }: { session: Session; me
                             <>
                               <span className={`font-semibold ${winsOn(s, m) ? "text-teal" : "text-rust"}`}>{fmtPrice(s.last_set?.[m])}</span>
                               <span className="text-inksoft"> / {fmtPrice(s.last_ptw?.[m])}</span>
+                              {isNoCompetition(m, Number(s.last_ptw?.[m]), noCompetitionReference(s.last_set ?? {}, MARKETS)) && (
+                                <span title="Brak konkurencji na tym rynku: cena do wygrania jest absurdalnie niska, więc ustawiamy 85% najwyższej ceny z pozostałych rynków" className="ml-1 text-[10px] font-bold text-amber cursor-help">brak konk.</span>
+                              )}
                             </>
                           ) : (
                             fmtPrice(s.last_set?.[m])

@@ -13,6 +13,8 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 // bidderTick(), który przetwarza tyle SKU, ile zmieści w TICK_BUDGET_MS, i kończy.
 // Kursorem przebiegu jest buyback_skus.last_attempt_at < run.started_at.
 
+import { applyNoCompetition, NO_COMPETITION_DISCOUNT } from "./noCompetition";
+
 export const MARKETS = ["DE", "ES", "FR", "IT"] as const;
 type Market = (typeof MARKETS)[number];
 
@@ -417,6 +419,9 @@ async function processSku(db: SupabaseClient, runId: number, row: SkuRow): Promi
       ptws[m] = ptw;
       prices[m] = Math.round(Math.min(ptw, maxPrice) * 100) / 100;
     }
+    // Rynek bez konkurencji (Włochy): zamiast absurdalnie niskiej "ceny do wygrania" — 85% najwyższej ceny z pozostałych rynków (lib/noCompetition.ts)
+    const nc = applyNoCompetition(prices, ptws, MARKETS, maxPrice);
+    Object.assign(prices, nc.prices);
     const missing = MARKETS.filter((m) => prices[m] === undefined);
 
     if (Object.keys(prices).length === 0) {
@@ -444,7 +449,9 @@ async function processSku(db: SupabaseClient, runId: number, row: SkuRow): Promi
     // Cena do wygrania z tego przebiegu (para do last_set) — OSOBNY zapis, bez sprawdzania wyniku: gdy kolumny last_ptw jeszcze nie ma (nie uruchomiono
     // tradein.sql), nie może zepsuć głównego zapisu powyżej (ceny, last_set, last_error), od którego zależy przywracanie cen po przerwaniu.
     await db.from("buyback_skus").update({ last_ptw: ptws }).eq("sku", row.sku);
-    const summary = MARKETS.map((m) => `${m} ${prices[m] ?? "10 (brak ptw)"}`).join(" · ");
+    const summary =
+      MARKETS.map((m) => `${m} ${prices[m] ?? "10 (brak ptw)"}`).join(" · ") +
+      (nc.applied.length ? ` · ${nc.applied.join("/")}: brak konkurencji (cena do wygrania ${nc.applied.map((m) => ptws[m]).join("/")}) → ${Math.round((1 - NO_COMPETITION_DISCOUNT) * 100)}% ceny z pozostałych rynków` : "");
     await log(db, runId, missing.length ? "warn" : "info", row.sku, summary);
     return true;
   } catch (err: any) {
