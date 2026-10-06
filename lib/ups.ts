@@ -6,6 +6,8 @@
 // Środowiska: test (wwwcie.ups.com) i produkcja (onlinetools.ups.com); domyślnie TEST, produkcja tylko przy UPS_ENV=production.
 // Ceny: wszystkie w walucie konta (u nas PLN), netto; gdy konto ma stawki wynegocjowane, bierzemy je (NegotiatedRateCharges), inaczej cennik katalogowy.
 
+import { gifLabelToZpl, isGif } from "./gifToZpl";
+
 export type UpsConfig = {
   clientId: string;
   clientSecret: string;
@@ -266,7 +268,15 @@ export async function upsCreate(
   const res = j?.ShipmentResponse?.ShipmentResults;
   if (!res?.ShipmentIdentificationNumber) throw new UpsError("UPS nie zwrócił numeru przesyłki.");
   const pk: any[] = Array.isArray(res.PackageResults) ? res.PackageResults : res.PackageResults ? [res.PackageResults] : [];
-  const labels: string[] = pk.map((p) => p.ShippingLabel?.GraphicImage).filter(Boolean);
+  // UPS zwraca ZPL jako base64 TEKSTU ZPL, ale dla niektórych przesyłek (u nas z pobraniem, "EDI-COD") wyłącznie obraz GIF mimo prośby o ZPL — wtedy zamieniamy go na ZPL (gifToZpl.ts),
+  // żeby podgląd (Labelary) i druk na Zebrę działały tak samo jak dla zwykłej etykiety ZPL.
+  const labels: string[] = pk
+    .map((p) => p.ShippingLabel?.GraphicImage)
+    .filter(Boolean)
+    .map((b64: string) => {
+      const bytes = Buffer.from(b64, "base64");
+      return isGif(bytes) ? Buffer.from(gifLabelToZpl(bytes), "latin1").toString("base64") : b64;
+    });
   const money = res.NegotiatedRateCharges?.TotalCharge ?? res.ShipmentCharges?.TotalCharges;
   return {
     shipmentId: String(res.ShipmentIdentificationNumber),
