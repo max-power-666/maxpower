@@ -1,10 +1,19 @@
 -- Import produktów sklepu z Katalogu konsol (console_catalog) — jednorazowy, 06.10.2026.
--- Uruchom PO aktualnym supabase/shop.sql (klasa "zadowalający" + ukrywanie wariantów z ceną 0).
+-- Samowystarczalny: sam dodaje klasę "zadowalający" i ukrywanie wariantów z ceną 0 (można go uruchomić bez wcześniejszego shop.sql).
 -- Wygenerowane z katalogu w stanie na dzień importu: 13 modeli (rodzina konsoli = model), wariant = dysk · kolor · pady × klasa.
 -- Klasy: A = bardzo dobry, B = dobry, C = zadowalający. SKU = SKU z katalogu (z końcówką -0M/-1M/-2M).
 -- Ceny 0 i stan 0: warianty są niewidoczne w sklepie, dopóki nie dostaną ceny (ERP → Recoo Sklep → Produkty).
 -- Nowe modele startują jako szkice (published = false). Bezpieczne do ponownego uruchomienia: nic nie nadpisuje cen, stanów ani opisów.
 begin;
+
+-- Samowystarczalny: te same zmiany co w aktualnym shop.sql (klasa C i ukrywanie wariantów z ceną 0) — działa też bez wcześniejszego shop.sql.
+alter table shop_variants drop constraint if exists shop_variants_grade_check;
+alter table shop_variants add constraint shop_variants_grade_check
+  check (grade in ('jak-nowy', 'bardzo-dobry', 'dobry', 'zadowalajacy'));
+drop policy if exists "shop read variants" on shop_variants;
+create policy "shop read variants" on shop_variants for select using (
+  can_edit_shop() or (active and price > 0 and exists (select 1 from shop_models m where m.id = model_id and m.published))
+);
 
 insert into shop_models (slug, name, brand, category_slug, option_label, color, keywords, published, sort)
 values
