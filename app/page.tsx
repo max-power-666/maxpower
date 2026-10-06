@@ -1032,37 +1032,27 @@ function MemberEditDrawer({
 /* ---------------- przełącznik Recoo ERP / Recoo Sklep ---------------- */
 
 // Nazwa w lewym górnym rogu. Gdy osoba ma dostęp tylko do jednej przestrzeni, to zwykły napis (bez przełącznika).
+// Nagłówek paska bocznego (06.10.2026): napis "Recoo", a pod nim wybór przestrzeni — ERP albo SKLEP (dwa przyciski obok siebie, bez rozwijanej listy).
+// Osoba z dostępem tylko do jednej przestrzeni widzi sam napis "Recoo" z nazwą tej przestrzeni.
+const SPACE_SHORT: Record<Space, string> = { erp: "ERP", shop: "SKLEP" };
 function SpaceSwitcher({ current, allowed, onSwitch }: { current: Space; allowed: ViewKey[]; onSwitch: (s: Space) => void }) {
-  const [open, setOpen] = useState(false);
   const spaces = (Object.keys(SPACE_NAMES) as Space[]).filter((s) => TABS.some((t) => spaceOf(t.key) === s && allowed.includes(t.key)));
-  if (spaces.length < 2) return <div className="font-bold text-lg mb-6">{SPACE_NAMES[current]}</div>;
   return (
-    <div className="relative mb-6">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title="Przełącz: Recoo ERP / Recoo Sklep"
-        className="w-full flex items-center justify-between gap-1 font-bold text-lg text-left rounded px-1 -mx-1 hover:bg-white"
-      >
-        <span className="truncate">{SPACE_NAMES[current]}</span>
-        <span className="text-xs text-inksoft">{open ? "▲" : "▼"}</span>
-      </button>
-      {open && (
-        <div role="menu" className="absolute left-0 right-0 top-full mt-1 z-20 border border-line bg-white rounded shadow-sm py-1">
+    <div className="mb-6">
+      <div className="font-bold text-lg">Recoo</div>
+      {spaces.length < 2 ? (
+        <div className="text-xs font-semibold text-inksoft mt-1">{SPACE_SHORT[current]}</div>
+      ) : (
+        <div role="radiogroup" aria-label="Przestrzeń: ERP lub Sklep" className="flex gap-1 mt-2 p-0.5 rounded border border-line bg-white">
           {spaces.map((s) => (
             <button
               key={s}
-              role="menuitemradio"
+              role="radio"
               aria-checked={s === current}
-              onClick={() => {
-                setOpen(false);
-                if (s !== current) onSwitch(s);
-              }}
-              className={`w-full text-left px-2 py-1.5 text-sm ${s === current ? "font-semibold" : "text-inksoft hover:text-ink"}`}
+              onClick={() => s !== current && onSwitch(s)}
+              className={`flex-1 px-2 py-1 rounded text-xs font-bold ${s === current ? "bg-ink text-paper" : "text-inksoft hover:text-ink"}`}
             >
-              {s === current ? "✓ " : ""}
-              {SPACE_NAMES[s]}
+              {SPACE_SHORT[s]}
             </button>
           ))}
         </div>

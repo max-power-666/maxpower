@@ -1315,10 +1315,10 @@ Nie ma jeszcze własnych, edytowalnych danych produktu — to odczyt.
 
 Sklep internetowy to osobne repo (`~/Downloads/recoo-sklep`, `github.com/max-power-666/recoo-sklep`, https://recoo-sklep.vercel.app),
 ale jego **backoffice jest w tym ERP** (decyzja właściciela: wspólne logowanie, role, dostęp per osoba, dziennik; zamówienia i
-wysyłka i tak są tutaj). **Przełącznik "Recoo ERP ⇄ Recoo Sklep"** to nazwa w lewym górnym rogu paska bocznego (`SpaceSwitcher`
+wysyłka i tak są tutaj). **Przełącznik ERP / SKLEP** (od 06.10.2026: na górze paska bocznego napis "Recoo", a pod nim dwa przyciski obok siebie "ERP" i "SKLEP" — wcześniej rozwijana nazwa "Recoo ERP ▾"; `SpaceSwitcher`
 w `app/page.tsx`): zakładki mają pole `space` (`TABS`), pasek pokazuje tylko zakładki bieżącej przestrzeni, ostatnia zakładka
 każdej przestrzeni pamiętana w `localStorage` (`magazyn-view-erp`/`magazyn-view-shop`). Osoba z dostępem tylko do jednej
-przestrzeni widzi zwykły napis zamiast przełącznika. Zakładki sklepu: **Produkty** (`shop_products`, `ShopProductsView.tsx` +
+przestrzeni widzi sam napis "Recoo" z nazwą tej przestrzeni zamiast przycisków. Zakładki sklepu: **Produkty** (`shop_products`, `ShopProductsView.tsx` +
 panel `ShopProductEditor.tsx`) i **Magazyn** (`shop_stock`, `ShopStockView.tsx`): lista wszystkich wariantów ze stanem, kafelki (sztuki na stanie,
 wartość wg cen sprzedaży, warianty w sprzedaży, brak na stanie), szybkie − / + (wydanie/przyjęcie 1 szt.) i „Więcej…”
 (przyjęcie / wydanie / korekta do konkretnej liczby + notatka), historia ruchów (ostatnie albo jednego SKU). **Stan zmienia
