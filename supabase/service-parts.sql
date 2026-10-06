@@ -30,6 +30,9 @@ create table if not exists service_parts (
   updated_by_email text
 );
 
+-- Kto zaimportował pozycję (06.10.2026, import z faktury w aplikacji); wiersze z arkusza mają null.
+alter table service_parts add column if not exists created_by_email text;
+
 create index if not exists service_parts_received_idx on service_parts (received_at desc nulls last, id desc);
 create index if not exists service_parts_device_idx on service_parts (upper(device_ref));
 create index if not exists service_parts_code_idx on service_parts (part_code);
@@ -41,10 +44,10 @@ language plpgsql security definer set search_path = public as $$
 begin
   if auth.role() = 'authenticated' then
     if (new.received_at, new.invoice_no, new.invoice_date, new.supplier, new.notes, new.name, new.part_code, new.batch_qty,
-        new.price_net, new.currency, new.nbp_rate, new.price_pln, new.source)
+        new.price_net, new.currency, new.nbp_rate, new.price_pln, new.source, new.created_by_email)
        is distinct from
        (old.received_at, old.invoice_no, old.invoice_date, old.supplier, old.notes, old.name, old.part_code, old.batch_qty,
-        old.price_net, old.currency, old.nbp_rate, old.price_pln, old.source) then
+        old.price_net, old.currency, old.nbp_rate, old.price_pln, old.source, old.created_by_email) then
       raise exception 'Dane zakupowe części są tylko do odczytu — zmienić można przypisanie urządzenia, status i uwagi.' using errcode = '42501';
     end if;
     new.device_ref := nullif(upper(btrim(new.device_ref)), '');
@@ -66,7 +69,7 @@ create policy "authenticated read service_parts" on service_parts
 drop policy if exists "authenticated update service_parts" on service_parts;
 create policy "authenticated update service_parts" on service_parts
   for update using (auth.role() = 'authenticated');
--- Brak polityki insert: części dopisuje import (service_role); usuwanie tylko Admin, z zapisem w deleted_records.
+-- Brak polityki insert: części dopisuje serwer (service_role) — arkusz (scripts/import-parts.mjs) i import z faktury (app/api/parts/import); usuwanie tylko Admin, z zapisem w deleted_records.
 drop policy if exists "admin delete service_parts" on service_parts;
 create policy "admin delete service_parts" on service_parts
   for delete using (is_admin());

@@ -18,7 +18,7 @@ export default function ServiceHub({ session, members, isAdmin, isAdminOrManager
         <button onClick={() => setSub("parts")} className={pill(sub === "parts")}>Części</button>
       </div>
       {sub === "repairs" && <ServiceView session={session} members={members} isAdmin={isAdmin} isAdminOrManager={isAdminOrManager} isServiceLead={isServiceLead} />}
-      {sub === "parts" && <PartsView members={members} />}
+      {sub === "parts" && <PartsView members={members} session={session} />}
     </div>
   );
 }

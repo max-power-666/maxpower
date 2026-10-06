@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import InlineEditCell from "./InlineEditCell";
 import ProductCardDrawer from "./ProductCardDrawer";
+import PartsImportDialog from "./PartsImportDialog";
+import type { Session } from "@supabase/supabase-js";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { escapeLike } from "@/lib/search";
 
@@ -48,7 +50,7 @@ const STATUS_STYLE: Record<string, string> = {
   "Uszkodzony": "bg-rustsoft text-rust",
 };
 
-export default function PartsView({ members }: { members: MemberLite[] }) {
+export default function PartsView({ members, session }: { members: MemberLite[]; session: Session }) {
   const [rows, setRows] = useState<Part[]>([]);
   const [total, setTotal] = useState(0);
   const [sum, setSum] = useState<{ pln: number; count: number } | null>(null);
@@ -61,6 +63,7 @@ export default function PartsView({ members }: { members: MemberLite[] }) {
   const [error, setError] = useState("");
   const [reload, setReload] = useState(0);
   const [openSerial, setOpenSerial] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -154,6 +157,7 @@ export default function PartsView({ members }: { members: MemberLite[] }) {
         <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }} className="border border-line bg-white px-2 py-1.5 rounded text-sm font-semibold">
           {PAGE_SIZES.map((n) => <option key={n} value={n}>{n}</option>)}
         </select>
+        <button onClick={() => setImporting(true)} className="bg-ink text-paper px-4 py-2 rounded text-sm font-semibold">+ Importuj z faktury</button>
         <div className="flex items-center gap-3 text-xs text-inksoft ml-auto">
           <span>{total.toLocaleString("pl-PL")} części · strona {Math.min(page, totalPages)} z {totalPages}</span>
           <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1 || loading} className="bg-white border border-line px-3 py-1.5 rounded text-sm font-semibold text-ink disabled:opacity-40">‹ Poprzednia</button>
@@ -221,9 +225,10 @@ export default function PartsView({ members }: { members: MemberLite[] }) {
       </div>
       <p className="text-[11px] text-inksoft mt-3 max-w-4xl">
         Cena netto PLN to cena jednostkowa części. Części przypisane do numeru seryjnego wchodzą do kosztu serwisu w zakładce Marża (części przyjęte do dnia zamówienia, bez wierszy „Demontaż”).
-        Dane zakupowe pochodzą z arkusza i są tylko do odczytu — zmieniasz przypisanie urządzenia i uwagi.
+        Dane zakupowe (z arkusza albo z importu faktury) są tylko do odczytu — zmieniasz przypisanie urządzenia i uwagi.
       </p>
 
+      {importing && <PartsImportDialog session={session} onClose={() => setImporting(false)} onSaved={() => { setPage(1); setReload((n) => n + 1); }} />}
       {openSerial && <ProductCardDrawer serial={openSerial} members={members} onClose={() => setOpenSerial(null)} />}
     </div>
   );
