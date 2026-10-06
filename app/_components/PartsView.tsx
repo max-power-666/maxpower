@@ -132,7 +132,7 @@ export default function PartsView({ members, session }: { members: MemberLite[];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, filter, reload]);
 
-  async function saveField(id: number, patch: Partial<Pick<Part, "device_ref" | "usage_notes">>) {
+  async function saveField(id: number, patch: Partial<Pick<Part, "usage_notes">>) {
     setError("");
     const { error: err } = await supabase.from("service_parts").update(patch).eq("id", id);
     if (err) setError(`Nie udało się zapisać: ${err.message}`);
@@ -178,7 +178,7 @@ export default function PartsView({ members, session }: { members: MemberLite[];
               <th className="p-3 text-right">Cena netto</th>
               <th className="p-3 text-right">Cena netto PLN</th>
               <th className="p-3">Status</th>
-              <th className="p-3">Numer seryjny / IMEI urządzenia</th>
+              <th className="p-3" title="Wpisywany w Serwis → Naprawy (kolumna Części) — tu tylko do odczytu">Numer seryjny / IMEI urządzenia</th>
               <th className="p-3">Uwagi</th>
             </tr>
           </thead>
@@ -202,7 +202,7 @@ export default function PartsView({ members, session }: { members: MemberLite[];
                 </td>
                 <td className="p-3">
                   <div className="flex items-center gap-1">
-                    <InlineEditCell value={r.device_ref} placeholder="Przypisz urządzenie" className="w-48 font-mono" onSave={(v) => saveField(r.id, { device_ref: v })} />
+                    <span className="font-mono text-sm">{r.device_ref || <span className="text-inksoft">—</span>}</span>
                     {r.device_ref && !/[\s,;]/.test(r.device_ref) && (
                       <button onClick={() => setOpenSerial(r.device_ref!)} title="Otwórz kartę produktu" className="text-teal shrink-0">↗</button>
                     )}
@@ -225,7 +225,7 @@ export default function PartsView({ members, session }: { members: MemberLite[];
       </div>
       <p className="text-[11px] text-inksoft mt-3 max-w-4xl">
         Cena netto PLN to cena jednostkowa części. Części przypisane do numeru seryjnego wchodzą do kosztu serwisu w zakładce Marża (części przyjęte do dnia zamówienia, bez wierszy „Demontaż”).
-        Dane zakupowe (z arkusza albo z importu faktury) są tylko do odczytu — zmieniasz przypisanie urządzenia i uwagi.
+        Dane zakupowe (z arkusza albo z importu faktury) są tylko do odczytu. Numer seryjny/IMEI urządzenia pojawia się automatycznie, gdy serwisant wpisze kod części w naprawie (Naprawy → kolumna „Części”) — dotyczy części z unikalnym kodem; zmieniasz tu tylko uwagi.
       </p>
 
       {importing && <PartsImportDialog session={session} onClose={() => setImporting(false)} onSaved={() => { setPage(1); setReload((n) => n + 1); }} />}
