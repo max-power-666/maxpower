@@ -2,7 +2,8 @@
 -- Uruchom w Supabase: Dashboard -> SQL Editor -> New query -> wklej CAŁY plik -> Run. Można uruchomić ponownie.
 -- Źródło: arkusz "katalog konsol.numbers" właściciela (75 wierszy). SKU w katalogu ma na końcu liczbę kontrolerów (-0M / -1M / -2M);
 -- wersja BEZ info o kontrolerach (np. PS5S-1TB-WE-C) jest wyliczana w aplikacji (obcięcie końcówki -nM), nie przechowywana.
--- Zakładka jest tylko do odczytu; dane odświeża się ponownym uruchomieniem tego pliku (on conflict (name) do update).
+-- Katalog edytuje Admin w aplikacji (komórki, dodawanie/usuwanie wierszy); dane startowe z arkusza wgrywają się TYLKO do pustej tabeli,
+-- więc ponowne uruchomienie pliku nie nadpisuje zmian Admina.
 
 create table if not exists console_catalog (
   id bigint generated always as identity primary key,
@@ -20,9 +21,19 @@ create table if not exists console_catalog (
 alter table console_catalog enable row level security;
 drop policy if exists "authenticated read console_catalog" on console_catalog;
 create policy "authenticated read console_catalog" on console_catalog for select using (auth.role() = 'authenticated');
--- Brak polityk zapisu: dane wgrywa ten plik / service_role.
+-- Zapis: tylko Admin (is_admin() ze schema.sql), usunięcia z zapisem w deleted_records (audit_delete).
+drop policy if exists "admin insert console_catalog" on console_catalog;
+create policy "admin insert console_catalog" on console_catalog for insert with check (is_admin());
+drop policy if exists "admin update console_catalog" on console_catalog;
+create policy "admin update console_catalog" on console_catalog for update using (is_admin());
+drop policy if exists "admin delete console_catalog" on console_catalog;
+create policy "admin delete console_catalog" on console_catalog for delete using (is_admin());
+drop trigger if exists console_catalog_audit_delete on console_catalog;
+create trigger console_catalog_audit_delete before delete on console_catalog
+  for each row execute function audit_delete();
 
-insert into console_catalog (position, manufacturer, name, accessories, color, storage, sku_satisfactory, sku_good, sku_very_good) values
+insert into console_catalog (position, manufacturer, name, accessories, color, storage, sku_satisfactory, sku_good, sku_very_good)
+select * from (values
   (1, 'Sony Playstation', 'Sony PlayStation 5 Slim Digital Edition 1TB Biały – Bez padów', 'bez padów', 'Biały', '1 TB', 'PS5SD-1TB-WE-C-0M', 'PS5SD-1TB-WE-B-0M', 'PS5SD-1TB-WE-A-0M'),
   (2, 'Sony Playstation', 'Sony PlayStation 5 Slim Digital Edition 1TB Biały – 2 pady', '2 pady', 'Biały', '1 TB', 'PS5SD-1TB-WE-C-2M', 'PS5SD-1TB-WE-B-2M', 'PS5SD-1TB-WE-A-2M'),
   (3, 'Sony Playstation', 'Sony PlayStation 5 Slim Digital Edition 1TB Biały – 1 pad', '1 pad', 'Biały', '1 TB', 'PS5SD-1TB-WE-C-1M', 'PS5SD-1TB-WE-B-1M', 'PS5SD-1TB-WE-A-1M'),
@@ -98,6 +109,5 @@ insert into console_catalog (position, manufacturer, name, accessories, color, s
   (73, 'Microsoft', 'Microsoft Xbox One 1TB Czarny – Bez padów', 'bez padów', 'Czarny', '1 TB', 'XO-1TB-BK-C-0M', 'XO-1TB-BK-B-0M', 'XO-1TB-BK-A-0M'),
   (74, 'Microsoft', 'Microsoft Xbox One 1TB Czarny – 2 pady', '2 pady', 'Czarny', '1 TB', 'XO-1TB-BK-C-2M', 'XO-1TB-BK-B-2M', 'XO-1TB-BK-A-2M'),
   (75, 'Microsoft', 'Microsoft Xbox One 1TB Czarny – 1 pad', '1 pad', 'Czarny', '1 TB', 'XO-1TB-BK-C-1M', 'XO-1TB-BK-B-1M', 'XO-1TB-BK-A-1M')
-on conflict (name) do update set
-  position = excluded.position, manufacturer = excluded.manufacturer, accessories = excluded.accessories, color = excluded.color,
-  storage = excluded.storage, sku_satisfactory = excluded.sku_satisfactory, sku_good = excluded.sku_good, sku_very_good = excluded.sku_very_good;
+) as v(position, manufacturer, name, accessories, color, storage, sku_satisfactory, sku_good, sku_very_good)
+where not exists (select 1 from console_catalog);
