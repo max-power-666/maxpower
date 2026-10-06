@@ -155,7 +155,7 @@ export default function RcpWidget({ session, role, onOpenRcp }: { session: Sessi
       <button onClick={onOpenRcp} className="block w-full text-center text-[11px] font-semibold text-inksoft hover:text-ink mt-1.5">Mój czas ›</button>
       {(error || blocked || loadError) && (
         <div className="mt-1.5 text-[11px] leading-snug text-rust">
-          {error || (blocked ? `Rejestracja czasu działa tylko z komputerów w firmie. Twój adres: ${st.ip || "nieznany"}.` : loadError)}
+          {[error, blocked ? `Rejestracja czasu działa tylko z komputerów w firmie. Twój adres: ${st.ip || "nieznany"}.` : "", loadError].filter(Boolean).join(" ")}
         </div>
       )}
     </div>

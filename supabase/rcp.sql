@@ -58,7 +58,9 @@ drop trigger if exists rcp_segments_audit_delete on rcp_segments;
 create trigger rcp_segments_audit_delete before delete on rcp_segments
   for each row execute function audit_delete();
 
--- Odcinki, które trwają od POPRZEDNIEGO dnia (wg czasu polskiego), zamykamy o 23:59:59 dnia ich rozpoczęcia i oznaczamy do sprawdzenia — pracownik nie kliknął "Zakończ".
+-- Zaległe odcinki (pracownik nie kliknął "Zakończ"): trwają od POPRZEDNIEGO dnia (wg czasu polskiego) ORAZ dłużej niż 10 godzin. Zamykamy je o 23:59:59 dnia rozpoczęcia i oznaczamy
+-- do sprawdzenia przez Managera. Warunek wieku (06.10.2026) chroni pracę, która legalnie przechodzi przez północ (np. 23:20–01:30) — wcześniejsza wersja zamykała
+-- każdy odcinek rozpoczęty "wczoraj" zaraz po północy, więc pracownik pracujący po 00:00 nie mógł zakończyć ani przerwać pracy ("Nie masz rozpoczętej pracy").
 -- p_user = null: wszyscy (cron). Zwraca liczbę zamkniętych.
 create or replace function rcp_close_stale(p_user uuid default null) returns int
 language plpgsql security definer set search_path = public as $$
@@ -70,7 +72,8 @@ begin
          history = s.history || jsonb_build_array(jsonb_build_object('at', now(), 'by_email', null, 'reason', 'Zamknięto automatycznie — nie zarejestrowano zakończenia pracy', 'changes', '[]'::jsonb))
    where s.ended_at is null
      and (p_user is null or s.user_id = p_user)
-     and s.started_at < (date_trunc('day', now() at time zone 'Europe/Warsaw') at time zone 'Europe/Warsaw');
+     and s.started_at < (date_trunc('day', now() at time zone 'Europe/Warsaw') at time zone 'Europe/Warsaw')
+     and s.started_at < now() - interval '10 hours';
   get diagnostics n = row_count;
   return n;
 end $$;
