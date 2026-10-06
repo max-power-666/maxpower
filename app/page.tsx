@@ -26,6 +26,7 @@ import type { ShipPrefill } from "@/lib/shipping";
 import ServiceHub from "./_components/ServiceHub";
 import TestsView from "./_components/TestsView";
 import InventoryRawView from "./_components/InventoryRawView";
+import ConsoleCatalogView from "./_components/ConsoleCatalogView";
 import ThemeSwitcher from "./_components/ThemeSwitcher";
 import { displayNameForEmail } from "@/lib/displayName";
 
@@ -217,7 +218,7 @@ export default function Home() {
   const [members, setMembers] = useState<Member[]>([]);
   const [view, setView] = useState<ViewKey>("overview");
   const [shipPrefill, setShipPrefill] = useState<ShipPrefill | null>(null); // dane z karty zamówienia do formularza przesyłki
-  const [invSub, setInvSub] = useState<"summary" | "raw">("summary");
+  const [invSub, setInvSub] = useState<"summary" | "raw" | "catalog">("summary");
   const [rawReloadKey, setRawReloadKey] = useState(0);
   const [fakturowniaSummary, setFakturowniaSummary] = useState<FakturowniaSummary | null>(null);
   const [fakturowniaLastSynced, setFakturowniaLastSynced] = useState<string | null>(null);
@@ -602,6 +603,7 @@ export default function Home() {
                   [
                     ["summary", "Podsumowanie"],
                     ["raw", "Raw data"],
+                    ["catalog", "Katalog konsol"],
                   ] as const
                 ).map(([k, label]) => (
                   <button
@@ -624,6 +626,8 @@ export default function Home() {
               )}
 
               {invSub === "raw" && <InventoryRawView reloadKey={rawReloadKey} members={members} />}
+
+              {invSub === "catalog" && <ConsoleCatalogView />}
             </div>
           )}
 
