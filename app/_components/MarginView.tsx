@@ -255,7 +255,7 @@ export default function MarginView({ session, members }: { session: Session; mem
                   {r.currency !== "PLN" && r.price !== null && <div className="text-[10px] text-inksoft">{r.price.toLocaleString("pl-PL")} {r.currency}</div>}
                 </td>
                 <td className="p-3 text-right font-mono">{fmtPLN(r.purchasePln)}</td>
-                <td className="p-3 text-right font-mono text-inksoft">{fmtPLN(r.vatPln)}</td>
+                <td className="p-3 text-right font-mono text-inksoft" title={r.vatMode === "V23" ? "Towar na V23: VAT należny 23% od pełnej ceny sprzedaży (zakup liczony netto)" : undefined}>{fmtPLN(r.vatPln)}{r.vatMode === "V23" && <span className="ml-1 text-[10px] font-semibold text-amber">V23</span>}</td>
                 <td className={`p-3 text-right font-mono ${marginCls(r.netMarginPln)}`}>{fmtPLN(r.netMarginPln)}</td>
                 <td className="p-3 text-right font-mono">{fmtPLN(r.shippingPln)}</td>
                 <td className="p-3 text-right font-mono">{fmtPLN(r.extraPln)}</td>
@@ -323,6 +323,7 @@ export default function MarginView({ session, members }: { session: Session; mem
       )}
       <p className="text-[11px] text-inksoft mt-3 max-w-4xl">
         Marża = cena sprzedaży (PLN, brutto) − cena zakupu − VAT od marży ({"("}sprzedaż − zakup{")"} × 23/123, bez kosztów dodatkowych) − wysyłka − koszty dodatkowe (Trade-in) − prowizja marketplace&apos;u − koszty serwisu.
+        Towary na V23 (zakup ze standardowym VAT 23%, np. akcesoria) liczymy inaczej: kosztem jest cena zakupu NETTO, a „VAT” w tabeli to VAT należny 23% od pełnej ceny sprzedaży — marża = sprzedaż/1,23 − zakup netto − pozostałe koszty.
         Koszty serwisu = ceny netto części przypisanych do numeru seryjnego (Serwis → Części). Koszty zamówień z wieloma pozycjami dzielone wg ceny pozycji; waluty przeliczone kursem NBP z dnia poprzedniego względem daty zamówienia.
       </p>
 

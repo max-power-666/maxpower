@@ -20,6 +20,10 @@ create table if not exists fakturownia_purchases (
   product_created_at timestamptz,
   updated_at timestamptz not null default now()
 );
+-- Stawka VAT zakupu (06.10.2026) — wpisywana RĘCZNIE, jak fakturownia_stock_cache.vat (synchronizacja jej nie ustawia ani nie nadpisuje; upsert zawiera tylko
+-- swoje kolumny). Potrzebna Marży dla SPRZEDANYCH sztuk (cache trzyma tylko dostępne): "V23" = zakup ze standardowym VAT 23% (marża liczona od netto,
+-- bez procedury VAT-marża); puste = jak dotąd VAT-marża. Gdy tu pusto, widok bierze VAT z cache (dla sztuk wciąż w magazynie).
+alter table fakturownia_purchases add column if not exists vat text;
 create index if not exists fakturownia_purchases_name_idx on fakturownia_purchases (lower(btrim(name)));
 alter table fakturownia_purchases enable row level security;
 -- Odczyt dla każdego zalogowanego — te same dane (numer seryjny, cena zakupu) są już czytelne dla wszystkich w fakturownia_stock_cache;
@@ -95,13 +99,15 @@ select
   inv.ccbm_fees as bm_ccbm_fees,
   inv.has_invoice as bm_has_invoice,
   oct.commission as octopia_commission,
-  oct.currency as octopia_commission_currency
+  oct.currency as octopia_commission_currency,
+  p.vat as purchase_vat
 from sales_order_items it
 join sales_orders o on o.marketplace = it.marketplace and o.external_id = it.external_id
 join order_agg oa on oa.marketplace = it.marketplace and oa.external_id = it.external_id
 -- zakup: sztuka o tym numerze seryjnym w Fakturowni; gdy numer wystąpił kilka razy (odkup), bierzemy zakup sprzed zamówienia, najnowszy
 left join lateral (
-  select fp.purchase_price_gross, fp.description
+  select fp.purchase_price_gross, fp.description,
+         coalesce(nullif(btrim(fp.vat), ''), (select nullif(btrim(c.vat), '') from fakturownia_stock_cache c where c.id = fp.id)) as vat
   from fakturownia_purchases fp
   where lower(btrim(fp.name)) = lower(btrim(it.serial_number))
   order by (fp.product_created_at <= o.order_date) desc nulls last, fp.product_created_at desc nulls last
@@ -171,7 +177,7 @@ from (
     p.product_created_at,
     -- VAT (05.10.2026): wpis ręczny z cache ma pierwszeństwo; dla sztuk z Trade-in (opis = numer zamówienia skupu BuyBack) automatycznie "VM" = VAT-marża
     -- (zakup od osoby prywatnej). Wartość wyliczana w widoku, nie zapisywana — ręczna zmiana w cache nadal ją nadpisuje.
-    coalesce(nullif(btrim(c.vat), ''), case when exists (select 1 from buyback_orders bo where bo.order_public_id = btrim(p.description)) then 'VM' end) as vat,
+    coalesce(nullif(btrim(c.vat), ''), nullif(btrim(p.vat), ''), case when exists (select 1 from buyback_orders bo where bo.order_public_id = btrim(p.description)) then 'VM' end) as vat,
     p.stock_level,
     (p.stock_level = 1) as available,
     -- Ręczne przypisanie (05.10.2026): serial_skus ze source = 'manual' ma najwyższy priorytet (jak w fakturownia_stock_with_sku, inventory.sql).

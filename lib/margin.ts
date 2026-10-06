@@ -93,6 +93,7 @@ export type MarginDbRow = {
   shipping_manual: number | string | null;
   refurbed_commission: number | string | null;
   refurbed_commission_currency: string | null;
+  purchase_vat?: string | null; // stawka VAT zakupu wpisana ręcznie (np. "V23"); puste = VAT-marża
   octopia_commission?: number | string | null; // prowizja Octopii na sztukę (z danych zamówienia), waluta zamówienia
   octopia_commission_currency?: string | null;
   bm_sales_fees: number | string | null;
@@ -113,7 +114,8 @@ export type MarginResult = {
   currency: string;
   salePln: number | null;
   purchasePln: number | null;
-  vatPln: number | null;
+  vatPln: number | null; // VAT od marży (VAT-marża) albo — dla towarów na V23 — VAT należny 23% od pełnej ceny sprzedaży
+  vatMode: "marza" | "V23"; // "V23": zakup ze standardowym VAT, marża liczona od netto (VAT należny nie jest kosztem, VAT zakupu odliczony)
   netMarginPln: number | null; // "Marża netto" = cena sprzedaży − cena zakupu − VAT od marży (bez wysyłki, kosztów dodatkowych, prowizji i serwisu)
   shippingPln: number | null;
   extraPln: number | null;
@@ -252,29 +254,43 @@ export function computeMargin(row: MarginDbRow, ctx: MarginContext): MarginResul
   }
 
   // --- cena zakupu
-  const purchase = num(row.purchase_price_gross);
+  // Towary na V23 (zakup ze standardowym VAT 23%, odliczalnym — np. akcesoria, "joystick1"): kosztem jest cena NETTO zakupu (brutto z Fakturowni / 1,23),
+  // a od sprzedaży odprowadzamy VAT należny 23% od PEŁNEJ ceny — marża = sprzedaż/1,23 − zakup netto − koszty. Pozostałe sztuki: VAT-marża jak dotąd.
+  const isV23 = (row.purchase_vat || "").trim().toUpperCase() === "V23";
+  const purchaseGross = num(row.purchase_price_gross);
+  const purchase = purchaseGross === null ? null : isV23 ? round2(purchaseGross / (1 + MARGIN_VAT_RATE / 100)) : purchaseGross;
   if (purchase === null) flags.push("brak ceny zakupu");
   details.push({
     key: "purchase",
-    label: "Cena zakupu",
+    label: isV23 ? "Cena zakupu (netto)" : "Cena zakupu",
     sign: "-",
     amountPln: purchase,
-    note: purchase === null ? "Brak ceny zakupu tej sztuki w historii zakupów z Fakturowni (pobierz ją przyciskiem „Pobierz z Fakturowni”)." : `Z Fakturowni, wg numeru seryjnego${row.purchase_ref ? ` (zamówienie/dokument: ${row.purchase_ref.trim()})` : ""}.`,
+    note:
+      purchase === null
+        ? "Brak ceny zakupu tej sztuki w historii zakupów z Fakturowni (pobierz ją przyciskiem „Pobierz z Fakturowni”)."
+        : `Z Fakturowni, wg numeru seryjnego${row.purchase_ref ? ` (zamówienie/dokument: ${row.purchase_ref.trim()})` : ""}.${isV23 ? ` Towar na V23: cena brutto ${f2(purchaseGross!)} zł → netto ${f2(purchase)} zł (VAT zakupu jest odliczany, nie jest kosztem).` : ""}`,
   });
 
-  // --- VAT od marży (po cenie sprzedaży i zakupu, bez kosztów dodatkowych)
-  const vatPln = salePln !== null && purchase !== null ? round2(Math.max(0, salePln - purchase) * (MARGIN_VAT_RATE / (100 + MARGIN_VAT_RATE))) : null;
+  // --- VAT: VAT-marża (po cenie sprzedaży i zakupu, bez kosztów dodatkowych) albo, dla V23, VAT należny od pełnej ceny sprzedaży
+  const vatPln =
+    salePln === null || purchase === null
+      ? null
+      : isV23
+        ? round2(salePln * (MARGIN_VAT_RATE / (100 + MARGIN_VAT_RATE)))
+        : round2(Math.max(0, salePln - purchase) * (MARGIN_VAT_RATE / (100 + MARGIN_VAT_RATE)));
   details.push({
     key: "vat",
-    label: "VAT od marży",
+    label: isV23 ? "VAT należny (V23)" : "VAT od marży",
     sign: "-",
     amountPln: vatPln,
     note:
       vatPln === null
         ? "Nie do policzenia bez ceny sprzedaży i zakupu."
-        : salePln! - purchase! <= 0
-          ? "Sprzedaż nie przekracza zakupu — VAT od marży wynosi 0."
-          : `(sprzedaż ${f2(salePln!)} − zakup ${f2(purchase!)}) × ${MARGIN_VAT_RATE}/${100 + MARGIN_VAT_RATE}, bez kosztów dodatkowych.`,
+        : isV23
+          ? `Towar na V23 — bez procedury VAT-marża: VAT należny ${MARGIN_VAT_RATE}% od pełnej ceny sprzedaży (${f2(salePln!)} × ${MARGIN_VAT_RATE}/${100 + MARGIN_VAT_RATE}); VAT od zakupu odliczony, więc koszt to cena netto.`
+          : salePln! - purchase! <= 0
+            ? "Sprzedaż nie przekracza zakupu — VAT od marży wynosi 0."
+            : `(sprzedaż ${f2(salePln!)} − zakup ${f2(purchase!)}) × ${MARGIN_VAT_RATE}/${100 + MARGIN_VAT_RATE}, bez kosztów dodatkowych.`,
   });
   // --- Marża netto: sprzedaż − zakup − VAT od marży (przed kosztami wysyłki, dodatkowymi, prowizją i serwisem)
   const netMarginPln = salePln !== null && purchase !== null && vatPln !== null ? round2(salePln - purchase - vatPln) : null;
@@ -438,7 +454,7 @@ export function computeMargin(row: MarginDbRow, ctx: MarginContext): MarginResul
     label: "Marża",
     sign: "=",
     amountPln: marginPln,
-    note: marginPln === null ? "Nie do policzenia — brakuje ceny sprzedaży (lub kursu) albo ceny zakupu." : "sprzedaż − zakup − VAT od marży − wysyłka − koszty dodatkowe − prowizja − serwis. Brakujące koszty liczone jako 0 (patrz ostrzeżenia).",
+    note: marginPln === null ? "Nie do policzenia — brakuje ceny sprzedaży (lub kursu) albo ceny zakupu." : "sprzedaż − zakup − VAT (od marży albo należny przy V23) − wysyłka − koszty dodatkowe − prowizja − serwis. Brakujące koszty liczone jako 0 (patrz ostrzeżenia).",
   });
 
   return {
@@ -454,6 +470,7 @@ export function computeMargin(row: MarginDbRow, ctx: MarginContext): MarginResul
     salePln: salePln === null ? null : round2(salePln),
     purchasePln: purchase,
     vatPln,
+    vatMode: isV23 ? "V23" : "marza",
     netMarginPln,
     shippingPln: shippingPln === null ? null : round2(shippingPln),
     extraPln: extraPln === null ? null : round2(extraPln),
