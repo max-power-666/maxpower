@@ -142,7 +142,7 @@ export async function parseInvoiceWithClaude(opts: {
 }
 
 // ---- Zapis ----
-export type ImportItemInput = { name: string; partCode: string | null; quantity: number; currency: string; priceNet: number | null; nbpRate: number | null; pricePln: number | null };
+export type ImportItemInput = { name: string; supplierCode: string | null; quantity: number; currency: string; priceNet: number | null; nbpRate: number | null; pricePln: number | null };
 export type ImportBody = { supplier: string | null; invoiceNo: string | null; invoiceDate: string | null; receivedAt: string | null; items: ImportItemInput[] };
 export const MAX_IMPORT_ITEMS = 200;
 export const MAX_IMPORT_ROWS = 500;
@@ -169,13 +169,15 @@ export function validateImport(b: any): { error: string } | { data: ImportBody }
     if (pricePln !== null && pricePln < 0) return { error: `Pozycja ${i + 1}: nieprawidłowa cena w PLN.` };
     if (pricePln === null && priceNet !== null && currency === "PLN") pricePln = priceNet; // PLN: cena w złotówkach to ta sama liczba
     rows += quantity;
-    out.push({ name, partCode: str(it?.partCode, 80), quantity, currency, priceNet, nbpRate: currency === "PLN" ? 1 : nbpRate, pricePln });
+    out.push({ name, supplierCode: str(it?.supplierCode, 80), quantity, currency, priceNet, nbpRate: currency === "PLN" ? 1 : nbpRate, pricePln });
   }
   if (rows > MAX_IMPORT_ROWS) return { error: `Za dużo sztuk naraz (${rows}, max ${MAX_IMPORT_ROWS}).` };
   return { data: { supplier: str(b?.supplier), invoiceNo: str(b?.invoiceNo, 80), invoiceDate: isoDate(b?.invoiceDate), receivedAt: isoDate(b?.receivedAt), items: out } };
 }
 
 // Jedna sztuka = jeden wiersz (jak w arkuszu); w partii o ilości > 1 pierwszy wiersz niesie batch_qty (informacja, nie licznik).
+// part_code NIE jest tu ustawiany: każda sztuka dostaje własny, unikalny kod z naszej serii (10xxxxxx) nadawany w bazie przez
+// service_parts_import (atomowo, kolejno). Kod z faktury (symbol dostawcy) trafia do uwag: "Kod dostawcy: ...".
 export function expandToRows(d: ImportBody, createdByEmail: string | null) {
   const rows: Record<string, unknown>[] = [];
   for (const it of d.items) {
@@ -187,7 +189,7 @@ export function expandToRows(d: ImportBody, createdByEmail: string | null) {
         supplier: d.supplier,
         status: "Dotarło",
         name: it.name,
-        part_code: it.partCode,
+        notes: it.supplierCode ? `Kod dostawcy: ${it.supplierCode}` : null,
         batch_qty: k === 0 && it.quantity > 1 ? it.quantity : null,
         price_net: it.priceNet,
         currency: it.currency,
@@ -199,4 +201,15 @@ export function expandToRows(d: ImportBody, createdByEmail: string | null) {
     }
   }
   return rows;
+}
+
+// Kody nadane zapisanym pozycjom: baza zwraca listę kodów w kolejności wierszy (pozycja 1 x ilość, pozycja 2 x ilość...).
+export function codeRanges(items: { name: string; quantity: number }[], codes: string[]): { name: string; quantity: number; first: string; last: string }[] {
+  const out: { name: string; quantity: number; first: string; last: string }[] = [];
+  let i = 0;
+  for (const it of items) {
+    out.push({ name: it.name, quantity: it.quantity, first: codes[i], last: codes[i + it.quantity - 1] });
+    i += it.quantity;
+  }
+  return out;
 }

@@ -153,3 +153,56 @@ begin
     perform set_config('parts.repair_sync', '0', true);
   end if;
 end $$;
+
+-- ---- Kody części nadawane automatycznie przy imporcie z faktury (06.10.2026, na prośbę właściciela) ----
+-- Każda sztuka dostaje własny, UNIKALNY kod z serii 10xxxxxx (ostatni użyty przed wdrożeniem: 10013681), nadawany kolejno i atomowo
+-- w jednej transakcji razem z zapisem wierszy — dwie równoległe importy nie dostaną tych samych kodów, a nieudany zapis nie zostawia dziur.
+-- Kod z faktury (symbol dostawcy) trafia do uwag. Funkcję woła tylko serwer (service_role).
+create table if not exists service_part_code_counter (
+  id int primary key default 1 check (id = 1),
+  last_value bigint not null
+);
+insert into service_part_code_counter (id, last_value) values (1, 10013681) on conflict (id) do nothing;
+alter table service_part_code_counter enable row level security; -- bez polityk: tylko service_role / funkcje security definer
+
+create or replace function service_parts_next_code() returns bigint
+language sql stable security definer set search_path = public as $$
+  select greatest(
+    (select last_value from service_part_code_counter where id = 1),
+    coalesce((select max(part_code::bigint) from service_parts where part_code ~ '^10[0-9]{6}$'), 0)
+  ) + 1;
+$$;
+
+create or replace function service_parts_import(p_rows jsonb) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare
+  n int := jsonb_array_length(p_rows);
+  base bigint;
+  r record;
+  codes jsonb := '[]'::jsonb;
+begin
+  if n = 0 then return codes; end if;
+  perform 1 from service_part_code_counter where id = 1 for update; -- blokada na czas importu: kody kolejno, bez dubli
+  base := service_parts_next_code() - 1;
+  if base + n > 10999999 then
+    raise exception 'Seria kodów 10xxxxxx jest wyczerpana (%).', base;
+  end if;
+  update service_part_code_counter set last_value = base + n where id = 1;
+  for r in select value as v from jsonb_array_elements(p_rows) with ordinality as t(value, ord) order by ord loop
+    base := base + 1;
+    insert into service_parts (received_at, invoice_no, invoice_date, supplier, status, notes, name, part_code, batch_qty,
+                               price_net, currency, nbp_rate, price_pln, source, created_by_email)
+    values (nullif(r.v ->> 'received_at', '')::date, nullif(r.v ->> 'invoice_no', ''), nullif(r.v ->> 'invoice_date', '')::date,
+            nullif(r.v ->> 'supplier', ''), coalesce(nullif(r.v ->> 'status', ''), 'Dotarło'), nullif(r.v ->> 'notes', ''),
+            r.v ->> 'name', base::text, nullif(r.v ->> 'batch_qty', '')::int,
+            nullif(r.v ->> 'price_net', '')::numeric, nullif(r.v ->> 'currency', ''), nullif(r.v ->> 'nbp_rate', '')::numeric,
+            nullif(r.v ->> 'price_pln', '')::numeric, coalesce(nullif(r.v ->> 'source', ''), 'invoice'), nullif(r.v ->> 'created_by_email', ''));
+    codes := codes || to_jsonb(base::text);
+  end loop;
+  return codes;
+end $$;
+
+revoke all on function service_parts_import(jsonb) from public, anon, authenticated;
+revoke all on function service_parts_next_code() from public, anon, authenticated;
+grant execute on function service_parts_import(jsonb) to service_role;
+grant execute on function service_parts_next_code() to service_role;

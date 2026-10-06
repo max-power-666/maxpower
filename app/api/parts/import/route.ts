@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { requireRole } from "@/lib/serverAuth";
-import { expandToRows, validateImport } from "@/lib/partsInvoice";
+import { codeRanges, expandToRows, validateImport } from "@/lib/partsInvoice";
 
 // Zapis zaakceptowanych pozycji do service_parts (Serwis -> Części -> "Importuj z faktury", 06.10.2026). Tabela nie ma polityki insert
 // (dane zakupowe są niezmienne dla zalogowanych), więc zapisuje serwer. Serwer waliduje wszystko jeszcze raz i pilnuje duplikatów faktury.
@@ -30,19 +30,20 @@ export async function POST(request: Request) {
 
   const { data: u } = await db.auth.admin.getUserById(uid);
   const rows = expandToRows(d, u?.user?.email ?? null);
-  let withEmail = true;
-  for (let i = 0; i < rows.length; i += 200) {
-    let chunk: Record<string, unknown>[] = rows.slice(i, i + 200);
-    if (!withEmail) chunk = chunk.map(({ created_by_email, ...rest }) => rest);
-    let { error } = await db.from("service_parts").insert(chunk);
-    if (error && error.code === "42703" && withEmail) {
-      // kolumna created_by_email (service-parts.sql) jeszcze nie istnieje — zapis bez niej
-      withEmail = false;
-      ({ error } = await db.from("service_parts").insert(chunk.map(({ created_by_email, ...rest }) => rest)));
-    }
-    if (error) {
-      return NextResponse.json({ error: `Zapis przerwany po ${i} z ${rows.length} wierszy: ${error.message}${i > 0 ? " — część wierszy już jest w bazie, sprawdź listę przed ponowieniem." : ""}` }, { status: 500 });
-    }
+  // Kody części nadaje baza (service_parts_import: kolejno, atomowo, razem z zapisem wierszy w jednej transakcji).
+  const { data: codes, error } = await db.rpc("service_parts_import", { p_rows: rows });
+  if (error) {
+    const missing = error.code === "PGRST202" || error.code === "42883" || /service_parts_import/.test(error.message) && /could not find|does not exist/i.test(error.message);
+    return NextResponse.json({ error: missing ? "Brak funkcji nadającej kody części — uruchom ponownie supabase/service-parts.sql w Supabase (SQL Editor)." : `Nie udało się zapisać: ${error.message}` }, { status: 500 });
   }
-  return NextResponse.json({ ok: true, saved: rows.length, items: d.items.length });
+  return NextResponse.json({ ok: true, saved: rows.length, items: d.items.length, ranges: codeRanges(d.items, codes as string[]) });
+}
+
+// Podgląd pierwszego wolnego kodu (nieblokujący — ostateczne numery nadaje zapis).
+export async function GET(request: Request) {
+  const db = admin();
+  if (!(await requireRole(request, db, ["Admin", "Manager", "Serwis", "Kierownik serwisu"]))) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
+  const { data, error } = await db.rpc("service_parts_next_code");
+  if (error) return NextResponse.json({ ok: true, next: null });
+  return NextResponse.json({ ok: true, next: String(data) });
 }

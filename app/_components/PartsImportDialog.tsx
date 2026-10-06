@@ -1,13 +1,13 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 
 // Import części z faktury zakupu (Serwis -> Części, 06.10.2026): plik -> odczyt (model Claude, /api/parts/parse-invoice) -> lista do
 // poprawienia i akceptacji -> zapis do service_parts (/api/parts/import). Nic nie trafia do bazy bez kliknięcia "Zapisz".
 // Można też zacząć od pustej listy ("Dodaj ręcznie"). Jedna pozycja z ilością N zapisze się jako N wierszy (jedna sztuka = jeden wiersz).
 
-type Row = { key: number; name: string; partCode: string; quantity: string; currency: string; priceNet: string; rate: string; pricePln: string; note: string | null };
+type Row = { key: number; name: string; supplierCode: string; quantity: string; currency: string; priceNet: string; rate: string; pricePln: string; note: string | null };
 type Header = { supplier: string; invoiceNo: string; invoiceDate: string; receivedAt: string };
 
 const today = () => new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Warsaw" });
@@ -20,7 +20,9 @@ const inp = "border border-line bg-white px-2 py-1 rounded text-sm w-full";
 let keySeq = 1;
 
 export default function PartsImportDialog({ session, onClose, onSaved }: { session: Session; onClose: () => void; onSaved: () => void }) {
-  const [stage, setStage] = useState<"pick" | "parsing" | "review" | "saving">("pick");
+  const [stage, setStage] = useState<"pick" | "parsing" | "review" | "saving" | "done">("pick");
+  const [nextCode, setNextCode] = useState<string | null>(null);
+  const [ranges, setRanges] = useState<{ name: string; quantity: number; first: string; last: string }[]>([]);
   const [error, setError] = useState("");
   const [dupInfo, setDupInfo] = useState("");
   const [fileName, setFileName] = useState("");
@@ -31,7 +33,12 @@ export default function PartsImportDialog({ session, onClose, onSaved }: { sessi
   const fileInput = useRef<HTMLInputElement>(null);
   const auth = { Authorization: `Bearer ${session.access_token}` };
 
-  const blankRow = (currency = "PLN"): Row => ({ key: keySeq++, name: "", partCode: "", quantity: "1", currency, priceNet: "", rate: currency === "PLN" ? "1" : "", pricePln: "", note: null });
+  useEffect(() => {
+    fetch("/api/parts/import", { headers: auth }).then((r) => r.json()).then((d) => setNextCode(d?.next ?? null)).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const blankRow = (currency = "PLN"): Row => ({ key: keySeq++, name: "", supplierCode: "", quantity: "1", currency, priceNet: "", rate: currency === "PLN" ? "1" : "", pricePln: "", note: null });
 
   async function onFile(file: File | undefined) {
     if (!file) return;
@@ -55,7 +62,7 @@ export default function PartsImportDialog({ session, onClose, onSaved }: { sessi
           return {
             key: keySeq++,
             name: it.name,
-            partCode: it.partCode || "",
+            supplierCode: it.partCode || "",
             quantity: String(it.quantity),
             currency: inv.currency,
             priceNet: net === null ? "" : String(net),
@@ -133,7 +140,7 @@ export default function PartsImportDialog({ session, onClose, onSaved }: { sessi
           invoiceNo: header.invoiceNo || null,
           invoiceDate: header.invoiceDate || null,
           receivedAt: header.receivedAt || null,
-          items: rows.map((r) => ({ name: r.name, partCode: r.partCode || null, quantity: toNum(r.quantity), currency: r.currency || "PLN", priceNet: toNum(r.priceNet), nbpRate: r.currency === "PLN" ? 1 : toNum(r.rate), pricePln: toNum(r.pricePln) })),
+          items: rows.map((r) => ({ name: r.name, supplierCode: r.supplierCode || null, quantity: toNum(r.quantity), currency: r.currency || "PLN", priceNet: toNum(r.priceNet), nbpRate: r.currency === "PLN" ? 1 : toNum(r.rate), pricePln: toNum(r.pricePln) })),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -144,7 +151,8 @@ export default function PartsImportDialog({ session, onClose, onSaved }: { sessi
       }
       if (!res.ok || data?.error) throw new Error(data?.error || "Nie udało się zapisać.");
       onSaved();
-      onClose();
+      setRanges(data.ranges || []);
+      setStage("done");
     } catch (e: any) {
       setError(e.message || "Nie udało się zapisać.");
       setStage("review");
@@ -194,6 +202,35 @@ export default function PartsImportDialog({ session, onClose, onSaved }: { sessi
           </div>
         )}
 
+        {stage === "done" && (
+          <div>
+            <p className="text-sm font-semibold text-teal mb-3">Zapisano {ranges.reduce((n, x) => n + x.quantity, 0)} szt. w częściach. Nadane kody:</p>
+            <div className="bg-white border border-line">
+              <table className="w-full text-sm">
+                <thead><tr className="text-left text-xs text-inksoft border-b border-line"><th className="p-2">Nazwa części</th><th className="p-2 text-right">Szt.</th><th className="p-2">Kody (do naklejenia na sztukach)</th></tr></thead>
+                <tbody>
+                  {ranges.map((x, i) => (
+                    <tr key={i} className="border-b border-line last:border-0">
+                      <td className="p-2">{x.name}</td>
+                      <td className="p-2 text-right font-mono">{x.quantity}</td>
+                      <td className="p-2 font-mono font-semibold">{x.quantity > 1 ? `${x.first} – ${x.last}` : x.first}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex gap-3 mt-4">
+              <button
+                onClick={() => navigator.clipboard?.writeText(ranges.map((x) => `${x.name}\t${x.quantity > 1 ? `${x.first}-${x.last}` : x.first}`).join("\n"))}
+                className="bg-white border border-line px-4 py-2 rounded text-sm font-semibold"
+              >
+                Kopiuj listę
+              </button>
+              <button onClick={onClose} className="bg-ink text-paper px-5 py-2 rounded text-sm font-semibold">Zamknij</button>
+            </div>
+          </div>
+        )}
+
         {(stage === "review" || stage === "saving") && (
           <div>
             {fileName && <p className="text-xs text-inksoft mb-3">Odczytano z pliku „{fileName}”. <b>Sprawdź każdą pozycję</b> — odczyt bywa nieidealny (zwłaszcza ze zdjęć).</p>}
@@ -218,7 +255,7 @@ export default function PartsImportDialog({ session, onClose, onSaved }: { sessi
                   <tr className="text-left text-xs text-inksoft border-b border-line">
                     <th className="p-2 w-8">#</th>
                     <th className="p-2">Nazwa części</th>
-                    <th className="p-2 w-36">Kod</th>
+                    <th className="p-2 w-36" title="Kod/symbol z faktury — zapisze się w uwagach. Własny, unikalny kod każdej sztuki nadaje system.">Kod dostawcy</th>
                     <th className="p-2 w-16">Ilość</th>
                     <th className="p-2 w-20">Waluta</th>
                     <th className="p-2 w-28">Cena netto / szt.</th>
@@ -236,7 +273,7 @@ export default function PartsImportDialog({ session, onClose, onSaved }: { sessi
                         {r.note && <div className="text-[10px] text-amber mt-0.5">{r.note}</div>}
                         {issues[i].length > 0 && <div className="text-[10px] text-rust mt-0.5">{issues[i].join(", ")}</div>}
                       </td>
-                      <td className="p-2"><input value={r.partCode} onChange={(e) => patchRow(r.key, { partCode: e.target.value })} className={inp + " font-mono"} /></td>
+                      <td className="p-2"><input value={r.supplierCode} onChange={(e) => patchRow(r.key, { supplierCode: e.target.value })} className={inp + " font-mono"} placeholder="opcjonalnie" /></td>
                       <td className="p-2"><input value={r.quantity} onChange={(e) => patchRow(r.key, { quantity: e.target.value })} inputMode="numeric" className={inp + " text-right"} /></td>
                       <td className="p-2"><input value={r.currency} onChange={(e) => changeCurrency(r.key, e.target.value)} className={inp + " uppercase"} /></td>
                       <td className="p-2"><input value={r.priceNet} onChange={(e) => patchRow(r.key, { priceNet: e.target.value }, true)} inputMode="decimal" className={inp + " text-right font-mono"} /></td>
@@ -265,7 +302,7 @@ export default function PartsImportDialog({ session, onClose, onSaved }: { sessi
             </div>
             <p className="text-[11px] text-inksoft mt-3 max-w-3xl">
               Cena „netto PLN / szt.” to cena jednostkowa bez VAT — ta, która liczy się do kosztu serwisu w Marży. Pozycja z ilością większą niż 1 zapisze się jako tyle samo wierszy (każdą sztukę przypisujesz potem do urządzenia osobno).
-              Nowe części dostają status „Dotarło”.
+              Nowe części dostają status „Dotarło” i <b>własny, unikalny kod</b> (kolejne numery serii 10xxxxxx{nextCode ? <>, od <span className="font-mono">{nextCode}</span></> : null}) — kod z faktury zostaje w uwagach. Ostateczne numery nadaje zapis i pokaże je po zapisaniu.
             </p>
           </div>
         )}
