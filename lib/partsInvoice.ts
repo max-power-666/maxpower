@@ -56,7 +56,7 @@ export const REPORT_INVOICE_TOOL = {
 
 export const INVOICE_SYSTEM_PROMPT =
   "Jesteś narzędziem do odczytu faktur zakupu części do napraw elektroniki (konsole, smartfony, laptopy). " +
-  "Przeczytaj załączony dokument i zawsze zgłoś wynik narzędziem report_invoice. Zasady: " +
+  "Przeczytaj załączony dokument i ZAWSZE zgłoś wynik, wywołując narzędzie report_invoice (nie odpowiadaj tekstem). Zasady: " +
   "(1) tylko pozycje towarowe — pomiń dostawę/transport, opłaty, rabaty ogólne, sumy i podsumowania VAT; " +
   "(2) unit_price_net to cena JEDNOSTKOWA NETTO za 1 sztukę; gdy dokument podaje tylko ceny brutto, a znana jest stawka VAT, przelicz na netto (brutto / (1 + stawka)) i zaznacz to w note; " +
   "gdy faktura podaje wartość pozycji (nie cenę jednostkową), podziel ją przez ilość; " +
@@ -114,24 +114,31 @@ export async function parseInvoiceWithClaude(opts: {
   fetchImpl?: typeof fetch;
 }): Promise<{ invoice: ParsedInvoice; usage: { input: number; output: number } }> {
   const f = opts.fetchImpl ?? fetch;
-  const res = await f("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-api-key": opts.apiKey, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({
-      model: opts.model,
-      max_tokens: 8000,
-      system: INVOICE_SYSTEM_PROMPT,
-      tools: [REPORT_INVOICE_TOOL],
-      tool_choice: { type: "tool", name: REPORT_INVOICE_TOOL.name },
-      messages: [{ role: "user", content: buildInvoiceContent(opts.file) }],
-    }),
-  });
-  const data: any = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(data?.error?.message || `Błąd API Anthropic (${res.status}).`);
-  const tu = (Array.isArray(data?.content) ? data.content : []).find((b: any) => b.type === "tool_use" && b.name === REPORT_INVOICE_TOOL.name);
-  if (!tu) throw new Error("Model nie zwrócił odczytu faktury — spróbuj ponownie albo dodaj pozycje ręcznie.");
-  if (data?.stop_reason === "max_tokens") throw new Error("Dokument ma zbyt wiele pozycji, żeby odczytać go naraz — podziel plik na mniejsze części.");
-  return { invoice: normalizeInvoice(tu.input), usage: { input: Number(data?.usage?.input_tokens) || 0, output: Number(data?.usage?.output_tokens) || 0 } };
+  const usage = { input: 0, output: 0 };
+  const convo: { role: "user" | "assistant"; content: string | Block[] }[] = [{ role: "user", content: buildInvoiceContent(opts.file) }];
+  // Nowsze modele nie przyjmują wymuszonego tool_choice {type: "tool"} (błąd 400 "type tool and any are not supported for this model"),
+  // więc zostawiamy tryb auto — prompt każe zawsze zgłosić wynik narzędziem, a gdy model mimo to odpowie tekstem, prosimy raz jeszcze.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = await f("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": opts.apiKey, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({ model: opts.model, max_tokens: 8000, system: INVOICE_SYSTEM_PROMPT, tools: [REPORT_INVOICE_TOOL], messages: convo }),
+    });
+    const data: any = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(data?.error?.message || `Błąd API Anthropic (${res.status}).`);
+    usage.input += Number(data?.usage?.input_tokens) || 0;
+    usage.output += Number(data?.usage?.output_tokens) || 0;
+    const content: Block[] = Array.isArray(data?.content) ? data.content : [];
+    const tu: any = content.find((b: any) => b.type === "tool_use" && b.name === REPORT_INVOICE_TOOL.name);
+    if (tu) {
+      if (data?.stop_reason === "max_tokens") throw new Error("Dokument ma zbyt wiele pozycji, żeby odczytać go naraz — podziel plik na mniejsze części.");
+      return { invoice: normalizeInvoice(tu.input), usage };
+    }
+    if (data?.stop_reason === "max_tokens") throw new Error("Dokument ma zbyt wiele pozycji, żeby odczytać go naraz — podziel plik na mniejsze części.");
+    convo.push({ role: "assistant", content });
+    convo.push({ role: "user", content: "Zgłoś wynik narzędziem report_invoice (tylko narzędziem, bez komentarza)." });
+  }
+  throw new Error("Model nie zwrócił odczytu faktury — spróbuj ponownie albo dodaj pozycje ręcznie.");
 }
 
 // ---- Zapis ----
