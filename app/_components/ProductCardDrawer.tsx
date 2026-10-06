@@ -7,7 +7,7 @@ import { escapeLike } from "@/lib/search";
 import { computeTradeInCosts, PCC_RATE, PCC_THRESHOLD_PLN } from "@/lib/buybackCosts";
 import { rateBeforeDate, warsawDate, type NbpRate } from "@/lib/nbp";
 import { TRADEIN_PAID_STATUSES } from "@/lib/stockCosts";
-import { SERVICE_STATUSES, SERVICE_TASKS, TEST_STATUSES, labelFor, productStatusLabel } from "@/lib/workLog";
+import { INTAKE_STATUSES, SERVICE_STATUSES, SERVICE_TASKS, TEST_STATUSES, labelFor, productStatusLabel } from "@/lib/workLog";
 
 // Karta produktu po numerze seryjnym. Nie ma własnej tabeli — składa się z tego, co system już wie
 // o tym numerze: stan z Fakturowni, testy (test_log), naprawy (service_log) i obsługa paczki
@@ -40,6 +40,10 @@ type ServiceRow = {
 type FieldChange = { field: string; from: string | null; to: string | null };
 type IntakeRow = {
   order_public_id: string;
+  status?: string | null;
+  defects?: string[] | null; // usterki wpisane w Trade-in (kolumna defects, buyback-orders.sql 06.10.2026)
+  notes?: string | null;
+  entered_by_email?: string | null;
   history: { action: "created" | "edited"; by_email: string | null; at: string; changes?: FieldChange[] }[] | null;
 };
 type OrderRow = {
@@ -85,6 +89,7 @@ export default function ProductCardDrawer({
 }) {
   const [stock, setStock] = useState<StockRow[]>([]);
   const [orders, setOrders] = useState<OrderRow[]>([]);
+  const [intakes, setIntakes] = useState<IntakeRow[]>([]);
   // Kursy EUR (NBP) — do przeliczenia wartości zakupu z Trade-in na PLN (podstawa PCC)
   const [eurRates, setEurRates] = useState<NbpRate[]>([]);
   useEffect(() => {
@@ -134,8 +139,15 @@ export default function ProductCardDrawer({
             .from("service_log")
             .select("employee_email, task_type, status, notes, started_at, finished_at")
             .ilike("device_ref", pattern),
-          supabase.from("buyback_order_intake").select("order_public_id, history").ilike("serial_number", pattern),
+          supabase.from("buyback_order_intake").select("order_public_id, status, defects, notes, entered_by_email, history").ilike("serial_number", pattern),
         ]);
+        // Kolumna usterek (buyback-orders.sql) może jeszcze nie istnieć — wtedy odczyt bez niej.
+        if (intakeRes.error && intakeRes.error.code === "42703") {
+          intakeRes = (await supabase
+            .from("buyback_order_intake")
+            .select("order_public_id, status, notes, entered_by_email, history")
+            .ilike("serial_number", pattern)) as unknown as typeof intakeRes;
+        }
         // Kolumn statusu produktu (inventory.sql, 05.10.2026) może jeszcze nie być w widoku — wtedy odczyt bez nich, żeby karta działała.
         if (stockRes.error && stockRes.error.code === "42703") {
           stockRes = (await supabase
@@ -201,6 +213,7 @@ export default function ProductCardDrawer({
         if (cancelled) return;
         setStock(stockRows);
         setOrders(orderRows);
+        setIntakes(intakes);
         setEvents(list);
       } catch (e: any) {
         if (!cancelled) setError(`Nie udało się wczytać karty: ${e.message || e}`);
@@ -214,7 +227,7 @@ export default function ProductCardDrawer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serial]);
 
-  const nothingFound = !loading && !error && stock.length === 0 && orders.length === 0 && events.length === 0;
+  const nothingFound = !loading && !error && stock.length === 0 && orders.length === 0 && intakes.length === 0 && events.length === 0;
 
   return (
     <div className="fixed inset-0 bg-black/30 flex justify-end z-50" onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -248,6 +261,32 @@ export default function ProductCardDrawer({
                     <Row label="VAT" value={s.vat} />
                     <Row label="Status produktu" value={productStatusLabel(s.product_status_source, s.product_status)} />
                     <Row label="Dodano" value={s.product_created_at ? fmtDateTime(s.product_created_at) : null} />
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {intakes.length > 0 && (
+              <div className="mt-6">
+                <h3 className="text-xs font-semibold text-inksoft mb-2">TRADE-IN</h3>
+                {intakes.map((it) => (
+                  <div key={it.order_public_id} className="border border-line bg-white mb-2">
+                    <Row label="Numer zamówienia" value={it.order_public_id} mono />
+                    <Row label="Status obsługi" value={it.status ? labelFor(INTAKE_STATUSES, it.status) : null} />
+                    <div className="flex justify-between gap-4 px-3 py-2 border-b border-line text-sm">
+                      <span className="text-inksoft">Usterki</span>
+                      {it.defects && it.defects.length > 0 ? (
+                        <span className="flex flex-wrap justify-end gap-1">
+                          {it.defects.map((d, i) => (
+                            <span key={i} className="text-xs font-semibold px-2 py-0.5 rounded-full bg-rustsoft text-rust">{d}</span>
+                          ))}
+                        </span>
+                      ) : (
+                        <span className="font-semibold">—</span>
+                      )}
+                    </div>
+                    <Row label="Uwagi" value={it.notes} />
+                    <Row label="Obsłużył(a)" value={it.entered_by_email ? displayNameForEmail(it.entered_by_email, members) : null} />
                   </div>
                 ))}
               </div>
