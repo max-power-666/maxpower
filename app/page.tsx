@@ -547,6 +547,7 @@ export default function Home() {
             if (target) setView(target);
           }}
         />
+        <RcpWidget session={session} role={role} onOpenRcp={() => effectiveAccess(role ?? "", viewAccess).includes("rcp") && setView("rcp")} />
         <nav className="flex flex-col gap-1">
           {TABS.filter((t) => spaceOf(t.key) === spaceOf(view) && effectiveAccess(role ?? "", viewAccess).includes(t.key)).map((t) => (
             <button key={t.key} onClick={() => setView(t.key)} className={`text-left px-2 py-2 rounded text-sm font-medium ${view === t.key ? "bg-white border border-line" : "text-inksoft"}`}>
@@ -567,7 +568,6 @@ export default function Home() {
       <main className="flex-1">
         <div className="flex items-center justify-between px-8 py-5 border-b border-line">
           <h1 className="text-lg font-semibold">{TABS.find((t) => t.key === view)?.label}</h1>
-          <div className="flex items-center gap-8">
           {view === "inventory" && (
             <div className="flex items-center gap-3">
               <button
@@ -582,8 +582,6 @@ export default function Home() {
               </span>
             </div>
           )}
-          <RcpWidget session={session} role={role} onOpenRcp={() => effectiveAccess(role ?? "", viewAccess).includes("rcp") && setView("rcp")} />
-          </div>
         </div>
 
         <div className="p-8">

@@ -11,7 +11,7 @@ import {
 } from "@/lib/rcp";
 
 // Zakładka RCP (06.10.2026, etap 1). Pracownik: "Mój czas" (dziś, miesiąc, godziny, przerwy), widzi TYLKO swoje (RLS w bazie). Admin i Manager dodatkowo: "Teraz w pracy",
-// "Ewidencja" miesięczna (z korektami i eksportem CSV) i ustawienia (adresy IP komputerów w firmie — zmienia tylko Admin). Rejestracja idzie z widżetu w prawym górnym rogu.
+// "Ewidencja" miesięczna (z korektami i eksportem CSV) i ustawienia (adresy IP komputerów w firmie — zmienia tylko Admin). Rejestracja idzie z widżetu na lewym pasku.
 
 type Sub = "mine" | "now" | "records" | "settings";
 const pill = (active: boolean) => `px-3 py-1.5 rounded-full text-sm font-semibold border ${active ? "bg-ink text-paper border-ink" : "bg-white border-line"}`;
@@ -133,7 +133,7 @@ function MyTime({ session, members }: { session: Session; members: MemberLite[] 
       </div>
 
       <h2 className="text-xs font-semibold text-inksoft mb-2">DZISIAJ</h2>
-      <div className="border border-line bg-white p-4 mb-6">{todaySegs.length === 0 ? <span className="text-sm text-inksoft">Dziś jeszcze nic nie zarejestrowano — użyj przycisku „Rozpocznij pracę” w prawym górnym rogu.</span> : <SegmentChips segs={todaySegs} />}</div>
+      <div className="border border-line bg-white p-4 mb-6">{todaySegs.length === 0 ? <span className="text-sm text-inksoft">Dziś jeszcze nic nie zarejestrowano — użyj przycisku „Rozpocznij pracę” na lewym pasku.</span> : <SegmentChips segs={todaySegs} />}</div>
 
       <div className="flex items-center justify-between mb-2">
         <h2 className="text-xs font-semibold text-inksoft">MOJE DNI</h2>
@@ -268,7 +268,7 @@ function NowBoard({ members }: { members: MemberLite[] }) {
           </tbody>
         </table>
       </div>
-      <p className="text-[11px] text-inksoft mt-3">Odświeża się co 30 s. Osoby z rolą "Admin" i "Manager" też rejestrują czas (widżet w prawym górnym rogu).</p>
+      <p className="text-[11px] text-inksoft mt-3">Odświeża się co 30 s. Osoby z rolą "Admin" i "Manager" też rejestrują czas (widżet na lewym pasku).</p>
     </div>
   );
 }
