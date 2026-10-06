@@ -19,6 +19,7 @@ import CategoryBreakdown, { FAKTUROWNIA_PALETTE } from "./_components/CategoryBr
 import OverviewSalesDashboard from "./_components/OverviewSalesDashboard";
 import OverviewMarginChart from "./_components/OverviewMarginChart";
 import RcpView from "./_components/RcpView";
+import RcpWidget from "./_components/RcpWidget";
 import ReturnsView from "./_components/ReturnsView";
 import ShopProductsView from "./_components/ShopProductsView";
 import ShopStockView from "./_components/ShopStockView";
@@ -566,6 +567,7 @@ export default function Home() {
       <main className="flex-1">
         <div className="flex items-center justify-between px-8 py-5 border-b border-line">
           <h1 className="text-lg font-semibold">{TABS.find((t) => t.key === view)?.label}</h1>
+          <div className="flex items-center gap-8">
           {view === "inventory" && (
             <div className="flex items-center gap-3">
               <button
@@ -580,6 +582,8 @@ export default function Home() {
               </span>
             </div>
           )}
+          <RcpWidget session={session} role={role} onOpenRcp={() => effectiveAccess(role ?? "", viewAccess).includes("rcp") && setView("rcp")} />
+          </div>
         </div>
 
         <div className="p-8">
@@ -674,7 +678,7 @@ export default function Home() {
 
           {view === "ai" && <AiView session={session} />}
 
-          {view === "rcp" && <RcpView />}
+          {view === "rcp" && <RcpView session={session} role={role} members={members} />}
 
           {view === "returns" && <ReturnsView />}
 

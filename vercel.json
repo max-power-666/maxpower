@@ -39,6 +39,10 @@
     {
       "path": "/api/nbp/sync",
       "schedule": "0 13 * * *"
+    },
+    {
+      "path": "/api/rcp/close-stale",
+      "schedule": "30 23 * * *"
     }
   ]
 }
