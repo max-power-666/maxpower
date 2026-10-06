@@ -11,6 +11,7 @@ import ShippingView from "./_components/ShippingView";
 import InvoicesView from "./_components/InvoicesView";
 import AiView from "./_components/AiView";
 import MarginView from "./_components/MarginView";
+import PointsView from "./_components/PointsView";
 import NbpView from "./_components/NbpView";
 import { stockTradeInCosts, type BuybackOrderLite, type CostLine } from "@/lib/stockCosts";
 import type { NbpRate } from "@/lib/nbp";
@@ -31,7 +32,7 @@ import { displayNameForEmail } from "@/lib/displayName";
 const ROLES = ["Admin", "Manager", "Magazyn", "Zamówienia", "Serwis", "Kierownik serwisu", "Testy", "Bidder", "Trade-in", "Sklep"];
 
 type ViewKey =
-  | "overview" | "inventory" | "sales" | "team" | "service" | "tests" | "tradein" | "orders" | "backlog" | "shipping" | "invoices" | "margin" | "nbp" | "ai" | "rcp" | "returns"
+  | "overview" | "inventory" | "sales" | "team" | "service" | "tests" | "tradein" | "orders" | "backlog" | "shipping" | "invoices" | "margin" | "points" | "nbp" | "ai" | "rcp" | "returns"
   // Recoo Sklep (backoffice sklepu, przełącznik w pasku bocznym):
   | "shop_products" | "shop_stock";
 
@@ -54,6 +55,7 @@ const TABS: { key: ViewKey; label: string; space?: Space }[] = [
   { key: "shipping", label: "Wysyłka" },
   { key: "invoices", label: "Faktury" },
   { key: "margin", label: "Marża" },
+  { key: "points", label: "Punktacja" }, // podsumowanie punktacji pracowników wg regulaminu, tylko Admin (06.10.2026)
   { key: "nbp", label: "NBP" },
   { key: "ai", label: "AI" },
   { key: "rcp", label: "RCP" },
@@ -80,7 +82,7 @@ const TABS: { key: ViewKey; label: string; space?: Space }[] = [
 // twardo zablokowane, tylko inny domyślny zestaw wg roli, jak każda inna zakładka.
 const ROLE_ACCESS: Record<string, ViewKey[]> = {
   // "ai" (asystent AI, 03.10.2026) — na tym etapie TYLKO Admin (także serwer: app/api/ai/ask); Manager go nie ma.
-  Admin: ["overview", "inventory", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "margin", "nbp", "ai", "rcp", "returns", "shop_products", "shop_stock"],
+  Admin: ["overview", "inventory", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "margin", "points", "nbp", "ai", "rcp", "returns", "shop_products", "shop_stock"],
   Manager: ["overview", "inventory", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "margin", "nbp", "rcp", "returns", "shop_products", "shop_stock"], // wszystko; Zespół tylko do odczytu, usuwa tylko Admin
   Magazyn: ["inventory", "backlog", "rcp", "returns"],
   Zamówienia: ["sales", "shipping", "invoices", "backlog", "rcp", "returns"],
@@ -662,6 +664,7 @@ export default function Home() {
           {view === "invoices" && <InvoicesView session={session} members={members} />}
 
           {view === "margin" && <MarginView session={session} members={members} />}
+          {view === "points" && <PointsView session={session} members={members} />}
 
           {view === "nbp" && <NbpView session={session} />}
 
