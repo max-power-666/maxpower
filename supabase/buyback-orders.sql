@@ -154,6 +154,27 @@ begin
   end if;
 end $$;
 
+-- Kanały skupu (06.10.2026, na prośbę właściciela): oprócz Buyback (Back Market) paczki z Allegro, Vinted, OLX i Umowy. Dla kanałów innych
+-- niż Buyback pracownik wpisuje numer PRZESYŁKI, który jest kluczem wpisu (order_public_id, nadal unikalny — ta sama paczka nie zaliczy się dwa razy),
+-- bo nie ma dla nich zamówienia w buyback_orders. Dlatego klucz obcy do buyback_orders znika, a jego rolę dla kanału 'buyback' przejmuje trigger
+-- (wpis Buyback wymaga istniejącego zamówienia BM). Lista kanałów jest w aplikacji (lib/workLog.ts, INTAKE_CHANNELS) — kolumna to zwykły tekst jak role.
+alter table buyback_order_intake add column if not exists channel text not null default 'buyback';
+alter table buyback_order_intake drop constraint if exists buyback_order_intake_order_public_id_fkey;
+create index if not exists buyback_order_intake_channel_idx on buyback_order_intake (channel);
+
+create or replace function buyback_order_intake_check_order() returns trigger
+language plpgsql as $$
+begin
+  if coalesce(new.channel, 'buyback') = 'buyback'
+     and not exists (select 1 from buyback_orders o where o.order_public_id = new.order_public_id) then
+    raise exception 'Nie ma zamówienia Back Market o numerze %.', new.order_public_id using errcode = '23503';
+  end if;
+  return new;
+end $$;
+drop trigger if exists buyback_order_intake_check_order on buyback_order_intake;
+create trigger buyback_order_intake_check_order before insert or update of order_public_id, channel on buyback_order_intake
+  for each row execute function buyback_order_intake_check_order();
+
 -- Warunek kompletności: statusy "obsluzona", "kontroferta" i "ok_dok" (30.09.2026 — wszystkie trzy dotyczą
 -- konkretnego, już zidentyfikowanego urządzenia, więc wymagają tego samego kompletu; "problem" zostaje bez
 -- wymagań, bo paczka mogła nie dojść do etapu identyfikacji) wymagają numeru seryjnego, SKU i liczby padów.

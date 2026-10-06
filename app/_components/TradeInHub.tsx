@@ -10,7 +10,7 @@ import DefectsCell from "./DefectsCell";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { computeTradeInCosts, TRADEIN_CATEGORY_LABELS, TRADEIN_COMMISSION_RATE, PCC_RATE, PCC_THRESHOLD_PLN } from "@/lib/buybackCosts";
 import { rateBeforeDate, warsawDate, type NbpRate } from "@/lib/nbp";
-import { INTAKE_STATUSES, INTERVALS, fmtDuration, rangeStart, type Interval } from "@/lib/workLog";
+import { INTAKE_CHANNELS, INTAKE_STATUSES, INTERVALS, fmtDuration, intakeChannelLabel, rangeStart, type Interval } from "@/lib/workLog";
 import { escapeLike } from "@/lib/search";
 import { buybackStatusLabel, buybackStatusStyle } from "@/lib/buybackOrders";
 import { colorForUser } from "@/lib/userColors";
@@ -63,6 +63,7 @@ type IntakeEntry = {
   sku: string | null;
   pads: number | null;
   pad_serials: string[] | null;
+  channel?: string | null; // kanał skupu (kolumna channel, buyback-orders.sql 06.10.2026); brak/null = buyback
   defects?: string[] | null; // usterki paczki (kolumna defects, buyback-orders.sql 06.10.2026)
   docs: boolean;
   notes: string | null;
@@ -79,10 +80,28 @@ type IntakeEntry = {
 };
 
 const INTAKE_COLUMNS_BASE =
-  "id, order_public_id, serial_number, sku, pads, pad_serials, docs, notes, entered_by_email, entered_at, finished_at, status, points, history, buyback_orders(sku, customer_first_name, customer_last_name, status)";
-// Kolumna `defects` (Usterki) może jeszcze nie istnieć (nie uruchomiono buyback-orders.sql) — wtedy odczyt bez niej, a kolumna Usterek nie jest pokazywana.
+  "id, order_public_id, serial_number, sku, pads, pad_serials, docs, notes, entered_by_email, entered_at, finished_at, status, points, history";
+// Kolumny `defects` (Usterki) i `channel` (Kanał skupu) mogą jeszcze nie istnieć (nie uruchomiono buyback-orders.sql) — wtedy odczyt bez nich,
+// a odpowiednie kolumny nie są pokazywane. Dane zamówienia BM (SKU, klient, status) doczytujemy osobnym zapytaniem (loadBmOrders) —
+// klucz obcy do buyback_orders zniknął razem z kanałami innymi niż Buyback, więc PostgREST nie zrobi już osadzenia.
 let defectsColumnAvailable = true;
-const intakeColumns = () => (defectsColumnAvailable ? INTAKE_COLUMNS_BASE.replace("pad_serials, docs", "pad_serials, defects, docs") : INTAKE_COLUMNS_BASE);
+let channelColumnAvailable = true;
+const intakeColumns = () => {
+  let c = INTAKE_COLUMNS_BASE;
+  if (defectsColumnAvailable) c = c.replace("pad_serials, docs", "pad_serials, defects, docs");
+  if (channelColumnAvailable) c = c.replace("id, order_public_id", "id, order_public_id, channel");
+  return c;
+};
+const isBuyback = (row: { channel?: string | null }) => (row.channel ?? "buyback") === "buyback";
+
+// Dane zamówień Back Market dla wpisów Buyback (kolumny tylko do odczytu w liście).
+async function attachBmOrders(rows: IntakeEntry[]): Promise<IntakeEntry[]> {
+  const ids = Array.from(new Set(rows.filter(isBuyback).map((r) => r.order_public_id)));
+  if (ids.length === 0) return rows;
+  const { data } = await supabase.from("buyback_orders").select("order_public_id, sku, customer_first_name, customer_last_name, status").in("order_public_id", ids);
+  const byId = new Map(((data as (NonNullable<IntakeEntry["buyback_orders"]> & { order_public_id: string })[]) || []).map((o) => [o.order_public_id, o]));
+  return rows.map((r) => ({ ...r, buyback_orders: byId.get(r.order_public_id) ?? null }));
+}
 
 // Statusy Back Market po walidacji — takiego zamówienia nie walidujemy drugi raz.
 const BM_ALREADY_VALIDATED = ["VALIDATED", "PAID", "MONEY_TRANSFERED"];
@@ -191,6 +210,8 @@ function IntakeView({
   const validating = useRef(new Set<number>()); // paczki, dla których trwa zmiana statusu z walidacją (blokada podwójnego kliknięcia)
   const [loading, setLoading] = useState(false);
   const [hasDefects, setHasDefects] = useState(defectsColumnAvailable);
+  const [hasChannel, setHasChannel] = useState(channelColumnAvailable);
+  const [channel, setChannel] = useState<string>("buyback");
   const [error, setError] = useState("");
 
   const [lookup, setLookup] = useState("");
@@ -236,14 +257,19 @@ function IntakeView({
       let { data: rangeData, error: rangeErr } = rangeRes;
       if (rangeErr && rangeErr.code === "42703") ({ data: rangeData, error: rangeErr } = await rangeQuery("finished_at"));
       if (rangeErr) throw rangeErr;
-      if (listErr && listErr.code === "42703" && defectsColumnAvailable) {
+      if (listErr && listErr.code === "42703" && /defects/.test(listErr.message) && defectsColumnAvailable) {
         defectsColumnAvailable = false;
         setHasDefects(false);
         return load(); // ponów bez kolumny Usterek
       }
+      if (listErr && listErr.code === "42703" && /channel/.test(listErr.message) && channelColumnAvailable) {
+        channelColumnAvailable = false;
+        setHasChannel(false);
+        return load(); // ponów bez kolumny Kanał
+      }
       if (listErr) throw listErr;
       setRangeRows(rangeData || []);
-      setEntries((listData as unknown as IntakeEntry[]) || []);
+      setEntries(await attachBmOrders((listData as unknown as IntakeEntry[]) || []));
     } catch (e: any) {
       setError(`Nie udało się wczytać paczek: ${e.message || e}`);
     } finally {
@@ -291,15 +317,18 @@ function IntakeView({
   async function submit() {
     setFormError("");
     const value = lookup.trim().toUpperCase();
+    const fromBuyback = channel === "buyback";
     if (!value) {
-      setFormError("Podaj numer zamówienia lub numer przesyłki.");
+      setFormError(fromBuyback ? "Podaj numer zamówienia lub numer przesyłki." : "Podaj numer przesyłki.");
       return;
     }
     setSubmitting(true);
     try {
-      const orderId = await resolveOrderId(value);
+      // Buyback: numer zamówienia/przesyłki szukany wśród zamówień BM. Inne kanały: wpisany numer przesyłki jest kluczem wpisu.
+      const orderId = fromBuyback ? await resolveOrderId(value) : value;
       const { error: err } = await supabase.from("buyback_order_intake").insert({
         order_public_id: orderId,
+        ...(channelColumnAvailable ? { channel } : {}),
         entered_by_user_id: session.user.id,
         entered_by_email: session.user.email,
         status: "w_trakcie",
@@ -308,6 +337,9 @@ function IntakeView({
       if (err) {
         if (err.code === "23505" || err.message.includes("duplicate key")) {
           throw new Error(`Paczka ${orderId} jest już zarejestrowana — otwórz ją z listy poniżej.`);
+        }
+        if (!fromBuyback && !channelColumnAvailable) {
+          throw new Error("Kanały inne niż Buyback wymagają aktualizacji bazy — uruchom supabase/buyback-orders.sql.");
         }
         throw err;
       }
@@ -471,7 +503,7 @@ function IntakeView({
           return;
         }
       }
-      if (status === "obsluzona") {
+      if (status === "obsluzona" && isBuyback(row)) {
         const validation = await validateAtBackMarket(row);
         if (!validation) return;
         if (!validation.already) {
@@ -540,20 +572,28 @@ function IntakeView({
       <div className="border border-line bg-white p-4 mb-6">
         <h2 className="text-xs font-semibold text-inksoft mb-3">ROZPOCZNIJ OBSŁUGĘ PACZKI</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+          {hasChannel && (
+            <div>
+              <label className="text-xs font-semibold text-inksoft block mb-1">Kanał skupu</label>
+              <select value={channel} onChange={(e) => setChannel(e.target.value)} className="w-full border border-line bg-white px-2 py-2 rounded text-sm font-semibold">
+                {INTAKE_CHANNELS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+              </select>
+            </div>
+          )}
           <div className="md:col-span-2">
-            <label className="text-xs font-semibold text-inksoft block mb-1">Numer zamówienia lub numer przesyłki *</label>
+            <label className="text-xs font-semibold text-inksoft block mb-1">{channel === "buyback" ? "Numer zamówienia lub numer przesyłki *" : "Numer przesyłki *"}</label>
             <input
               value={lookup}
               onChange={(e) => setLookup(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && !submitting && submit()}
-              placeholder="np. ES-26394-ODTNR"
+              placeholder={channel === "buyback" ? "np. ES-26394-ODTNR" : "numer przesyłki (skan lub wpisz)"}
               className="w-full border border-line bg-white px-2 py-2 rounded text-sm font-mono"
             />
           </div>
         </div>
         {formError && <p className="text-rust text-xs mb-2">{formError}</p>}
         <button onClick={submit} disabled={submitting} className={btnPrimary}>
-          {submitting ? "Szukanie…" : "Rozpocznij"}
+          {submitting ? (channel === "buyback" ? "Szukanie…" : "Zapisywanie…") : "Rozpocznij"}
         </button>
       </div>
 
@@ -571,7 +611,8 @@ function IntakeView({
             <tr className="text-left text-xs text-inksoft border-b border-line">
               <th className="p-3">Rozpoczęto</th>
               <th className="p-3">Pracownik</th>
-              <th className="p-3">Numer zamówienia</th>
+              {hasChannel && <th className="p-3">Kanał</th>}
+              <th className="p-3">Numer zamówienia / przesyłki</th>
               <th className="p-3">Imię i nazwisko</th>
               <th className="p-3">Numer seryjny</th>
               <th className="p-3">Zadeklarowane SKU</th>
@@ -590,12 +631,17 @@ function IntakeView({
           </thead>
           <tbody>
             {!loading && entries.length === 0 && (
-              <tr><td colSpan={14 + (hasDefects ? 1 : 0) + (isAdminOrManager ? 1 : 0) + (isAdmin ? 1 : 0)} className="p-6 text-center text-inksoft text-sm">{search ? "Nic nie znaleziono dla tego numeru." : "Brak paczek — rozpocznij pierwszą powyżej."}</td></tr>
+              <tr><td colSpan={14 + (hasDefects ? 1 : 0) + (hasChannel ? 1 : 0) + (isAdminOrManager ? 1 : 0) + (isAdmin ? 1 : 0)} className="p-6 text-center text-inksoft text-sm">{search ? "Nic nie znaleziono dla tego numeru." : "Brak paczek — rozpocznij pierwszą powyżej."}</td></tr>
             )}
             {entries.map((e) => (
               <tr key={e.id} className="border-b border-line last:border-b-0" style={{ backgroundColor: rowColorForUser(e.entered_by_email) }}>
                 <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDateTime(e.entered_at)}</td>
                 <td className="p-3">{displayNameForEmail(e.entered_by_email, members)}</td>
+                {hasChannel && (
+                  <td className="p-3">
+                    <span className={`text-xs font-semibold px-2 py-1 rounded-full ${isBuyback(e) ? "bg-tealsoft text-teal" : "bg-ambersoft text-amber"}`}>{intakeChannelLabel(e.channel)}</span>
+                  </td>
+                )}
                 <td className="p-3">
                   <button onClick={() => onOpenOrder(e.order_public_id)} className="font-mono font-semibold text-teal hover:underline">
                     {e.order_public_id}
@@ -716,6 +762,8 @@ function OrderCardDrawer({
     });
   }, []);
   const [intake, setIntake] = useState<IntakeEntry | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const hasChannelCol = channelColumnAvailable;
   const [error, setError] = useState("");
 
   const [editing, setEditing] = useState(false);
@@ -745,6 +793,7 @@ function OrderCardDrawer({
     if (orderErr) setError(orderErr.message);
     setOrder((orderData as OrderDetail) ?? null);
     setIntake((intakeData as unknown as IntakeEntry) ?? null);
+    setLoaded(true);
   }
 
   function startEdit() {
@@ -842,21 +891,29 @@ function OrderCardDrawer({
         </div>
 
         {error && <p className="text-rust text-xs mb-4">{error}</p>}
-        {!order && !error && <p className="text-inksoft text-sm">Wczytywanie…</p>}
+        {!loaded && !error && <p className="text-inksoft text-sm">Wczytywanie…</p>}
+        {loaded && !order && !intake && !error && <p className="text-inksoft text-sm">Nie znaleziono tej paczki.</p>}
 
-        {order && (
+        {(order || intake) && (
           <>
             <div className="flex items-center gap-3 mb-6">
-              <span className={`inline-block text-xs font-semibold px-2 py-1 rounded-full ${buybackStatusStyle(order.status)}`}>{buybackStatusLabel(order.status)}</span>
-              {/* Panel sprzedawcy Back Market: jedna domena (.fr) dla zamówień ze wszystkich rynków */}
-              <a
-                href={`https://www.backmarket.fr/bo-seller/buyback/orders/${encodeURIComponent(order.order_public_id)}`}
-                target="_blank"
-                rel="noreferrer"
-                className="text-xs font-semibold text-teal hover:underline"
-              >
-                Otwórz w Back Market ↗
-              </a>
+              {intake && hasChannelCol && (
+                <span className={`inline-block text-xs font-semibold px-2 py-1 rounded-full ${isBuyback(intake) ? "bg-tealsoft text-teal" : "bg-ambersoft text-amber"}`}>{intakeChannelLabel(intake.channel)}</span>
+              )}
+              {order && (
+                <>
+                  <span className={`inline-block text-xs font-semibold px-2 py-1 rounded-full ${buybackStatusStyle(order.status)}`}>{buybackStatusLabel(order.status)}</span>
+                  {/* Panel sprzedawcy Back Market: jedna domena (.fr) dla zamówień ze wszystkich rynków */}
+                  <a
+                    href={`https://www.backmarket.fr/bo-seller/buyback/orders/${encodeURIComponent(order.order_public_id)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs font-semibold text-teal hover:underline"
+                  >
+                    Otwórz w Back Market ↗
+                  </a>
+                </>
+              )}
             </div>
 
             <div className="flex items-center justify-between mb-2">
@@ -935,6 +992,8 @@ function OrderCardDrawer({
               )}
             </div>
 
+            {order && (
+              <>
             <h3 className="text-xs font-semibold text-inksoft mb-2">PRODUKT</h3>
             <div className="border border-line bg-white mb-6">
               <Row label="Nazwa" value={order.product_title} />
@@ -1021,6 +1080,8 @@ function OrderCardDrawer({
                 </div>
               </>
             ) : null}
+              </>
+            )}
 
             <h3 className="text-xs font-semibold text-inksoft mb-2">LOG ZMIAN</h3>
             <div className="border border-line bg-white mb-6 p-3 text-sm">

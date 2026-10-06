@@ -97,6 +97,17 @@ export const INTAKE_STATUSES = [
   { key: "problem", label: "Problem" },
 ] as const;
 
+// Kanały skupu w Trade-in -> Wprowadzanie (06.10.2026). "buyback" = zamówienia Back Market (numer zamówienia/przesyłki szukany w buyback_orders,
+// walidacja w BM przy "Obsłużona"); pozostałe kanały to paczki z numerem przesyłki wpisywanym ręcznie, bez integracji z API.
+export const INTAKE_CHANNELS = [
+  { key: "buyback", label: "Buyback" },
+  { key: "allegro", label: "Allegro" },
+  { key: "vinted", label: "Vinted" },
+  { key: "olx", label: "OLX" },
+  { key: "umowa", label: "Umowa" },
+] as const;
+export const intakeChannelLabel = (key: string | null | undefined) => labelFor(INTAKE_CHANNELS as unknown as readonly { key: string; label: string }[], key || "buyback");
+
 // Status produktu w Magazynie (05.10.2026) — ostatni status z Serwisu (kolumna Status), Testów (kolumna Wynik) albo Trade-in (kolumna Status) (widok: product_status_source / product_status).
 export const PRODUCT_STATUS_SOURCES = {
   serwis: { label: "Serwis", statuses: SERVICE_STATUSES },

@@ -7,7 +7,7 @@ import { escapeLike } from "@/lib/search";
 import { computeTradeInCosts, PCC_RATE, PCC_THRESHOLD_PLN } from "@/lib/buybackCosts";
 import { rateBeforeDate, warsawDate, type NbpRate } from "@/lib/nbp";
 import { TRADEIN_PAID_STATUSES } from "@/lib/stockCosts";
-import { INTAKE_STATUSES, SERVICE_STATUSES, SERVICE_TASKS, TEST_STATUSES, labelFor, productStatusLabel } from "@/lib/workLog";
+import { INTAKE_STATUSES, intakeChannelLabel, SERVICE_STATUSES, SERVICE_TASKS, TEST_STATUSES, labelFor, productStatusLabel } from "@/lib/workLog";
 
 // Karta produktu po numerze seryjnym. Nie ma własnej tabeli — składa się z tego, co system już wie
 // o tym numerze: stan z Fakturowni, testy (test_log), naprawy (service_log) i obsługa paczki
@@ -41,6 +41,7 @@ type FieldChange = { field: string; from: string | null; to: string | null };
 type IntakeRow = {
   order_public_id: string;
   status?: string | null;
+  channel?: string | null; // kanał skupu (buyback / allegro / vinted / olx / umowa); brak = buyback
   defects?: string[] | null; // usterki wpisane w Trade-in (kolumna defects, buyback-orders.sql 06.10.2026)
   notes?: string | null;
   entered_by_email?: string | null;
@@ -139,9 +140,9 @@ export default function ProductCardDrawer({
             .from("service_log")
             .select("employee_email, task_type, status, notes, started_at, finished_at")
             .ilike("device_ref", pattern),
-          supabase.from("buyback_order_intake").select("order_public_id, status, defects, notes, entered_by_email, history").ilike("serial_number", pattern),
+          supabase.from("buyback_order_intake").select("order_public_id, status, channel, defects, notes, entered_by_email, history").ilike("serial_number", pattern),
         ]);
-        // Kolumna usterek (buyback-orders.sql) może jeszcze nie istnieć — wtedy odczyt bez niej.
+        // Kolumny usterek i kanału skupu (buyback-orders.sql) mogą jeszcze nie istnieć — wtedy odczyt bez niej.
         if (intakeRes.error && intakeRes.error.code === "42703") {
           intakeRes = (await supabase
             .from("buyback_order_intake")
@@ -271,7 +272,8 @@ export default function ProductCardDrawer({
                 <h3 className="text-xs font-semibold text-inksoft mb-2">TRADE-IN</h3>
                 {intakes.map((it) => (
                   <div key={it.order_public_id} className="border border-line bg-white mb-2">
-                    <Row label="Numer zamówienia" value={it.order_public_id} mono />
+                    <Row label="Kanał" value={intakeChannelLabel(it.channel)} />
+                    <Row label={(it.channel ?? "buyback") === "buyback" ? "Numer zamówienia" : "Numer przesyłki"} value={it.order_public_id} mono />
                     <Row label="Status obsługi" value={it.status ? labelFor(INTAKE_STATUSES, it.status) : null} />
                     <div className="flex justify-between gap-4 px-3 py-2 border-b border-line text-sm">
                       <span className="text-inksoft">Usterki</span>
