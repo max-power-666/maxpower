@@ -79,6 +79,7 @@ export default function ServiceView({
 }) {
   // Zwykły pracownik widzi tylko własne naprawy (02.10.2026); Admin i Manager — wszystkie.
   const ownOnly = !isAdminOrManager && !isServiceLead;
+  const canDelete = isAdmin || isServiceLead; // usuwanie wpisów: Admin i Kierownik serwisu
   const [interval, setInterval] = useState<Interval>("today");
   const [rangeRows, setRangeRows] = useState<{ employee_email: string | null; points: number }[]>([]);
   const [recent, setRecent] = useState<LogRow[]>([]);
@@ -186,12 +187,12 @@ export default function ServiceView({
     }
   }
 
-  // Usuwanie tylko dla Admina (polityka w bazie: is_admin(); każde usunięcie trafia do deleted_records).
+  // Usuwanie: Admin i Kierownik serwisu (polityka w bazie: is_admin() or is_service_lead(); każde usunięcie trafia do deleted_records).
   async function deleteRow(row: LogRow) {
     if (!confirm(`Usunąć wpis „${row.device_ref || TASK_LABEL[row.task_type] || row.task_type}”? Tej operacji nie można cofnąć.`)) return;
     const { data, error: err } = await supabase.from("service_log").delete().eq("id", row.id).select("id");
     if (err) setError(`Nie udało się usunąć: ${err.message}`);
-    else if (!data?.length) setError("Nie usunięto — brak uprawnień (tylko Admin) albo wpis już nie istnieje.");
+    else if (!data?.length) setError("Nie usunięto — brak uprawnień (tylko Admin i Kierownik serwisu) albo wpis już nie istnieje.");
     else await load();
   }
 
@@ -305,12 +306,12 @@ export default function ServiceView({
               <th className="p-3">Uwagi</th>
               {isAdminOrManager && <th className="p-3">Czas</th>}
               <th className="p-3 text-right">Punkty</th>
-              {isAdmin && <th className="p-3"></th>}
+              {canDelete && <th className="p-3"></th>}
             </tr>
           </thead>
           <tbody>
             {!loading && recent.length === 0 && (
-              <tr><td colSpan={8 + (isAdminOrManager ? 1 : 0) + (isAdmin ? 1 : 0)} className="p-6 text-center text-inksoft text-sm">{search ? "Brak wyników." : "Brak wpisów — rozpocznij pierwszą naprawę powyżej."}</td></tr>
+              <tr><td colSpan={8 + (isAdminOrManager ? 1 : 0) + (canDelete ? 1 : 0)} className="p-6 text-center text-inksoft text-sm">{search ? "Brak wyników." : "Brak wpisów — rozpocznij pierwszą naprawę powyżej."}</td></tr>
             )}
             {recent.map((r) => {
               // Wiersz edytowalny tylko w statusie "w naprawie" (02.10.2026) — żeby nic nie zmienić przez przypadek.
@@ -352,7 +353,7 @@ export default function ServiceView({
                 <td className="p-3"><InlineEditCell value={r.notes} onSave={(n) => saveNotes(r, n)} multiline readOnly={locked} className="w-64" /></td>
                 {isAdminOrManager && <td className="p-3 text-xs text-inksoft whitespace-nowrap">{r.status === "wstrzymane" ? "wstrzymane" : fmtDuration(r.started_at, r.finished_at, r.paused_seconds)}</td>}
                 <td className="p-3 text-right font-mono font-semibold">{r.status === "naprawiony" ? r.points : "—"}</td>
-                {isAdmin && (
+                {canDelete && (
                   <td className="p-3 text-right">
                     <button onClick={() => deleteRow(r)} className="text-xs font-semibold text-rust hover:underline">
                       Usuń

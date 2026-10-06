@@ -156,12 +156,18 @@ drop policy if exists "authenticated update service_log" on service_log;
 create policy "authenticated update service_log" on service_log
   for update using (auth.role() = 'authenticated');
 
--- Usuwanie wpisów Serwisu: tylko Admin (is_admin() z schema.sql — uruchom ten plik najpierw), a każde
--- usunięcie ląduje w deleted_records (kto, kiedy, cały wiersz). Polityka to twarde zabezpieczenie:
--- działa też przy bezpośrednim wywołaniu API, nie tylko gdy przycisk jest ukryty w UI.
+-- Usuwanie wpisów Serwisu: Admin (is_admin() z schema.sql — uruchom ten plik najpierw) ORAZ rola "Kierownik serwisu"
+-- (06.10.2026, na prośbę właściciela), a każde usunięcie ląduje w deleted_records (kto, kiedy, cały wiersz). Polityka to
+-- twarde zabezpieczenie: działa też przy bezpośrednim wywołaniu API, nie tylko gdy przycisk jest ukryty w UI.
+-- is_service_lead(): SECURITY DEFINER, żeby polityka mogła sprawdzić rolę w members bez uprawnień do niej (jak is_admin()).
+create or replace function is_service_lead() returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from members where user_id = auth.uid() and role = 'Kierownik serwisu');
+$$;
 drop policy if exists "admin delete service_log" on service_log;
-create policy "admin delete service_log" on service_log
-  for delete using (is_admin());
+drop policy if exists "admin or service lead delete service_log" on service_log;
+create policy "admin or service lead delete service_log" on service_log
+  for delete using (is_admin() or is_service_lead());
 drop trigger if exists service_log_audit_delete on service_log;
 create trigger service_log_audit_delete before delete on service_log
   for each row execute function audit_delete();
