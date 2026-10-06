@@ -123,6 +123,8 @@ alter table buyback_order_intake drop constraint if exists buyback_order_intake_
 alter table buyback_order_intake add constraint buyback_order_intake_entered_by_user_id_fkey foreign key (entered_by_user_id) references auth.users(id) on delete set null;
 alter table buyback_order_intake add column if not exists pad_serials text[];
 alter table buyback_order_intake add column if not exists docs boolean not null default false;
+-- Usterki paczki (06.10.2026): lista wpisywana w Trade-in (np. "hdmi", "dysk") — Enter dodaje kolejną; nie wymagana do żadnego statusu.
+alter table buyback_order_intake add column if not exists defects text[];
 -- Wcześniejsza wersja trzymała numery padów w jednym polu tekstowym (po przecinku) — zamień na tablicę.
 do $$
 begin

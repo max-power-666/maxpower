@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabaseClient";
 import TradeInOrdersView from "./TradeInOrdersView";
 import InlineEditCell from "./InlineEditCell";
 import PadSerialsCell, { MAX_PADS } from "./PadSerialsCell";
+import DefectsCell from "./DefectsCell";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { computeTradeInCosts, TRADEIN_CATEGORY_LABELS, TRADEIN_COMMISSION_RATE, PCC_RATE, PCC_THRESHOLD_PLN } from "@/lib/buybackCosts";
 import { rateBeforeDate, warsawDate, type NbpRate } from "@/lib/nbp";
@@ -62,6 +63,7 @@ type IntakeEntry = {
   sku: string | null;
   pads: number | null;
   pad_serials: string[] | null;
+  defects?: string[] | null; // usterki paczki (kolumna defects, buyback-orders.sql 06.10.2026)
   docs: boolean;
   notes: string | null;
   entered_by_email: string | null;
@@ -76,8 +78,11 @@ type IntakeEntry = {
   buyback_orders: { sku: string | null; customer_first_name: string | null; customer_last_name: string | null; status: string } | null;
 };
 
-const INTAKE_COLUMNS =
+const INTAKE_COLUMNS_BASE =
   "id, order_public_id, serial_number, sku, pads, pad_serials, docs, notes, entered_by_email, entered_at, finished_at, status, points, history, buyback_orders(sku, customer_first_name, customer_last_name, status)";
+// Kolumna `defects` (Usterki) może jeszcze nie istnieć (nie uruchomiono buyback-orders.sql) — wtedy odczyt bez niej, a kolumna Usterek nie jest pokazywana.
+let defectsColumnAvailable = true;
+const intakeColumns = () => (defectsColumnAvailable ? INTAKE_COLUMNS_BASE.replace("pad_serials, docs", "pad_serials, defects, docs") : INTAKE_COLUMNS_BASE);
 
 // Statusy Back Market po walidacji — takiego zamówienia nie walidujemy drugi raz.
 const BM_ALREADY_VALIDATED = ["VALIDATED", "PAID", "MONEY_TRANSFERED"];
@@ -185,6 +190,7 @@ function IntakeView({
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
   const validating = useRef(new Set<number>()); // paczki, dla których trwa zmiana statusu z walidacją (blokada podwójnego kliknięcia)
   const [loading, setLoading] = useState(false);
+  const [hasDefects, setHasDefects] = useState(defectsColumnAvailable);
   const [error, setError] = useState("");
 
   const [lookup, setLookup] = useState("");
@@ -215,7 +221,7 @@ function IntakeView({
     setLoading(true);
     setError("");
     try {
-      let listQuery = supabase.from("buyback_order_intake").select(INTAKE_COLUMNS).order("entered_at", { ascending: false });
+      let listQuery = supabase.from("buyback_order_intake").select(intakeColumns()).order("entered_at", { ascending: false });
       // Bez wyszukiwania: tylko najświeższe 50 paczek. Z wyszukiwaniem: szerszy limit, bo szukany
       // wpis mógł dawno wypaść poza najświeższe 50 (np. paczka sprzed tygodni po numerze seryjnym).
       listQuery = search
@@ -230,6 +236,11 @@ function IntakeView({
       let { data: rangeData, error: rangeErr } = rangeRes;
       if (rangeErr && rangeErr.code === "42703") ({ data: rangeData, error: rangeErr } = await rangeQuery("finished_at"));
       if (rangeErr) throw rangeErr;
+      if (listErr && listErr.code === "42703" && defectsColumnAvailable) {
+        defectsColumnAvailable = false;
+        setHasDefects(false);
+        return load(); // ponów bez kolumny Usterek
+      }
       if (listErr) throw listErr;
       setRangeRows(rangeData || []);
       setEntries((listData as unknown as IntakeEntry[]) || []);
@@ -362,6 +373,19 @@ function IntakeView({
       return {
         patch: { pad_serials: arr.every((x) => !x) ? null : arr },
         changes: [{ field: `Nr seryjny pada ${index + 1}`, from: before, to: value }],
+      };
+    });
+  }
+
+  // Usterki: cała tablica po każdym dodaniu/usunięciu, w logu zmian jako lista po przecinku.
+  function saveDefects(row: IntakeEntry, next: string[]) {
+    setError("");
+    enqueueUpdate(row.id, "Usterki", (cur) => {
+      const before = cur.defects ?? [];
+      if (before.join("\u0000") === next.join("\u0000")) return null;
+      return {
+        patch: { defects: next.length ? next : null },
+        changes: [{ field: "Usterki", from: before.length ? before.join(", ") : null, to: next.length ? next.join(", ") : null }],
       };
     });
   }
@@ -555,6 +579,7 @@ function IntakeView({
               <th className="p-3">Pady</th>
               <th className="p-3">Nr seryjny padów</th>
               <th className="p-3">Dok.</th>
+              {hasDefects && <th className="p-3">Usterki</th>}
               <th className="p-3">Status BM</th>
               <th className="p-3">Status</th>
               <th className="p-3">Uwagi</th>
@@ -565,7 +590,7 @@ function IntakeView({
           </thead>
           <tbody>
             {!loading && entries.length === 0 && (
-              <tr><td colSpan={14 + (isAdminOrManager ? 1 : 0) + (isAdmin ? 1 : 0)} className="p-6 text-center text-inksoft text-sm">{search ? "Nic nie znaleziono dla tego numeru." : "Brak paczek — rozpocznij pierwszą powyżej."}</td></tr>
+              <tr><td colSpan={14 + (hasDefects ? 1 : 0) + (isAdminOrManager ? 1 : 0) + (isAdmin ? 1 : 0)} className="p-6 text-center text-inksoft text-sm">{search ? "Nic nie znaleziono dla tego numeru." : "Brak paczek — rozpocznij pierwszą powyżej."}</td></tr>
             )}
             {entries.map((e) => (
               <tr key={e.id} className="border-b border-line last:border-b-0" style={{ backgroundColor: rowColorForUser(e.entered_by_email) }}>
@@ -623,6 +648,11 @@ function IntakeView({
                     aria-label="Dok."
                   />
                 </td>
+                {hasDefects && (
+                  <td className="p-3">
+                    <DefectsCell values={e.defects ?? null} onSave={(next) => saveDefects(e, next)} />
+                  </td>
+                )}
                 <td className="p-3 whitespace-nowrap">
                   {e.buyback_orders ? (
                     <span className={`text-xs font-semibold px-2 py-1 rounded-full ${buybackStatusStyle(e.buyback_orders.status)}`}>
@@ -693,6 +723,7 @@ function OrderCardDrawer({
   const [skuDraft, setSkuDraft] = useState("");
   const [padsDraft, setPadsDraft] = useState("");
   const [padSerialsDraft, setPadSerialsDraft] = useState<string[]>([]);
+  const [defectsDraft, setDefectsDraft] = useState<string[]>([]);
   const [docsDraft, setDocsDraft] = useState(false);
   const [notesDraft, setNotesDraft] = useState("");
   const [saving, setSaving] = useState(false);
@@ -707,7 +738,7 @@ function OrderCardDrawer({
       supabase.from("buyback_orders").select("*").eq("order_public_id", orderPublicId).maybeSingle(),
       supabase
         .from("buyback_order_intake")
-        .select(INTAKE_COLUMNS)
+        .select(intakeColumns())
         .eq("order_public_id", orderPublicId)
         .maybeSingle(),
     ]);
@@ -721,6 +752,7 @@ function OrderCardDrawer({
     setSkuDraft(intake?.sku || "");
     setPadsDraft(intake?.pads === null || intake?.pads === undefined ? "" : String(intake.pads));
     setPadSerialsDraft(intake?.pad_serials ?? []);
+    setDefectsDraft(intake?.defects ?? []);
     setDocsDraft(!!intake?.docs);
     setNotesDraft(intake?.notes || "");
     setEditing(true);
@@ -743,6 +775,8 @@ function OrderCardDrawer({
       pad_serials: padSerialsNext,
       docs: docsDraft,
       notes: notesDraft.trim() || null,
+      // bez kolumny (nie uruchomiono buyback-orders.sql) pole Usterek w ogóle nie bierze udziału w zapisie
+      ...(defectsColumnAvailable ? { defects: defectsDraft.length ? defectsDraft : null } : {}),
     };
     const changes: FieldChange[] = [];
     const diff = (field: string, from: string | number | null, to: string | number | null) => {
@@ -755,6 +789,7 @@ function OrderCardDrawer({
       diff(`Nr seryjny pada ${i + 1}`, intake.pad_serials?.[i] || null, next.pad_serials?.[i] || null);
     }
     diff("Dok.", intake.docs ? "tak" : "nie", next.docs ? "tak" : "nie");
+    if (defectsColumnAvailable) diff("Usterki", (intake.defects ?? []).join(", ") || null, (next.defects ?? []).join(", ") || null);
     diff("Uwagi", intake.notes, next.notes);
 
     if (changes.length === 0) {
@@ -845,6 +880,7 @@ function OrderCardDrawer({
                     <Row key={i} label={`Nr seryjny pada ${i + 1}`} value={intake.pad_serials?.[i]} mono />
                   ))}
                   <Row label="Dok." value={intake.docs ? "tak" : "nie"} />
+                  {defectsColumnAvailable && <Row label="Usterki" value={(intake.defects ?? []).join(", ") || null} />}
                   <Row label="Uwagi" value={intake.notes} />
                 </>
               )}
@@ -881,6 +917,12 @@ function OrderCardDrawer({
                     <input type="checkbox" checked={docsDraft} onChange={(e) => setDocsDraft(e.target.checked)} className="w-4 h-4 accent-teal" />
                     Dok.
                   </label>
+                  {defectsColumnAvailable && (
+                    <div>
+                      <label className="text-xs font-semibold text-inksoft block mb-1">Usterki (Enter dodaje kolejną)</label>
+                      <DefectsCell values={defectsDraft} onSave={setDefectsDraft} />
+                    </div>
+                  )}
                   <div>
                     <label className="text-xs font-semibold text-inksoft block mb-1">Uwagi</label>
                     <input value={notesDraft} onChange={(e) => setNotesDraft(e.target.value)} className="w-full border border-line bg-white px-2 py-1.5 rounded text-sm" />
