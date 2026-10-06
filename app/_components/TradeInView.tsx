@@ -221,6 +221,31 @@ export default function TradeInView({ session, members }: { session: Session; me
     loadSettings();
   }
 
+  // Po zmianie ceny max (albo zdjęciu "Ignoruj") od razu zlecamy bidderowi przeliczenie tych SKU (06.10.2026), zamiast czekać na zbiorczy przebieg:
+  // serwer ustawia cenę na Back Markecie dla wskazanych SKU (do 60 naraz). Gdy bidder akurat pracuje w tle, trigger w bazie znakuje SKU jako pilne
+  // i trwający przebieg bierze je pierwsze (kilka sekund). Nie blokuje interfejsu — wynik w komunikacie i po odświeżeniu listy.
+  async function pushNow(list: string[], prefix: string) {
+    const batch = list.slice(0, 60);
+    if (batch.length === 0) return;
+    flash(`${prefix} — aktualizuję ${batch.length === 1 ? "cenę" : `ceny (${batch.length})`} na Back Markecie…`, 8000);
+    try {
+      const res = await fetch("/api/tradein/bidder", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ skus: batch }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Błąd uruchomienia");
+      if (data.ok === false && data.reason === "locked") flash(`${prefix} — bidder akurat pracuje, cena zostanie zaktualizowana w jego bieżącym przebiegu (kilka sekund).`, 8000);
+      else if (data.failed) flash(`${prefix} — cena zaktualizowana, ale ${data.failed} SKU zakończyło się błędem (szczegóły w „Przebiegi i log”).`, 9000);
+      else flash(`${prefix} — cena zaktualizowana na Back Markecie${data.remaining ? ` (niewykonane: ${data.remaining}, dokończy bidder)` : ""}.`, 6000);
+    } catch (e: any) {
+      flash(`${prefix} — nie udało się od razu zaktualizować ceny (${e.message}); zrobi to bidder w najbliższym przebiegu.`, 9000);
+    } finally {
+      loadSkus();
+    }
+  }
+
   async function saveMax(sku: string) {
     const raw = (drafts[sku] ?? "").trim().replace(",", ".");
     const value = raw === "" ? null : Number(raw);
@@ -233,6 +258,9 @@ export default function TradeInView({ session, members }: { session: Session; me
     setSkus((prev) => prev.map((s) => (s.sku === sku ? { ...s, max_price: value } : s)));
     setDrafts(({ [sku]: _, ...rest }) => rest);
     flash(`Zapisano ${sku}.`);
+    const target = skus.find((s) => s.sku === sku);
+    if (value !== null && value > 0 && target && !target.ignored) pushNow([sku], `Zapisano ${sku}`);
+    else if (target?.ignored && value !== null && value > 0) flash(`Zapisano ${sku} — SKU jest ignorowane, więc bidder go nie przelicza (odznacz „Ignoruj”).`, 6000);
   }
 
   // Hurtowa zmiana: nowa cena max = obecna + delta (delta może być ujemna). Pomijamy SKU bez ceny max (nie ma do czego dodać),
@@ -246,7 +274,7 @@ export default function TradeInView({ session, members }: { session: Session; me
     if (plan.length === 0) return flash(`Nic do zmiany (bez ceny max: ${noMax}, wynik ≤ 0: ${tooLow}, niezapisana edycja: ${unsaved}).`);
     const sign = delta > 0 ? "+" : "−";
     const skipped = [noMax && `${noMax} bez ceny max`, tooLow && `${tooLow} z wynikiem ≤ 0`, unsaved && `${unsaved} z niezapisaną edycją`].filter(Boolean).join(", ");
-    if (!confirm(`Zmienić cenę max o ${sign}€${Math.abs(delta)} dla ${plan.length} SKU?\n\nPrzykład: ${plan[0].sku}: €${plan[0].from} → €${plan[0].to}${skipped ? `\nPominięte: ${skipped}.` : ""}\n\nBidder zacznie używać nowych cen w najbliższym przebiegu (do ${settings?.interval_minutes ?? 15} min) — to ceny na żywym Back Markecie.`)) return;
+    if (!confirm(`Zmienić cenę max o ${sign}€${Math.abs(delta)} dla ${plan.length} SKU?\n\nPrzykład: ${plan[0].sku}: €${plan[0].from} → €${plan[0].to}${skipped ? `\nPominięte: ${skipped}.` : ""}\n\nNowe ceny zostaną OD RAZU wysłane do Back Marketu (do 60 SKU naraz, reszta w trwającym przebiegu) — to ceny na żywym Back Markecie.`)) return;
     setBulkBusy(true);
     const done = new Map<string, number>();
     let conflicts = 0, failed = 0;
@@ -266,12 +294,15 @@ export default function TradeInView({ session, members }: { session: Session; me
     setBulkDelta("");
     setBulkBusy(false);
     flash(`Zmieniono ${done.size} z ${plan.length} SKU${conflicts ? `, ${conflicts} zmienione w międzyczasie przez kogoś innego (pominięte)` : ""}${failed ? `, ${failed} błędów zapisu` : ""}.`);
+    const toPush = Array.from(done.keys()).filter((k) => !skus.find((s) => s.sku === k)?.ignored);
+    if (toPush.length) pushNow(toPush, `Zmieniono ${done.size} SKU`);
   }
 
   async function toggleIgnored(s: Sku) {
     const { error } = await supabase.from("buyback_skus").update({ ignored: !s.ignored, updated_at: new Date().toISOString() }).eq("sku", s.sku);
     if (error) return flash(`Błąd zapisu: ${error.message}`);
     setSkus((prev) => prev.map((x) => (x.sku === s.sku ? { ...x, ignored: !s.ignored } : x)));
+    if (s.ignored && hasMax(s)) pushNow([s.sku], `${s.sku}: zdjęto ignorowanie`); // wraca do wyceny — od razu ustaw cenę wg aktualnego max
   }
 
   const hasMax = (s: Sku) => Number(s.max_price) > 0;

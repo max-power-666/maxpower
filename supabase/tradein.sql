@@ -156,3 +156,22 @@ end $$;
 drop trigger if exists buyback_skus_log_max_price on buyback_skus;
 create trigger buyback_skus_log_max_price after insert or update of max_price on buyback_skus
   for each row execute function buyback_log_max_price_change();
+
+-- Natychmiastowa aktualizacja ceny po zmianie ceny max (06.10.2026, na prośbę właściciela): zmiana buyback_skus.max_price (na wartość > 0) albo zdjęcie "ignorowany"
+-- znakuje SKU w recheck_requested_at (trigger poniżej, więc działa też przy zmianie hurtowej i spoza aplikacji). Aplikacja od razu woła bidder dla tego SKU;
+-- gdy akurat pracuje przebieg w tle (trzyma blokadę), ten przebieg bierze SKU z tą flagą PIERWSZE, przed resztą kolejki — zamiast czekać na swoją kolej.
+alter table buyback_skus add column if not exists recheck_requested_at timestamptz;
+create index if not exists buyback_skus_recheck_idx on buyback_skus (recheck_requested_at) where recheck_requested_at is not null;
+
+create or replace function buyback_skus_request_recheck() returns trigger
+language plpgsql as $$
+begin
+  if not new.ignored and coalesce(new.max_price, 0) > 0
+     and (new.max_price is distinct from old.max_price or old.ignored) then
+    new.recheck_requested_at := now();
+  end if;
+  return new;
+end $$;
+drop trigger if exists buyback_skus_request_recheck on buyback_skus;
+create trigger buyback_skus_request_recheck before update of max_price, ignored on buyback_skus
+  for each row execute function buyback_skus_request_recheck();

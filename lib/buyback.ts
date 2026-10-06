@@ -170,7 +170,23 @@ export async function bidderTick(opts: { requestRun?: boolean } = {}): Promise<T
       const intervalMs = (settings.interval_minutes || 15) * 60_000;
       const due = settings.enabled && (!last || Date.now() - Date.parse(last.started_at) >= intervalMs);
       const requested = !!settings.run_requested_at;
-      if (!due && !requested) return { ok: true, idle: true };
+      if (!due && !requested) {
+        // Brak przebiegu do prowadzenia — ale SKU z pilną zmianą ceny max (06.10.2026) nie czekają na następny przebieg.
+        const urgent = await priorityQueue(db);
+        if (urgent.length === 0) return { ok: true, idle: true };
+        const { data: pr } = await db.from("buyback_runs").insert({ source: "recheck", status: "finished", total: urgent.length, finished_at: new Date().toISOString() }).select("id").single();
+        const prId = (pr as { id: number } | null)?.id ?? null;
+        let ok = 0;
+        let bad = 0;
+        for (const p of urgent) {
+          if (Date.now() - startedAt > TICK_BUDGET_MS) break;
+          if (ok + bad > 0) await sleep(SLEEP_BETWEEN_SKUS_MS);
+          if (await processSku(db, prId as number, p)) ok += 1;
+          else bad += 1;
+        }
+        if (prId) await db.from("buyback_runs").update({ updated: ok, failed: bad, total: ok + bad }).eq("id", prId);
+        return { ok: true, idle: true };
+      }
 
       const { count } = await targetsQuery(db, null, { head: true });
       const { data: created, error } = await db
@@ -191,7 +207,26 @@ export async function bidderTick(opts: { requestRun?: boolean } = {}): Promise<T
     if (tErr) throw new Error(`Supabase: ${tErr.message}`);
     const queue = (targets as SkuRow[]) || [];
 
+    const doneAsPriority = new Set<string>();
     for (const sku of queue) {
+      if (Date.now() - startedAt > TICK_BUDGET_MS) break;
+      if (doneAsPriority.has(sku.sku)) {
+        processed += 1; // już przeliczone jako pilne w tym ticku
+        continue;
+      }
+      // SKU ze zmienioną ceną max / zdjętym ignorowaniem mają pierwszeństwo przed resztą kolejki (06.10.2026)
+      for (const p of await priorityQueue(db)) {
+        if (Date.now() - startedAt > TICK_BUDGET_MS) break;
+        if (processed > 0) await sleep(SLEEP_BETWEEN_SKUS_MS);
+        const ok = await processSku(db, run.id, p);
+        doneAsPriority.add(p.sku);
+        if (ok) updated += 1;
+        else failed += 1;
+      }
+      if (doneAsPriority.has(sku.sku)) {
+        processed += 1;
+        continue;
+      }
       if (Date.now() - startedAt > TICK_BUDGET_MS) break;
       if (processed > 0) await sleep(SLEEP_BETWEEN_SKUS_MS);
       const ok = await processSku(db, run.id, sku);
@@ -310,6 +345,20 @@ function targetsQuery(db: SupabaseClient, runStartedAt: string | null, countOpts
   return q.order("sku");
 }
 
+// SKU czekające na pilną aktualizację ceny (zmiana ceny max albo zdjęte ignorowanie — trigger w tradein.sql ustawia recheck_requested_at), najstarsze pierwsze.
+// Przed uruchomieniem SQL kolumny nie ma — wtedy lista jest pusta i bidder działa jak dotąd.
+async function priorityQueue(db: SupabaseClient, limit = 10): Promise<SkuRow[]> {
+  const { data, error } = await db
+    .from("buyback_skus")
+    .select("sku, listing_id, max_price, last_set, in_progress_since")
+    .not("recheck_requested_at", "is", null)
+    .eq("ignored", false)
+    .gt("max_price", 0)
+    .order("recheck_requested_at")
+    .limit(limit);
+  return error ? [] : ((data as SkuRow[]) || []);
+}
+
 // Jeśli poprzedni tick został ubity w trakcie SKU (między "10 €" a właściwą ceną),
 // listing wisiałby z ceną 10 €. Przywracamy ostatnie znane ceny.
 async function recoverInterrupted(db: SupabaseClient, runId: number | null) {
@@ -333,9 +382,23 @@ async function recoverInterrupted(db: SupabaseClient, runId: number | null) {
 }
 
 async function processSku(db: SupabaseClient, runId: number, row: SkuRow): Promise<boolean> {
+  // Aktualna cena max i flaga "ignorowany" czytane TUTAJ, nie z kolejki zbudowanej na początku ticka (kolejka mogła powstać kilka minut wcześniej, a cenę max
+  // zmieniono w międzyczasie — wtedy bidder ustawiłby cenę wg starego limitu). SKU zignorowane w międzyczasie pomijamy.
+  const { data: cur } = await db.from("buyback_skus").select("max_price, ignored").eq("sku", row.sku).maybeSingle();
+  if (cur) {
+    row = { ...row, max_price: (cur as { max_price: number | null }).max_price };
+    if ((cur as { ignored: boolean }).ignored) {
+      const t = new Date().toISOString();
+      await db.from("buyback_skus").update({ last_attempt_at: t }).eq("sku", row.sku);
+      return true;
+    }
+  }
   const maxPrice = toNumber(row.max_price);
   const now = new Date().toISOString();
   await db.from("buyback_skus").update({ in_progress_since: now, last_attempt_at: now }).eq("sku", row.sku);
+  // Zdejmujemy flagę pilnej aktualizacji (recheck_requested_at, tradein.sql) — zmiana zgłoszona w trakcie tego SKU zostanie znakowana na nowo przez trigger. Osobny zapis
+  // bez sprawdzania wyniku: przed uruchomieniem SQL kolumny nie ma i nie może to psuć przebiegu.
+  await db.from("buyback_skus").update({ recheck_requested_at: null }).eq("sku", row.sku);
 
   try {
     // Krok 1: 10 € na wszystkich rynkach
