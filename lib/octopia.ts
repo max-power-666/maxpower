@@ -81,3 +81,71 @@ export async function octopiaSweep(cfg: OctopiaConfig, opts: { since?: string; b
   });
   return { finished: result.finished, processed: result.processed, nextPage: result.nextPage };
 }
+
+// ---- Akcje na zamówieniu (06.10.2026): akceptacja i zgłoszenie przesyłki ----
+// Dokumentacja: https://developer.octopia-io.net/api-reference/orders-management/ (Approve an order / Ship an order).
+// Zmieniają prawdziwe zamówienie u marketplace'u, więc ZAWSZE wołane z jawnej akcji użytkownika (przycisk / nadanie przesyłki).
+
+// Nazwy przewoźników zgłaszane do Octopii (pole carrierName jest wolnym tekstem — w naszych zamówieniach występują m.in. "DHL",
+// "DHL Express", "UPS"); te same, które już są na wysłanych zamówieniach.
+export const OCTOPIA_CARRIER_BY_CARRIER = { dhl_express: "DHL Express", dhl_parcel: "DHL", ups: "UPS" } as const;
+
+async function octopiaPost(cfg: OctopiaConfig, token: string, path: string, body: unknown): Promise<void> {
+  const doFetch = cfg.fetchImpl ?? fetch;
+  const res = await doFetch(`${OCTOPIA_API_URL}${path}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, SellerId: cfg.sellerId, Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    cache: "no-store",
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    // Odpowiedzi błędów to application/problem+json — "errors" niesie konkretną przyczynę (np. "Cannot switch to shipped status ...").
+    let detail = text.slice(0, 300);
+    try {
+      const j = JSON.parse(text);
+      const errs = j?.errors ? Object.entries(j.errors).map(([k, v]) => `${k}: ${(v as string[]).join(", ")}`).join("; ") : "";
+      detail = [j?.detail, errs].filter(Boolean).join(" — ") || j?.title || detail;
+    } catch {
+      /* zostaje surowy tekst */
+    }
+    throw new OctopiaError(`Octopia zwróciło błąd (${res.status}): ${detail}`, res.status);
+  }
+}
+
+export async function octopiaGetOrder(cfg: OctopiaConfig, orderId: string, token?: string): Promise<any> {
+  return octopiaGet(cfg, token ?? (await getToken(cfg)), `/orders/${encodeURIComponent(orderId)}`);
+}
+
+// POST /orders/{id}/approval-status — tylko Cdiscount, tylko zamówienie w stanie WaitingAcceptance (po akceptacji: Accepted -> InPreparation).
+export async function octopiaApproveOrder(cfg: OctopiaConfig, orderId: string): Promise<void> {
+  const token = await getToken(cfg);
+  await octopiaPost(cfg, token, `/orders/${encodeURIComponent(orderId)}/approval-status`, { approval_status: "Accepted" });
+}
+
+// POST /orders/{id}/shipments — zgłasza paczkę (przewoźnik + numer + link śledzenia) dla pozycji gotowych do wysyłki. Wymaga stanu
+// InPreparation i supplyMode = Seller; nadaje się do wywołania PRZED odbiorem paczki przez kuriera. Zwraca, co zrobiono.
+export async function octopiaShipOrder(
+  cfg: OctopiaConfig,
+  opts: { orderId: string; carrierName: string; parcelNumber: string; trackingUrl: string }
+): Promise<{ alreadyShipped: boolean }> {
+  const token = await getToken(cfg);
+  const order = await octopiaGetOrder(cfg, opts.orderId, token);
+  const lines: any[] = Array.isArray(order?.lines) ? order.lines : [];
+  const hasParcel = lines.some((l) => (l?.parcels || []).some((p: any) => String(p?.parcelNumber) === opts.parcelNumber));
+  if (hasParcel) return { alreadyShipped: true }; // ponowienie po udanym zgłoszeniu — nic do zrobienia
+  const ready = lines.filter((l) => l?.status === "InPreparation" && (l?.offer?.supplyMode ?? "Seller") === "Seller");
+  if (ready.length === 0) {
+    const st = order?.status ? `status zamówienia: ${order.status}` : "brak pozycji gotowych do wysyłki";
+    throw new OctopiaError(
+      order?.status === "WaitingAcceptance" || order?.status === "Accepted"
+        ? `Zamówienie nie jest jeszcze gotowe do wysyłki w Octopii (${st}) — zaakceptuj je i zgłoś numer przesyłki ponownie.`
+        : `Octopia nie ma pozycji w stanie InPreparation (${st}) — nie da się zgłosić przesyłki.`
+    );
+  }
+  await octopiaPost(cfg, token, `/orders/${encodeURIComponent(opts.orderId)}/shipments`, [
+    { parcelNumber: opts.parcelNumber, carrierName: opts.carrierName, trackingUrl: opts.trackingUrl, orderLineIds: ready.map((l) => String(l.orderLineId)) },
+  ]);
+  return { alreadyShipped: false };
+}

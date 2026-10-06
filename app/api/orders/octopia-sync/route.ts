@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { createClient } from "@supabase/supabase-js";
 import { isAuthorized } from "@/lib/buyback";
 import { octopiaConfigFromEnv, octopiaSweep, OctopiaError } from "@/lib/octopia";
-import { mapOctopiaItems, mapOctopiaOrder, mapOctopiaToSales, uniqueBy } from "@/lib/salesOrders";
+import { saveOctopiaOrders } from "@/lib/octopiaServer";
 
 // Synchronizuje zamówienia SPRZEDAŻY z Octopia (GET /orders, dokumentacja: https://developer.octopia-io.net — marketplace'y takie
 // jak Cdiscount) do octopia_orders (surowe dane) i sales_orders + sales_order_items (wspólna lista). Odpowiednik orders/bm-sync.
@@ -19,18 +19,7 @@ const MARKETPLACE = "octopia";
 const BUDGET_MS = 200_000;
 const OVERLAP_MS = 10 * 60 * 1000;
 
-async function saveOrders(admin: SupabaseClient<any, any, any>, all: any[]) {
-  const orders = uniqueBy(all, (o) => String(o.orderId));
-  const { error: rawErr } = await admin.from("octopia_orders").upsert(orders.map(mapOctopiaOrder));
-  if (rawErr) throw new Error(`Błąd zapisu do Supabase (octopia_orders): ${rawErr.message}`);
-  const { error: salesErr } = await admin.from("sales_orders").upsert(orders.map(mapOctopiaToSales));
-  if (salesErr) throw new Error(`Błąd zapisu do Supabase (sales_orders): ${salesErr.message}`);
-  const items = uniqueBy(orders.flatMap(mapOctopiaItems), (i) => `${i.external_id}#${i.item_key}`);
-  if (items.length > 0) {
-    const { error: itemsErr } = await admin.from("sales_order_items").upsert(items);
-    if (itemsErr) throw new Error(`Błąd zapisu do Supabase (sales_order_items): ${itemsErr.message}`);
-  }
-}
+const saveOrders = saveOctopiaOrders;
 
 export async function GET(request: Request) {
   const startedAt = new Date().toISOString();

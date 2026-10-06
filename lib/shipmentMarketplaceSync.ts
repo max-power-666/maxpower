@@ -1,5 +1,5 @@
 // Skutek uboczny udanego nadania przesyłki DHL dla zamówienia z Zamówień: notifyMarketplace zgłasza numer
-// przesyłki z powrotem do marketplace'u, z którego pochodzi zamówienie — dziś Back Market i refurbed, jedyne dwa
+// przesyłki z powrotem do marketplace'u, z którego pochodzi zamówienie — dziś Back Market, refurbed i Octopia (od 06.10.2026), jedyne trzy
 // kanały, z których karta zamówienia daje przycisk "Nadaj przesyłkę DHL" (patrz buildShipPrefill w lib/shipping.ts;
 // inne marketplace'y — Erli, Allegro, Octopia, Apilo, Amazon — na razie nie mają tego przycisku, więc nic tu dla
 // nich nie robimy). Do 30.09.2026 był tu też markOurStatusShipped (przestawiał "Nasz status" na "Wysłane") —
@@ -20,6 +20,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { bmShipConfigFromEnv, bmMarkOrderShipped, bmSetOrderlineIdentifier, BM_SHIPPER_BY_CARRIER } from "./backmarket";
 import { refurbedListCarriers, refurbedMarkItemsShipped } from "./refurbed";
+import { octopiaConfigFromEnv, octopiaGetOrder, octopiaShipOrder, OCTOPIA_CARRIER_BY_CARRIER } from "./octopia";
+import { saveOctopiaOrders } from "./octopiaServer";
 
 export type ShipmentCarrier = "dhl_express" | "dhl_parcel" | "ups";
 
@@ -122,6 +124,24 @@ export async function notifyMarketplace(
 
       const result = await refurbedMarkItemsShipped(client, { items, trackingUrl: opts.trackingUrl, carrierSlug, trackingNumber: opts.trackingNumber });
       if (!result.ok) return { synced: false, error: `Część pozycji nie została zgłoszona (${result.failed.map((f) => `${f.id}: ${f.message}`).join("; ")}).` };
+      return { synced: true, error: null };
+    }
+
+    if (opts.marketplace === "octopia") {
+      const cfg = octopiaConfigFromEnv();
+      if (!cfg) return { synced: false, error: "Brak konfiguracji Octopia — zgłoś numer przesyłki ręcznie w panelu Octopia." };
+      await octopiaShipOrder(cfg, {
+        orderId: opts.externalId,
+        carrierName: OCTOPIA_CARRIER_BY_CARRIER[opts.carrier],
+        parcelNumber: opts.trackingNumber,
+        trackingUrl: opts.trackingUrl,
+      });
+      // Odświeżenie wiersza zamówienia (status Shipped, numer przesyłki) — best-effort, cron i tak dociągnie.
+      try {
+        await saveOctopiaOrders(db, [await octopiaGetOrder(cfg, opts.externalId)]);
+      } catch {
+        /* ignorujemy */
+      }
       return { synced: true, error: null };
     }
 

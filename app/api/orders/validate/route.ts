@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { requireRole } from "@/lib/serverAuth";
 import { bmShipConfigFromEnv, bmAcceptOrder } from "@/lib/backmarket";
+import { octopiaConfigFromEnv, octopiaApproveOrder, octopiaGetOrder } from "@/lib/octopia";
+import { saveOctopiaOrders } from "@/lib/octopiaServer";
 
 // Akceptuje zamówienie u marketplace'u — jawny przycisk "Zaakceptuj zamówienie" na karcie zamówienia
 // (SalesOrderCard.tsx, acceptOrder), widoczny przy Back Marketcie w stanie "Do zaakceptowania". Dziś tylko Back
@@ -27,6 +29,25 @@ export async function POST(request: Request) {
   const marketplace = typeof b?.marketplace === "string" ? b.marketplace : "";
   const externalId = typeof b?.externalId === "string" ? b.externalId : "";
   if (!marketplace || !externalId) return NextResponse.json({ error: "Brak marketplace/numeru zamówienia." }, { status: 400 });
+
+  // Octopia (Cdiscount): POST /orders/{id}/approval-status — tylko zamówienie w stanie WaitingAcceptance (06.10.2026). Przy innych
+  // kanałach Octopii i przy włączonej automatycznej akceptacji w OSP zamówienie od razu ma InPreparation i przycisku nie ma.
+  if (marketplace === "octopia") {
+    const cfg = octopiaConfigFromEnv();
+    if (!cfg) return NextResponse.json({ ok: true, validated: false, error: "Brak konfiguracji Octopia — zaakceptuj zamówienie ręcznie w panelu Octopia." });
+    try {
+      await octopiaApproveOrder(cfg, externalId);
+    } catch (e: any) {
+      return NextResponse.json({ ok: true, validated: false, error: e?.message || "Nie udało się zaakceptować zamówienia w Octopii." });
+    }
+    // Odświeżenie to tylko wygoda (plakietka od razu pokaże nowy stan) — akceptacja już się udała.
+    try {
+      await saveOctopiaOrders(db, [await octopiaGetOrder(cfg, externalId)]);
+    } catch {
+      /* cron dociągnie */
+    }
+    return NextResponse.json({ ok: true, validated: true, error: null });
+  }
 
   if (marketplace !== "backmarket") {
     return NextResponse.json({ ok: true, validated: false, error: null }); // kanał bez obsługi akceptacji — nic do zrobienia

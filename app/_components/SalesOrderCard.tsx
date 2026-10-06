@@ -447,12 +447,12 @@ export default function SalesOrderCard({
           action: "edited",
           by_email: session.user.email ?? null,
           at: new Date().toISOString(),
-          changes: [{ field: "Back Market", from: "Do zaakceptowania", to: "Zaakceptowano" }],
+          changes: [{ field: marketplace === "octopia" ? "Octopia" : "Back Market", from: "Do zaakceptowania", to: "Zaakceptowano" }],
         },
       });
       // Odświeżenie danych to tylko wygoda (płakietka od razu pokaże "Do wysyłki") — akceptacja już się udała,
       // więc błąd tego kroku nie psuje wyniku.
-      await fetch("/api/orders/bm-refresh", { method: "POST", headers, body: JSON.stringify({ orderId: externalId }) }).catch(() => {});
+      if (marketplace === "backmarket") await fetch("/api/orders/bm-refresh", { method: "POST", headers, body: JSON.stringify({ orderId: externalId }) }).catch(() => {});
       await load();
     } catch (e: any) {
       setError(e.message || "Nie udało się zaakceptować zamówienia.");
@@ -633,6 +633,11 @@ export default function SalesOrderCard({
               <span className="inline-block text-xs font-semibold px-2 py-1 rounded-full bg-tealsoft text-teal">
                 {salesStatusLabel(marketplace, worker.status)}
               </span>
+              {marketplace === "octopia" && oc?.status === "WaitingAcceptance" && (
+                <button onClick={acceptOrder} disabled={accepting} className="text-xs font-semibold text-teal hover:underline disabled:opacity-50">
+                  {accepting ? "Akceptowanie…" : "Zaakceptuj zamówienie →"}
+                </button>
+              )}
               {marketplace === "backmarket" && bm?.state === 1 && (
                 <button onClick={acceptOrder} disabled={accepting} className="text-xs font-semibold text-teal hover:underline disabled:opacity-50">
                   {accepting ? "Akceptowanie…" : "Zaakceptuj zamówienie →"}
