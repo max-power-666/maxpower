@@ -3,12 +3,14 @@
 
 export const SHOP_URL = process.env.NEXT_PUBLIC_SHOP_URL || "https://recoo-sklep.vercel.app";
 
-export type ShopGrade = "jak-nowy" | "bardzo-dobry" | "dobry";
+export type ShopGrade = "jak-nowy" | "bardzo-dobry" | "dobry" | "zadowalajacy";
 
 export const SHOP_GRADES: { value: ShopGrade; label: string; short: string }[] = [
   { value: "jak-nowy", label: "Jak nowy", short: "A+" },
   { value: "bardzo-dobry", label: "Bardzo dobry", short: "A" },
   { value: "dobry", label: "Dobry", short: "B" },
+  // Klasy A/B/C = klasy z Katalogu konsol (bardzo dobry / dobry / zadowalający).
+  { value: "zadowalajacy", label: "Zadowalający", short: "C" },
 ];
 
 export function gradeLabel(g: string) {

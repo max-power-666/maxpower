@@ -49,7 +49,7 @@ create table if not exists shop_variants (
   model_id uuid not null references shop_models (id) on delete cascade,
   sku text not null unique check (sku ~ '^[A-Z0-9+-]+$'),
   option_value text,                                   -- "1 TB", "PS5", "Body"…; null = model bez opcji
-  grade text not null check (grade in ('jak-nowy', 'bardzo-dobry', 'dobry')),
+  grade text not null check (grade in ('jak-nowy', 'bardzo-dobry', 'dobry', 'zadowalajacy')),
   price numeric(10, 2) not null check (price >= 0),    -- PLN brutto
   old_price numeric(10, 2) check (old_price is null or old_price >= 0), -- cena nowego (przekreślona)
   stock int not null default 0 check (stock >= 0),     -- RĘCZNY stan (decyzja właściciela), edycja w zakładce Magazyn
@@ -59,6 +59,10 @@ create table if not exists shop_variants (
   updated_at timestamptz not null default now()
 );
 create index if not exists shop_variants_model_idx on shop_variants (model_id, sort);
+-- Klasa "zadowalający" (C, jak w Katalogu konsol) dodana 06.10.2026 — istniejąca tabela dostaje nowy CHECK.
+alter table shop_variants drop constraint if exists shop_variants_grade_check;
+alter table shop_variants add constraint shop_variants_grade_check
+  check (grade in ('jak-nowy', 'bardzo-dobry', 'dobry', 'zadowalajacy'));
 -- Jeden wariant na parę (opcja, stan) w modelu; brak opcji traktujemy jak pusty tekst.
 create unique index if not exists shop_variants_model_option_grade on shop_variants (model_id, coalesce(option_value, ''), grade);
 
@@ -164,13 +168,14 @@ alter table shop_images enable row level security;
 alter table shop_log enable row level security;
 
 -- Odczyt: sklep (anon) widzi tylko to, co opublikowane; zespół sklepu widzi wszystko (także szkice).
+-- Wariant z ceną 0 (np. świeżo zaimportowany z Katalogu konsol, jeszcze bez ceny) jest dla sklepu niewidoczny.
 drop policy if exists "shop read categories" on shop_categories;
 create policy "shop read categories" on shop_categories for select using (true);
 drop policy if exists "shop read models" on shop_models;
 create policy "shop read models" on shop_models for select using (published or can_edit_shop());
 drop policy if exists "shop read variants" on shop_variants;
 create policy "shop read variants" on shop_variants for select using (
-  can_edit_shop() or (active and exists (select 1 from shop_models m where m.id = model_id and m.published))
+  can_edit_shop() or (active and price > 0 and exists (select 1 from shop_models m where m.id = model_id and m.published))
 );
 drop policy if exists "shop read images" on shop_images;
 create policy "shop read images" on shop_images for select using (

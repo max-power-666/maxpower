@@ -417,6 +417,11 @@ export default function ShopProductEditor({
             </Section>
 
             <Section title="WARIANTY I CENY">
+              {rows.some((r) => r.price !== "" && Number(r.price) === 0) && (
+                <p className="mb-2 text-xs text-amber">
+                  Warianty z ceną 0 ({rows.filter((r) => r.price !== "" && Number(r.price) === 0).length}) są niewidoczne w sklepie, dopóki nie dostaną ceny.
+                </p>
+              )}
               <div className="border border-line bg-white overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
@@ -444,7 +449,7 @@ export default function ShopProductEditor({
                           </select>
                         </td>
                         <td className="p-1.5"><input value={r.sku} onChange={(e) => updateRow(r.key, { sku: e.target.value.toUpperCase() })} className="w-36 border border-line bg-white px-2 py-1 rounded font-mono text-xs" /></td>
-                        <td className="p-1.5"><input value={r.price} onChange={(e) => updateRow(r.key, { price: e.target.value.replace(",", ".") })} inputMode="decimal" className="w-20 border border-line bg-white px-2 py-1 rounded text-right" /></td>
+                        <td className="p-1.5"><input value={r.price} onChange={(e) => updateRow(r.key, { price: e.target.value.replace(",", ".") })} inputMode="decimal" title={Number(r.price) === 0 ? "Cena 0 — wariant jest niewidoczny w sklepie" : undefined} className={`w-20 border bg-white px-2 py-1 rounded text-right ${r.price !== "" && Number(r.price) === 0 ? "border-amber" : "border-line"}`} /></td>
                         <td className="p-1.5"><input value={r.old_price} onChange={(e) => updateRow(r.key, { old_price: e.target.value.replace(",", ".") })} inputMode="decimal" className="w-20 border border-line bg-white px-2 py-1 rounded text-right" placeholder="—" /></td>
                         <td className={`p-1.5 text-center font-semibold ${r.stock > 0 ? "" : "text-rust"}`}>{r.stock}</td>
                         <td className="p-1.5 text-center"><input type="checkbox" checked={r.active} onChange={(e) => updateRow(r.key, { active: e.target.checked })} aria-label={`Aktywny ${r.sku}`} /></td>
