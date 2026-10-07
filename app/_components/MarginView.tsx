@@ -6,7 +6,7 @@ import { MARKETPLACES } from "@/lib/salesOrders";
 import type { MemberLite } from "@/lib/displayName";
 import SalesOrderCard from "./SalesOrderCard";
 import ProductCardDrawer from "./ProductCardDrawer";
-import type { BmRates, MarginResult } from "@/lib/margin";
+import { skuCategoryOf, NO_SKU_CATEGORY, type BmRates, type MarginResult } from "@/lib/margin";
 
 // Zakładka Marża (03.10.2026, Admin i Manager): lista sprzedanych sztuk z numerem seryjnym i marżą po kosztach. Układ jak lista Zamówień,
 // ale kolumny finansowe. Całość liczy serwer (app/api/margin/list, lib/margin.ts); tu tylko wyświetlamy, filtrujemy i wgrywamy faktury BM.
@@ -48,6 +48,8 @@ export default function MarginView({ session, members }: { session: Session; mem
   const [pageSize, setPageSize] = useState(50);
   const [marketplace, setMarketplace] = useState("");
   const [period, setPeriod] = useState<"all" | "current" | "previous">("all");
+  const [skuCategory, setSkuCategory] = useState("");
+  const [skuCategories, setSkuCategories] = useState<{ category: string; count: number }[]>([]);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
@@ -73,7 +75,7 @@ export default function MarginView({ session, members }: { session: Session; mem
     setLoading(true);
     setError("");
     try {
-      const qs = new URLSearchParams({ page: String(page), pageSize: String(pageSize), search, marketplace, period });
+      const qs = new URLSearchParams({ page: String(page), pageSize: String(pageSize), search, marketplace, period, skuCategory });
       const res = await fetch(`/api/margin/list?${qs}`, { headers: auth });
       const data = await res.json().catch(() => ({}));
       if (mySeq !== seq.current) return;
@@ -81,6 +83,7 @@ export default function MarginView({ session, members }: { session: Session; mem
       setRows(data.rows);
       setTotal(data.total);
       setTotals(data.totals);
+      setSkuCategories(data.skuCategories || []);
       setBmRates(data.bmRates);
       setInvoiceCount(data.invoiceCount);
       setPurchasesCount(data.purchasesCount ?? null);
@@ -94,7 +97,7 @@ export default function MarginView({ session, members }: { session: Session; mem
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, pageSize, search, marketplace, period]);
+  }, [page, pageSize, search, marketplace, period, skuCategory]);
 
   // Pełna synchronizacja z Fakturownią (ten sam route co "Odśwież" w Magazynie): zapisuje też produkty sprzedane (stan 0), od 01.01.2025 — to z nich
   // bierze się cena zakupu w tej zakładce. Pierwszy raz trwa ok. minuty (cały katalog).
@@ -189,6 +192,15 @@ export default function MarginView({ session, members }: { session: Session; mem
           {PERIODS.map((p) => (
             <button key={p.key} onClick={() => { setPeriod(p.key); setPage(1); }} className={pill(period === p.key)} title={p.hint}>{p.label}</button>
           ))}
+          <select
+            value={skuCategory}
+            onChange={(e) => { setSkuCategory(e.target.value); setPage(1); }}
+            title="Kategoria z SKU — pierwszy człon SKU (np. XSX, PS5)"
+            className="border border-line bg-white px-2 py-2 rounded text-sm ml-2"
+          >
+            <option value="">Kategoria z SKU: wszystkie</option>
+            {skuCategories.map((c) => <option key={c.category} value={c.category}>{c.category === NO_SKU_CATEGORY ? "Bez SKU" : c.category} ({c.count})</option>)}
+          </select>
           <input
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
@@ -218,6 +230,7 @@ export default function MarginView({ session, members }: { session: Session; mem
               <th className="p-3">Nr zamówienia</th>
               <th className="p-3">Numer seryjny</th>
               <th className="p-3">SKU</th>
+              <th className="p-3">Kategoria z SKU</th>
               <th className="p-3 text-right">Cena sprzedaży</th>
               <th className="p-3 text-right">Cena zakupu</th>
               <th className="p-3 text-right">VAT od marży</th>
@@ -233,7 +246,7 @@ export default function MarginView({ session, members }: { session: Session; mem
           </thead>
           <tbody>
             {!loading && rows.length === 0 && (
-              <tr><td colSpan={16} className="p-6 text-center text-inksoft text-sm">{search || marketplace || period !== "all" ? "Brak wyników." : "Brak sprzedanych sztuk z numerem seryjnym (Back Market, refurbed i Octopia)."}</td></tr>
+              <tr><td colSpan={17} className="p-6 text-center text-inksoft text-sm">{search || marketplace || skuCategory || period !== "all" ? "Brak wyników." : "Brak sprzedanych sztuk z numerem seryjnym (Back Market, refurbed i Octopia)."}</td></tr>
             )}
             {rows.map((r) => {
               const rowKey = `${r.marketplace}:${r.orderId}:${r.itemKey}`;
@@ -250,6 +263,7 @@ export default function MarginView({ session, members }: { session: Session; mem
                   <button onClick={() => setOpenSerial(r.serial)} title="Otwórz kartę produktu" className="text-teal hover:underline">{r.serial}</button>
                 </td>
                 <td className="p-3 font-mono text-xs">{r.sku || "—"}</td>
+                <td className="p-3 font-mono text-xs">{skuCategoryOf(r.sku) || "—"}</td>
                 <td className="p-3 text-right font-mono whitespace-nowrap">
                   {fmtPLN(r.salePln)}
                   {r.currency !== "PLN" && r.price !== null && <div className="text-[10px] text-inksoft">{r.price.toLocaleString("pl-PL")} {r.currency}</div>}
@@ -282,7 +296,7 @@ export default function MarginView({ session, members }: { session: Session; mem
               </tr>
               {open && (
                 <tr className="border-b border-line bg-paper">
-                  <td colSpan={16} className="px-6 py-4">
+                  <td colSpan={17} className="px-6 py-4">
                     <div className="text-xs font-semibold text-inksoft mb-2">WYLICZENIE MARŻY — {r.productName || r.sku || r.serial} · {r.serial}</div>
                     <table className="w-full max-w-5xl text-sm bg-white border border-line">
                       <tbody>

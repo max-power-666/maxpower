@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { requireRole } from "@/lib/serverAuth";
-import { inPeriod, periodRange, type MarginResult } from "@/lib/margin";
+import { inPeriod, periodRange, skuCategoryOf, NO_SKU_CATEGORY, type MarginResult } from "@/lib/margin";
 import { loadMarginResults } from "@/lib/marginServer";
 
 // Zakładka Marża (03.10.2026) — lista sprzedanych sztuk z numerem seryjnym z marżą. Tylko Admin i Manager (ceny zakupu, prowizje).
@@ -21,6 +21,7 @@ export async function GET(request: Request) {
   const pageSize = [25, 50, 100].includes(Number(url.searchParams.get("pageSize"))) ? Number(url.searchParams.get("pageSize")) : 50;
   const search = (url.searchParams.get("search") || "").trim().toLowerCase();
   const marketplace = url.searchParams.get("marketplace") || "";
+  const skuCategory = (url.searchParams.get("skuCategory") || "").trim().toUpperCase() === NO_SKU_CATEGORY.toUpperCase() ? NO_SKU_CATEGORY : (url.searchParams.get("skuCategory") || "").trim().toUpperCase();
   const range = periodRange(url.searchParams.get("period") || "all"); // all (null) | current | previous — miesiące kalendarzowe wg czasu polskiego
 
   try {
@@ -29,6 +30,15 @@ export async function GET(request: Request) {
     if (marketplace) results = results.filter((r) => r.marketplace === marketplace);
     if (range) results = results.filter((r) => inPeriod(r.orderDate, range));
     if (search) results = results.filter((r) => [r.serial, r.orderId, r.sku, r.productName].some((v) => (v || "").toLowerCase().includes(search)));
+    // Lista kategorii z licznikami liczona PRZED filtrem kategorii (żeby wybór jednej nie zawężał listy do niej samej); reszta filtrów zawęża liczniki.
+    const catCounts = new Map<string, number>();
+    for (const r of results) {
+      const c = skuCategoryOf(r.sku) || NO_SKU_CATEGORY;
+      catCounts.set(c, (catCounts.get(c) || 0) + 1);
+    }
+    if (skuCategory && !catCounts.has(skuCategory)) catCounts.set(skuCategory, 0);
+    const skuCategories = Array.from(catCounts, ([category, count]) => ({ category, count })).sort((a, b) => (a.category === NO_SKU_CATEGORY ? 1 : b.category === NO_SKU_CATEGORY ? -1 : a.category.localeCompare(b.category)));
+    if (skuCategory) results = results.filter((r) => (skuCategoryOf(r.sku) || NO_SKU_CATEGORY) === skuCategory);
     results.sort((a, b) => (b.orderDate || "").localeCompare(a.orderDate || ""));
 
     const withMargin = results.filter((r) => r.marginPln !== null);
@@ -52,6 +62,7 @@ export async function GET(request: Request) {
       total: results.length,
       rows: results.slice((page - 1) * pageSize, page * pageSize),
       totals,
+      skuCategories,
       bmRates,
       invoiceCount,
       purchasesCount,

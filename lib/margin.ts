@@ -102,6 +102,10 @@ export type MarginDbRow = {
   bm_has_invoice: boolean | null;
 };
 
+// "Kategoria z SKU" (07.10.2026) — pierwszy człon SKU przed pierwszym myślnikiem (XSX-1TB-BK-B-1M -> XSX); ta sama zasada co `sku_category` w widokach magazynowych. Brak SKU -> "".
+export const skuCategoryOf = (sku: string | null | undefined): string => (sku || "").trim().split("-")[0].trim().toUpperCase();
+export const NO_SKU_CATEGORY = "__none__"; // wartość filtra "Bez SKU"
+
 export type MarginResult = {
   marketplace: string;
   orderId: string;
