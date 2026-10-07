@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
-import { RCP_AREAS, fmtHm, RCP_KIND_LABEL, ADMIN_WORK_ROLES, type RcpKind } from "@/lib/rcp";
+import { RCP_AREAS, fmtHm, RCP_KIND_LABEL, ADMIN_WORK_ROLES, dayStartMs, summarizeDays, warsawDay, type RcpKind, type RcpSegment } from "@/lib/rcp";
 
 // Widżet RCP na górze paska bocznego po lewej (06.10.2026; wcześniej w prawym górnym rogu): zegar i JEDEN duży przycisk, którego kolor mówi o stanie — czerwony (nie pracujesz),
 // zielony (pracujesz), pomarańczowy (przerwa / wyjście); kliknięcie otwiera menu akcji dla bieżącego stanu. Widoczny na każdej zakładce dla każdej osoby z rolą.
@@ -18,6 +18,7 @@ export default function RcpWidget({ session, role, onOpenRcp }: { session: Sessi
   const [st, setSt] = useState<State | null>(null);
   const [setup, setSetup] = useState(false);
   const [tick, setTick] = useState(Date.now());
+  const [todaySegs, setTodaySegs] = useState<RcpSegment[]>([]); // odcinki z dzisiejszej doby — do liczników narastających (praca / przerwy łącznie)
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [menu, setMenu] = useState<"main" | "area" | "end" | null>(null);
@@ -28,6 +29,15 @@ export default function RcpWidget({ session, role, onOpenRcp }: { session: Sessi
   // Trwający odcinek czytamy BEZPOŚREDNIO z bazy przez RLS (własne wiersze — to samo zapytanie, którego używa lista "Teraz w pracy"), a z serwera (api/rcp/state)
   // tylko adres IP i ograniczenie do komputerów w firmie. Dzięki temu kolor przycisku zawsze zgadza się z tym, co jest w bazie.
   const load = useCallback(async () => {
+    const dayStartIso = new Date(dayStartMs(warsawDay(Date.now()))).toISOString();
+    supabase
+      .from("rcp_segments")
+      .select("id, user_id, user_email, kind, area, started_at, ended_at, needs_review, source, note")
+      .eq("user_id", session.user.id)
+      .or(`ended_at.is.null,ended_at.gte.${dayStartIso}`)
+      .order("started_at")
+      .limit(200)
+      .then(({ data, error }) => !error && setTodaySegs((data as RcpSegment[]) || []));
     const [own, srv] = await Promise.allSettled([
       supabase.from("rcp_segments").select("id, kind, area, started_at, needs_review").eq("user_id", session.user.id).is("ended_at", null).maybeSingle(),
       fetch("/api/rcp/state", { headers: { Authorization: `Bearer ${session.access_token}` }, cache: "no-store" }).then((r) => r.json()),
@@ -87,7 +97,10 @@ export default function RcpWidget({ session, role, onOpenRcp }: { session: Sessi
   const open = st.open;
   const blocked = st.restricted && !st.ipAllowed;
   const clock = new Date(tick).toLocaleTimeString("pl-PL", { timeZone: "Europe/Warsaw", hour: "2-digit", minute: "2-digit", second: "2-digit" });
-  const since = open ? Math.max(0, tick - Date.parse(open.started_at)) : 0;
+  // Liczniki NARASTAJĄCE od początku dnia (07.10.2026, uwaga pracownika: czas liczył się od zera przy każdej przerwie i powrocie): w przycisku suma dla bieżącego stanu
+  // (praca łącznie / przerwy łącznie / wyjścia prywatne łącznie / administracja łącznie), pod nim podsumowanie dnia.
+  const day = summarizeDays(todaySegs, tick).get(warsawDay(tick));
+  const since = !open ? 0 : open.kind === "przerwa" ? day?.breakMs ?? 0 : open.kind === "wyjscie_prywatne" ? day?.privateMs ?? 0 : open.kind === "administracja" ? day?.adminMs ?? 0 : day?.workMs ?? 0;
   const suggested = ROLE_AREA[role];
   const areas = suggested ? [suggested, ...RCP_AREAS.filter((a) => a !== suggested)] : [...RCP_AREAS];
   const working = open?.kind === "praca";
@@ -108,8 +121,9 @@ export default function RcpWidget({ session, role, onOpenRcp }: { session: Sessi
         className={`w-full rounded px-2 py-3 text-center font-bold leading-tight shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${tone}`}
       >
         <div className="text-sm">{!open ? "▶ " : working ? "● " : admin ? "🗂 " : "⏸ "}{label}</div>
-        {open && <div className="font-mono text-xs font-semibold opacity-90 mt-0.5">{fmtHm(since)}</div>}
+        {open && <div className="font-mono text-xs font-semibold opacity-90 mt-0.5" title="Łącznie dziś w tym stanie">{fmtHm(since)}</div>}
       </button>
+      {open && day && <div className="mt-1 text-center text-[11px] text-inksoft font-mono">praca {fmtHm(day.workMs)} · przerwy {fmtHm(day.breakMs)}</div>}
 
       {menu && (
         <div className="absolute left-0 top-full mt-1 z-30 w-56 border border-line bg-white rounded shadow-sm py-1">
