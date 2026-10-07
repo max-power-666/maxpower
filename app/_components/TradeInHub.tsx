@@ -220,9 +220,16 @@ function IntakeView({
 
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
+  // Paginacja listy paczek po stronie serwera (07.10.2026): .range() + licznik; zmiana wyszukiwania lub rozmiaru strony wraca na stronę 1.
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const [totalCount, setTotalCount] = useState<number | null>(null);
 
   useEffect(() => {
-    const t = setTimeout(() => setSearch(searchInput.trim()), 300);
+    const t = setTimeout(() => {
+      setSearch(searchInput.trim());
+      setPage(1);
+    }, 300);
     return () => clearTimeout(t);
   }, [searchInput]);
 
@@ -236,24 +243,22 @@ function IntakeView({
       supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [interval, search]);
+  }, [interval, search, page, pageSize]);
 
   async function load() {
     setLoading(true);
     setError("");
     try {
-      let listQuery = supabase.from("buyback_order_intake").select(intakeColumns()).order("entered_at", { ascending: false });
-      // Bez wyszukiwania: tylko najświeższe 50 paczek. Z wyszukiwaniem: szerszy limit, bo szukany
-      // wpis mógł dawno wypaść poza najświeższe 50 (np. paczka sprzed tygodni po numerze seryjnym).
-      listQuery = search
-        ? listQuery.or(`order_public_id.ilike.%${escapeLike(search)}%,serial_number.ilike.%${escapeLike(search)}%`).limit(200)
-        : listQuery.limit(50);
+      let listQuery = supabase.from("buyback_order_intake").select(intakeColumns(), { count: "exact" }).order("entered_at", { ascending: false });
+      if (search) listQuery = listQuery.or(`order_public_id.ilike.%${escapeLike(search)}%,serial_number.ilike.%${escapeLike(search)}%`);
+      const from = (page - 1) * pageSize;
+      listQuery = listQuery.range(from, from + pageSize - 1);
       // Punkty liczymy po points_awarded_at (pierwsze zaliczenie paczki, ustawiane triggerem w bazie) — zmiana statusu między statusami
       // punktowanymi nie liczy paczki ponownie ani nie przesuwa jej do innego dnia. Przed uruchomieniem aktualizacji buyback-orders.sql
       // kolumny jeszcze nie ma — wtedy awaryjnie po finished_at (stare zachowanie), żeby podsumowanie nie zniknęło.
       const rangeQuery = (col: string) =>
         supabase.from("buyback_order_intake").select("entered_by_email, points").in("status", POINTS_STATUSES).gte(col, rangeStart(interval));
-      const [rangeRes, { data: listData, error: listErr }] = await Promise.all([rangeQuery("points_awarded_at"), listQuery]);
+      const [rangeRes, { data: listData, error: listErr, count: listCount }] = await Promise.all([rangeQuery("points_awarded_at"), listQuery]);
       let { data: rangeData, error: rangeErr } = rangeRes;
       if (rangeErr && rangeErr.code === "42703") ({ data: rangeData, error: rangeErr } = await rangeQuery("finished_at"));
       if (rangeErr) throw rangeErr;
@@ -267,7 +272,12 @@ function IntakeView({
         setHasChannel(false);
         return load(); // ponów bez kolumny Kanał
       }
+      if (listErr && listErr.code === "PGRST103" && page > 1) {
+        setPage(1); // strona poza zakresem (np. po usunięciu wpisów) — wracamy na pierwszą
+        return;
+      }
       if (listErr) throw listErr;
+      setTotalCount(listCount ?? null);
       setRangeRows(rangeData || []);
       setEntries(await attachBmOrders((listData as unknown as IntakeEntry[]) || []));
     } catch (e: any) {
@@ -276,6 +286,8 @@ function IntakeView({
       setLoading(false);
     }
   }
+
+  const totalPages = Math.max(1, Math.ceil((totalCount ?? 0) / pageSize));
 
   const summary = useMemo(() => {
     const totals = new Map<string, { count: number; points: number }>();
@@ -535,13 +547,11 @@ function IntakeView({
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-2">
-        <h2 className="text-xs font-semibold text-inksoft">PODSUMOWANIE PUNKTACJI (obsłużone, kontroferty, ok. dok. i problemy)</h2>
-        <div className="flex gap-2">
-          {INTERVALS.map((i) => (
-            <button key={i.key} onClick={() => setInterval(i.key)} className={pill(interval === i.key)}>{i.label}</button>
-          ))}
-        </div>
+      <h2 className="text-xs font-semibold text-inksoft mb-2">PODSUMOWANIE PUNKTACJI (obsłużone, kontroferty, ok. dok. i problemy)</h2>
+      <div className="flex gap-2 mb-2">
+        {INTERVALS.map((i) => (
+          <button key={i.key} onClick={() => setInterval(i.key)} className={pill(interval === i.key)}>{i.label}</button>
+        ))}
       </div>
       <div className="border border-line bg-white mb-6">
         <table className="w-full text-sm">
@@ -597,13 +607,31 @@ function IntakeView({
         </button>
       </div>
 
-      <div className="mb-2">
+      <div className="mb-2 flex items-center justify-between gap-3 flex-wrap">
         <input
           value={searchInput}
           onChange={(e) => setSearchInput(e.target.value)}
           placeholder="Szukaj po numerze seryjnym lub numerze zamówienia"
           className="w-80 border border-line bg-white px-3 py-1.5 rounded text-sm font-mono"
         />
+        <div className="flex items-center gap-3">
+          <label className="text-xs text-inksoft">Pokaż</label>
+          <select
+            value={pageSize}
+            onChange={(e) => {
+              setPageSize(Number(e.target.value));
+              setPage(1);
+            }}
+            className="border border-line bg-white px-2 py-1.5 rounded text-sm font-semibold"
+          >
+            {[10, 20, 50, 100].map((n) => (
+              <option key={n} value={n}>{n}</option>
+            ))}
+          </select>
+          <span className="text-xs text-inksoft">{totalCount !== null ? `z ${totalCount.toLocaleString("pl-PL")} paczek · strona ${Math.min(page, totalPages)} z ${totalPages}` : ""}</span>
+          <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1 || loading} className="bg-white border border-line px-3 py-1.5 rounded text-sm font-semibold text-ink disabled:opacity-40">‹ Poprzednia</button>
+          <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages || loading} className="bg-white border border-line px-3 py-1.5 rounded text-sm font-semibold text-ink disabled:opacity-40">Następna ›</button>
+        </div>
       </div>
       <div className="border border-line bg-white overflow-x-auto">
         <table className="w-full text-sm">

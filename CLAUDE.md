@@ -337,8 +337,7 @@ Teraz kolumna `points_awarded_at` (chwila PIERWSZEGO wejścia w status punktowan
 (czyści je tylko powrót do "W trakcie", a "Czas obsługi" liczy do pierwszego zakończenia). Podsumowanie punktów (`IntakeView` w `TradeInHub.tsx`) liczy po `points_awarded_at` (przed uruchomieniem `buyback-orders.sql` awaryjnie po `finished_at`). Wiersze sprzed zmiany dostały `points_awarded_at = finished_at` (ich pierwotna data zaliczenia, jeśli były już przestawiane, jest nieodtwarzalna — przyjmujemy ostatnią zmianę statusu). Punkty za paczkę nadal liczą się tylko dopóki status jest punktowany.
 Numer przesyłki służy tylko do
   znalezienia zamówienia przy rozpoczynaniu (w liście nie ma kolumny przesyłki; jest na karcie).
-  **Lista "Ostatnie paczki" pokazuje bez wyszukiwania tylko najświeższe 50 wpisów** (`.limit(50)`, bez pełnej
-  paginacji jak w Raw data — świadomie, to lista roboczo-przeglądowa, nie archiwum); wyszukiwarka nad listą
+  **Lista paczek ma paginację po stronie serwera (07.10.2026, na prośbę właściciela; wcześniej tylko najświeższe 50 wpisów):** `.range()` + licznik z bazy, wybór "Pokaż" 10/20/50/100 (domyślnie 50), "z N paczek · strona X z Y", przyciski Poprzednia/Następna nad tabelą obok wyszukiwarki; zmiana wyszukiwania lub rozmiaru strony wraca na stronę 1, strona poza zakresem (np. po usunięciu wpisów) też. **Pigułki Dziś / 7 dni / 30 dni** (okres podsumowania punktacji) przeniesione pod nagłówek podsumowania, po lewej stronie. Wyszukiwarka nad listą
   (30.09.2026, `escapeLike` jak w `InventoryRawView.tsx`, debounce 300 ms) szuka jednocześnie po numerze zamówienia
   I numerze seryjnym (`order_public_id.ilike.%...%,serial_number.ilike.%...%` — PostgREST `.or()`) i wtedy limit
   rośnie do 200, bo szukany wpis mógł dawno wypaść poza najświeższe 50. **Kolorowanie wierszy wg osoby, która
