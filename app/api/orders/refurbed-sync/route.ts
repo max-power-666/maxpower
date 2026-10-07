@@ -12,7 +12,7 @@ import { mapRefurbedItems, mapRefurbedOrder, mapRefurbedToSales, uniqueBy } from
 //  - pełny skan (full_scan_done = false): zamówienia od 1 stycznia bieżącego roku (released_at), rosnąco po ID,
 //    w porcjach z kursorem (sales_orders_sync_meta.scan_cursor = id ostatniego zamówienia) — limit czasu funkcji;
 //  - przyrostowo, przy każdym przebiegu: (A) nowe zamówienia — released_at od ostatniej synchronizacji (z zapasem
-//    10 minut) oraz (B) odświeżenie zamówień jeszcze niezakończonych (NEW, ACCEPTED, SHIPPED) z ostatnich 60 dni.
+//    10 minut) oraz (B) odświeżenie WSZYSTKICH zamówień z ostatnich 60 dni (bez filtra po stanie — anulowane zamówienie nie ma już stanu NEW/ACCEPTED/SHIPPED).
 // Bez tokena (REFURBED_API_TOKEN) endpoint nic nie robi i mówi o tym wprost, żeby "Odśwież" działało dalej dla Back Market.
 // Wywoływane przez Vercel Cron (vercel.json) i przycisk "Odśwież" w zakładce Zamówienia.
 
@@ -22,7 +22,6 @@ const MARKETPLACE = "refurbed";
 const BUDGET_MS = 200_000;
 const OVERLAP_MS = 10 * 60 * 1000;
 const OPEN_WINDOW_MS = 60 * 24 * 60 * 60 * 1000;
-const OPEN_STATES = ["NEW", "ACCEPTED", "SHIPPED"];
 
 // Zapis pobranych zamówień. Upsert pozycji zawiera tylko pola z API, więc numery seryjne i pady wpisane
 // przez zespół zostają nietknięte (patrz bm-sync).
@@ -99,11 +98,21 @@ export async function GET(request: Request) {
       budgetMs: BUDGET_MS,
       save,
     });
+    // (B) Odświeżenie ostatnich 60 dni BEZ filtra po stanie (07.10.2026): wcześniej filtrowaliśmy po stanie NEW/ACCEPTED/SHIPPED, ale zamówienie anulowane u refurbed ma już
+    // stan CANCELLED, więc wypadało z tego filtra i w naszej bazie wisiało na zawsze jako "Nowe". Okno sięga też wstecz do najstarszego zamówienia, które u nas wciąż jest
+    // NEW/ACCEPTED (nie dłużej niż do 1 stycznia), żeby takie starsze zaległości też się domknęły.
+    const { data: oldestOpen } = await admin
+      .from("refurbed_orders")
+      .select("released_at")
+      .in("state", ["NEW", "ACCEPTED"])
+      .order("released_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    const yearStart = Date.parse(`${new Date().getFullYear()}-01-01T00:00:00Z`);
+    const oldestOpenMs = oldestOpen?.released_at ? Date.parse(oldestOpen.released_at as string) - 60_000 : Infinity;
+    const windowStart = Math.max(yearStart, Math.min(Date.now() - OPEN_WINDOW_MS, oldestOpenMs));
     const open = await refurbedSweep(client, {
-      filter: {
-        state: { any_of: OPEN_STATES },
-        released_at: { ge: new Date(Date.now() - OPEN_WINDOW_MS).toISOString() },
-      },
+      filter: { released_at: { ge: new Date(windowStart).toISOString() } },
       budgetMs: Math.max(BUDGET_MS - (Date.now() - startedAt), 10_000),
       save,
     });

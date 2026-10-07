@@ -536,8 +536,9 @@ numeru w URL) — numer zamówienia trzeba wkleić ręcznie w wyszukiwarkę pane
 data = `released_at`, status = `state` (NEW/ACCEPTED/SHIPPED/...; etykiety w `REFURBED_ORDER_STATES`), SKU = `items[].sku`; **każda
 pozycja API to jedna sztuka** (klucz = `item.id`). "Nr przesyłki" to link `parcel_tracking_url` pozycji (refurbed nie ma numeru) — lista
 pokazuje go jako "śledzenie". **refurbed nie ma filtra po dacie modyfikacji**, więc przyrostowo pobieramy (A) nowe po `released_at`
-(z zapasem 10 min) i (B) ponownie zamówienia w stanach NEW/ACCEPTED/SHIPPED z ostatnich 60 dni; pełny skan od 1 stycznia idzie
-z kursorem `sales_orders_sync_meta.scan_cursor`. **`state` zamówienia potrafi utknąć na "ACCEPTED" mimo realnie wysłanej i dostarczonej
+(z zapasem 10 min) i (B) ponownie WSZYSTKIE zamówienia z ostatnich 60 dni (od 07.10.2026 bez filtra po stanie — patrz niżej); pełny skan od 1 stycznia idzie
+z kursorem `sales_orders_sync_meta.scan_cursor`. **Anulowane zamówienia wisiały jako "Nowe" (07.10.2026, zgłoszone przez właściciela):** odświeżanie (B) pytało API tylko o zamówienia w stanach NEW/ACCEPTED/SHIPPED — a zamówienie anulowane u refurbed ma już stan CANCELLED, więc wypadało z zapytania i nasza kopia zostawała na zawsze ze starym stanem NEW (w bazie widać było zamówienia z `synced_at` sprzed dni, mimo że cron biegnie co 15 min). Teraz (B) pobiera wszystkie zamówienia z ostatnich 60 dni bez filtra po stanie, a okno sięga wstecz do najstarszego zamówienia, które u nas wciąż jest NEW/ACCEPTED (nie dalej niż do 1 stycznia). Zaległe wiersze poprawią się przy najbliższym przebiegu crona albo po kliknięciu "Odśwież" w Zamówieniach. Nie testowane na żywym API (brak tokena w środowisku asystenta).
+**`state` zamówienia potrafi utknąć na "ACCEPTED" mimo realnie wysłanej i dostarczonej
 paczki** — nasze własne zgłoszenie wysyłki (`notifyMarketplace` -> `BatchUpdateOrderItemsState`) ustawia numer przesyłki na pozycji, ale
 NIE zmienia `state`; realny postęp pokazuje osobne pole na pozycji `items[].shipment_status` (UNSPECIFIED/INFO_RECEIVED/IN_TRANSIT/
 OUT_FOR_DELIVERY/AVAILABLE_FOR_PICKUP/DELIVERED/FAILED_ATTEMPT/EXCEPTION — wypełniane dopiero, gdy przewoźnik zacznie raportować
