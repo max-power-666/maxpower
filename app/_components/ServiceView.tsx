@@ -88,6 +88,7 @@ export default function ServiceView({
   // Wyszukiwarka po numerze seryjnym (02.10.2026): bez niej lista to tylko najświeższe 50 wpisów, wyszukiwanie sięga całej tabeli.
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
+  const [repairEmails, setRepairEmails] = useState<string[]>([]);
   const [employeeFilter, setEmployeeFilter] = useState(""); // filtr listy po kolumnie "Pracownik" (e-mail; pusty = wszyscy) — tylko dla osób widzących naprawy wszystkich
 
   const [taskType, setTaskType] = useState<TaskKey>(SERVICE_TASKS[0].key);
@@ -95,6 +96,25 @@ export default function ServiceView({
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
   const [openSerial, setOpenSerial] = useState<string | null>(null);
+
+  // Jednorazowo (przy wejściu do zakładki): unikalne e-maile z całej tabeli napraw — PostgREST nie ma DISTINCT, więc czytamy samą kolumnę stronami po 1000.
+  useEffect(() => {
+    if (ownOnly) return;
+    let alive = true;
+    (async () => {
+      const seen = new Set<string>();
+      for (let from = 0; from < 50_000; from += 1000) {
+        const { data, error: err } = await supabase.from("service_log").select("employee_email").order("id").range(from, from + 999);
+        if (err || !data) break;
+        for (const r of data as { employee_email: string | null }[]) if (r.employee_email) seen.add(r.employee_email.toLowerCase());
+        if (data.length < 1000) break;
+      }
+      if (alive) setRepairEmails(Array.from(seen));
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [ownOnly]);
 
   useEffect(() => {
     const t = setTimeout(() => setSearch(searchInput.trim()), 300);
@@ -149,15 +169,12 @@ export default function ServiceView({
     }
   }
 
-  // Lista pracowników do filtra: członkowie zespołu z e-mailem + osoby z napraw na liście/w podsumowaniu (np. konto bez wpisu w members), skrócone imię.
+  // Lista pracowników do filtra: TYLKO osoby, które mają jakąkolwiek naprawę w service_log (nie cały zespół), skrócone imię.
   const employeeOptions = useMemo(() => {
-    const emails = new Set<string>();
-    for (const m of members) if (m.email) emails.add(m.email.toLowerCase());
-    for (const r of rangeRows) if (r.employee_email) emails.add(r.employee_email.toLowerCase());
-    for (const r of recent) if (r.employee_email) emails.add(r.employee_email.toLowerCase());
+    const emails = new Set(repairEmails);
     if (employeeFilter) emails.add(employeeFilter.toLowerCase());
     return Array.from(emails).map((email) => ({ email, name: displayNameForEmail(email, members) }));
-  }, [members, rangeRows, recent, employeeFilter]);
+  }, [repairEmails, members, employeeFilter]);
 
   const summary = useMemo(() => {
     // "Poprawka" (0 pkt) nie jest naprawą — nie wchodzi do liczby napraw, tylko do osobnej liczby w nawiasie (07.10.2026).
