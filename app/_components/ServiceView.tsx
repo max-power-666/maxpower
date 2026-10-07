@@ -81,7 +81,7 @@ export default function ServiceView({
   const ownOnly = !isAdminOrManager && !isServiceLead;
   const canDelete = isAdmin || isServiceLead; // usuwanie wpisów: Admin i Kierownik serwisu
   const [interval, setInterval] = useState<Interval>("today");
-  const [rangeRows, setRangeRows] = useState<{ employee_email: string | null; points: number }[]>([]);
+  const [rangeRows, setRangeRows] = useState<{ employee_email: string | null; points: number; task_type: string }[]>([]);
   const [recent, setRecent] = useState<LogRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -119,7 +119,7 @@ export default function ServiceView({
       // Punkty po points_awarded_at (pierwsze zaliczenie, trigger w bazie) — zmiana statusu nie przesuwa naprawy do innego dnia. Przed uruchomieniem
       // aktualizacji service.sql kolumny nie ma — wtedy awaryjnie po finished_at (stare zachowanie).
       const rangeQuery = (col: string) => {
-        const q = supabase.from("service_log").select("employee_email, points").eq("status", "naprawiony").gte(col, rangeStart(interval));
+        const q = supabase.from("service_log").select("employee_email, points, task_type").eq("status", "naprawiony").gte(col, rangeStart(interval));
         return ownOnly ? q.eq("employee_user_id", session.user.id) : q;
       };
       const [rangeRes, { data: recentData, error: recentErr }] = await Promise.all([
@@ -148,11 +148,13 @@ export default function ServiceView({
   }
 
   const summary = useMemo(() => {
-    const totals = new Map<string, { count: number; points: number }>();
+    // "Poprawka" (0 pkt) nie jest naprawą — nie wchodzi do liczby napraw, tylko do osobnej liczby w nawiasie (07.10.2026).
+    const totals = new Map<string, { count: number; corrections: number; points: number }>();
     for (const r of rangeRows) {
       const key = r.employee_email || "—";
-      const entry = totals.get(key) || { count: 0, points: 0 };
-      entry.count += 1;
+      const entry = totals.get(key) || { count: 0, corrections: 0, points: 0 };
+      if (r.task_type === "correction") entry.corrections += 1;
+      else entry.count += 1;
       entry.points += Number(r.points) || 0;
       totals.set(key, entry);
     }
@@ -234,7 +236,7 @@ export default function ServiceView({
           <thead>
             <tr className="text-left text-xs text-inksoft border-b border-line">
               <th className="p-3">Pracownik</th>
-              <th className="p-3 text-right">Liczba napraw</th>
+              <th className="p-3 text-right">Liczba napraw (poprawka)</th>
               <th className="p-3 text-right">Punkty</th>
             </tr>
           </thead>
@@ -245,7 +247,7 @@ export default function ServiceView({
             {summary.map((s) => (
               <tr key={s.email} className="border-b border-line last:border-b-0">
                 <td className="p-3 font-semibold">{displayNameForEmail(s.email, members)}</td>
-                <td className="p-3 text-right font-mono">{s.count}</td>
+                <td className="p-3 text-right font-mono">{s.count} <span className="text-inksoft">({s.corrections})</span></td>
                 <td className="p-3 text-right font-mono font-semibold">{s.points.toLocaleString("pl-PL")}</td>
               </tr>
             ))}
