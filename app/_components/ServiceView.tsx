@@ -254,11 +254,6 @@ export default function ServiceView({
     <div>
       <div className="flex items-center justify-between mb-2">
         <h2 className="text-xs font-semibold text-inksoft">PODSUMOWANIE PUNKTACJI (naprawione)</h2>
-        <div className="flex gap-2">
-          {INTERVALS.map((i) => (
-            <button key={i.key} onClick={() => setInterval(i.key)} className={pill(interval === i.key)}>{i.label}</button>
-          ))}
-        </div>
       </div>
       <div className="border border-line bg-white mb-6">
         <table className="w-full text-sm">
@@ -334,6 +329,11 @@ export default function ServiceView({
           placeholder="Szukaj po numerze seryjnym…"
           className="border border-line bg-white px-3 py-1.5 rounded text-sm w-64"
         />
+        <div className="flex gap-2 ml-auto" title="Okres podsumowania punktacji u góry">
+          {INTERVALS.map((i) => (
+            <button key={i.key} onClick={() => setInterval(i.key)} className={pill(interval === i.key)}>{i.label}</button>
+          ))}
+        </div>
       </div>
       <div className="border border-line bg-white overflow-x-auto">
         <table className="w-full text-sm">
