@@ -88,6 +88,7 @@ export default function ServiceView({
   // Wyszukiwarka po numerze seryjnym (02.10.2026): bez niej lista to tylko najświeższe 50 wpisów, wyszukiwanie sięga całej tabeli.
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
+  const [employeeFilter, setEmployeeFilter] = useState(""); // filtr listy po kolumnie "Pracownik" (e-mail; pusty = wszyscy) — tylko dla osób widzących naprawy wszystkich
 
   const [taskType, setTaskType] = useState<TaskKey>(SERVICE_TASKS[0].key);
   const [deviceRef, setDeviceRef] = useState("");
@@ -110,7 +111,7 @@ export default function ServiceView({
       supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [interval, search]);
+  }, [interval, search, employeeFilter]);
 
   async function load() {
     setLoading(true);
@@ -129,6 +130,7 @@ export default function ServiceView({
             .from("service_log")
             .select("id, employee_email, task_type, points, device_ref, status, notes, started_at, finished_at, part_serials, paused_seconds");
           if (ownOnly) q = q.eq("employee_user_id", session.user.id);
+          else if (employeeFilter) q = q.ilike("employee_email", escapeLike(employeeFilter));
           if (search) q = q.ilike("device_ref", `%${escapeLike(search)}%`);
           // Przy wyszukiwaniu limit rośnie — szukany wpis mógł dawno wypaść poza najświeższe 50.
           return q.order("started_at", { ascending: false }).limit(search ? 200 : 50);
@@ -146,6 +148,16 @@ export default function ServiceView({
       setLoading(false);
     }
   }
+
+  // Lista pracowników do filtra: członkowie zespołu z e-mailem + osoby z napraw na liście/w podsumowaniu (np. konto bez wpisu w members), skrócone imię.
+  const employeeOptions = useMemo(() => {
+    const emails = new Set<string>();
+    for (const m of members) if (m.email) emails.add(m.email.toLowerCase());
+    for (const r of rangeRows) if (r.employee_email) emails.add(r.employee_email.toLowerCase());
+    for (const r of recent) if (r.employee_email) emails.add(r.employee_email.toLowerCase());
+    if (employeeFilter) emails.add(employeeFilter.toLowerCase());
+    return Array.from(emails).map((email) => ({ email, name: displayNameForEmail(email, members) }));
+  }, [members, rangeRows, recent, employeeFilter]);
 
   const summary = useMemo(() => {
     // "Poprawka" (0 pkt) nie jest naprawą — nie wchodzi do liczby napraw, tylko do osobnej liczby w nawiasie (07.10.2026).
@@ -287,7 +299,18 @@ export default function ServiceView({
         </button>
       </div>
 
-      <div className="mb-2">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        {!ownOnly && (
+          <select
+            value={employeeFilter}
+            onChange={(e) => setEmployeeFilter(e.target.value)}
+            title="Pokaż naprawy jednego pracownika"
+            className="border border-line bg-white px-2 py-1.5 rounded text-sm"
+          >
+            <option value="">Pracownik: wszyscy</option>
+            {[...employeeOptions].sort((a, b) => a.name.localeCompare(b.name, "pl")).map((o) => <option key={o.email} value={o.email}>{o.name}</option>)}
+          </select>
+        )}
         <input
           value={searchInput}
           onChange={(e) => setSearchInput(e.target.value)}
