@@ -27,7 +27,7 @@ create table if not exists rcp_segments (
   id bigint generated always as identity primary key,
   user_id uuid references auth.users(id) on delete set null,
   user_email text not null,
-  kind text not null check (kind in ('praca', 'przerwa', 'wyjscie_prywatne', 'wyjscie_sluzbowe')),
+  kind text not null check (kind in ('praca', 'administracja', 'przerwa', 'wyjscie_prywatne', 'wyjscie_sluzbowe')),
   area text,                                   -- obszar pracy (dla przerwy/wyjścia: obszar, do którego pracownik wraca)
   started_at timestamptz not null default now(),
   ended_at timestamptz,                        -- null = trwa
@@ -78,7 +78,11 @@ begin
   return n;
 end $$;
 
--- Rejestracja: start | break | resume | leave | change_area | end. Atomowo (blokada na pracownika), zegar serwera. Błędy biznesowe to wyjątki P0001 z polskim komunikatem.
+-- Prace administracyjne (07.10.2026): nowy rodzaj odcinka 'administracja' (tabela mogła powstać ze starszą listą rodzajów).
+alter table rcp_segments drop constraint if exists rcp_segments_kind_check;
+alter table rcp_segments add constraint rcp_segments_kind_check check (kind in ('praca', 'administracja', 'przerwa', 'wyjscie_prywatne', 'wyjscie_sluzbowe'));
+
+-- Rejestracja: start | break | admin | resume | leave | change_area | end. Atomowo (blokada na pracownika), zegar serwera. Błędy biznesowe to wyjątki P0001 z polskim komunikatem.
 create or replace function rcp_act(p_user uuid, p_email text, p_action text, p_area text, p_leave text, p_ip text) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare
@@ -105,6 +109,12 @@ begin
     if cur.kind <> 'praca' then raise exception 'Przerwę można zacząć tylko w trakcie pracy.' using errcode = 'P0001'; end if;
     update rcp_segments set ended_at = t where id = cur.id;
     insert into rcp_segments (user_id, user_email, kind, area, started_at, ip) values (p_user, p_email, 'przerwa', cur.area, t, p_ip) returning * into res;
+  elsif p_action = 'admin' then
+    -- prace administracyjne zaczyna się z pracy, tak jak przerwę; kończy "Wróć do pracy" (resume); uprawnienie do tej akcji sprawdza serwer (api/rcp/action)
+    if cur.kind = 'administracja' then raise exception 'Prace administracyjne już trwają.' using errcode = 'P0001'; end if;
+    if cur.kind <> 'praca' then raise exception 'Prace administracyjne można zacząć tylko w trakcie pracy.' using errcode = 'P0001'; end if;
+    update rcp_segments set ended_at = t where id = cur.id;
+    insert into rcp_segments (user_id, user_email, kind, area, started_at, ip) values (p_user, p_email, 'administracja', cur.area, t, p_ip) returning * into res;
   elsif p_action = 'leave' then
     if cur.kind <> 'praca' then raise exception 'Wyjście można zarejestrować tylko w trakcie pracy.' using errcode = 'P0001'; end if;
     if p_leave not in ('prywatne', 'sluzbowe') then raise exception 'Wybierz rodzaj wyjścia.' using errcode = 'P0001'; end if;

@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { rcpAdmin, rcpCaller, clientIp, loadAllowedIps } from "@/lib/rcpServer";
-import { isIpAllowed, RCP_AREAS } from "@/lib/rcp";
+import { isIpAllowed, RCP_AREAS, ADMIN_WORK_ROLES } from "@/lib/rcp";
 
-// Rejestracja czasu pracy: start | break | resume | leave | change_area | end. Zapis WYŁĄCZNIE tu (tabela rcp_segments nie ma polityk zapisu), po sprawdzeniu adresu IP
+// Rejestracja czasu pracy: start | break | admin | resume | leave | change_area | end. Zapis WYŁĄCZNIE tu (tabela rcp_segments nie ma polityk zapisu), po sprawdzeniu adresu IP
 // komputera (tylko komputery w firmie — lista w rcp_settings; pusta = bez ograniczenia). Samą zmianę stanu robi atomowa funkcja bazy rcp_act (zegar serwera).
 export const dynamic = "force-dynamic";
 
-const ACTIONS = ["start", "break", "resume", "leave", "change_area", "end"];
+const ACTIONS = ["start", "break", "admin", "resume", "leave", "change_area", "end"];
 
 export async function POST(request: Request) {
   const db = rcpAdmin();
@@ -15,6 +15,7 @@ export async function POST(request: Request) {
   const b = await request.json().catch(() => null);
   const action = typeof b?.action === "string" ? b.action : "";
   if (!ACTIONS.includes(action)) return NextResponse.json({ error: "Nieznana akcja." }, { status: 400 });
+  if (action === "admin" && !ADMIN_WORK_ROLES.includes(me.role)) return NextResponse.json({ error: "Prace administracyjne mogą rejestrować tylko kierownicy." }, { status: 403 });
   const area = typeof b?.area === "string" ? b.area.trim() : "";
   if (area && !(RCP_AREAS as readonly string[]).includes(area)) return NextResponse.json({ error: "Nieznany obszar pracy." }, { status: 400 });
 

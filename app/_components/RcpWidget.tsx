@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
-import { RCP_AREAS, fmtHm, RCP_KIND_LABEL, type RcpKind } from "@/lib/rcp";
+import { RCP_AREAS, fmtHm, RCP_KIND_LABEL, ADMIN_WORK_ROLES, type RcpKind } from "@/lib/rcp";
 
 // Widżet RCP na górze paska bocznego po lewej (06.10.2026; wcześniej w prawym górnym rogu): zegar i JEDEN duży przycisk, którego kolor mówi o stanie — czerwony (nie pracujesz),
 // zielony (pracujesz), pomarańczowy (przerwa / wyjście); kliknięcie otwiera menu akcji dla bieżącego stanu. Widoczny na każdej zakładce dla każdej osoby z rolą.
@@ -12,7 +12,7 @@ import { RCP_AREAS, fmtHm, RCP_KIND_LABEL, type RcpKind } from "@/lib/rcp";
 type Open = { id: number; kind: RcpKind; area: string | null; started_at: string; needs_review: boolean };
 type State = { open: Open | null; ip: string; restricted: boolean; ipAllowed: boolean };
 
-const ROLE_AREA: Record<string, string> = { Serwis: "Serwis", "Kierownik serwisu": "Serwis", Testy: "Testy", "Trade-in": "Trade-in", Magazyn: "Magazyn", Zamówienia: "Zamówienia" };
+const ROLE_AREA: Record<string, string> = { Serwis: "Serwis", "Kierownik serwisu": "Serwis", Testy: "Testy", "Trade-in": "Trade-in", "Kierownik trade-in": "Trade-in", Magazyn: "Magazyn", Zamówienia: "Zamówienia" };
 
 export default function RcpWidget({ session, role, onOpenRcp }: { session: Session; role: string; onOpenRcp: () => void }) {
   const [st, setSt] = useState<State | null>(null);
@@ -92,7 +92,9 @@ export default function RcpWidget({ session, role, onOpenRcp }: { session: Sessi
   const areas = suggested ? [suggested, ...RCP_AREAS.filter((a) => a !== suggested)] : [...RCP_AREAS];
   const working = open?.kind === "praca";
   // Kolor przycisku = stan: czerwony (nie pracujesz), zielony (pracujesz), pomarańczowy (przerwa albo wyjście).
-  const tone = !open ? "bg-rust text-paper" : working ? "bg-teal text-paper" : "bg-amber text-paper";
+  const admin = open?.kind === "administracja"; // prace administracyjne (kierownicy) — to też praca, więc inny odcień niż przerwa
+  const canAdmin = ADMIN_WORK_ROLES.includes(role);
+  const tone = !open ? "bg-rust text-paper" : working ? "bg-teal text-paper" : admin ? "bg-[#2a6bb5] text-paper" : "bg-amber text-paper";
   const label = !open ? "Rozpocznij pracę" : working ? `W pracy${open.area ? ` · ${open.area}` : ""}` : RCP_KIND_LABEL[open.kind];
   const item = "w-full text-left px-3 py-2 text-sm font-semibold hover:bg-paper";
 
@@ -105,7 +107,7 @@ export default function RcpWidget({ session, role, onOpenRcp }: { session: Sessi
         title={blocked ? "Tylko komputery w firmie" : "Rejestracja czasu pracy"}
         className={`w-full rounded px-2 py-3 text-center font-bold leading-tight shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${tone}`}
       >
-        <div className="text-sm">{!open ? "▶ " : working ? "● " : "⏸ "}{label}</div>
+        <div className="text-sm">{!open ? "▶ " : working ? "● " : admin ? "🗂 " : "⏸ "}{label}</div>
         {open && <div className="font-mono text-xs font-semibold opacity-90 mt-0.5">{fmtHm(since)}</div>}
       </button>
 
@@ -122,6 +124,7 @@ export default function RcpWidget({ session, role, onOpenRcp }: { session: Sessi
           {menu === "main" && open && working && (
             <>
               <button onClick={() => act("break")} className={item}>⏸ Przerwa</button>
+              {canAdmin && <button onClick={() => act("admin")} className={item}>🗂 Prace administracyjne</button>}
               <button onClick={() => act("leave", { leave: "sluzbowe" })} className={item}>Wyjście służbowe</button>
               <button onClick={() => act("leave", { leave: "prywatne" })} className={item}>Wyjście prywatne</button>
               <button onClick={() => setMenu("area")} className={item}>Zmień obszar ›</button>
@@ -130,7 +133,7 @@ export default function RcpWidget({ session, role, onOpenRcp }: { session: Sessi
           )}
           {menu === "main" && open && !working && (
             <>
-              <button onClick={() => act("resume")} className={item}>▶ Wróć do pracy</button>
+              <button onClick={() => act("resume")} className={item}>▶ {admin ? "Zakończ prace administracyjne" : "Wróć do pracy"}</button>
               <button onClick={() => setMenu("end")} className={`${item} text-rust`}>⏹ Zakończ pracę</button>
             </>
           )}

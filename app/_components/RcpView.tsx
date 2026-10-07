@@ -21,6 +21,7 @@ const pill = (active: boolean) => `px-3 py-1.5 rounded-full text-sm font-semibol
 const DOW = ["nd", "pn", "wt", "śr", "cz", "pt", "so"];
 const KIND_STYLE: Record<RcpKind, string> = {
   praca: "bg-tealsoft text-teal",
+  administracja: "bg-[#e3ecf9] text-[#2a6bb5]",
   przerwa: "bg-ambersoft text-amber",
   wyjscie_prywatne: "bg-rustsoft text-rust",
   wyjscie_sluzbowe: "bg-[#e3ecf9] text-[#2a6bb5]",
@@ -120,6 +121,7 @@ function MyTime({ session, members }: { session: Session; members: MemberLite[] 
   const t = days.get(today);
   const monthDays = Array.from({ length: daysIn(month) }, (_, i) => `${month}-${String(i + 1).padStart(2, "0")}`);
   const worked = monthDays.filter((d) => (days.get(d)?.workMs ?? 0) > 0).length;
+  const hasAdmin = Array.from(days.values()).some((d) => d.adminMs > 0);
 
   return (
     <div className="max-w-5xl">
@@ -157,6 +159,7 @@ function MyTime({ session, members }: { session: Session; members: MemberLite[] 
               <th className="p-3">Początek</th>
               <th className="p-3">Koniec</th>
               <th className="p-3 text-right">Praca</th>
+              {hasAdmin && <th className="p-3 text-right" title="Wliczone w Pracę">w tym admin.</th>}
               <th className="p-3 text-right">Przerwy</th>
               <th className="p-3 text-right">Wyjścia prywatne</th>
               <th className="p-3">Obszary</th>
@@ -171,13 +174,14 @@ function MyTime({ session, members }: { session: Session; members: MemberLite[] 
                   <td className="p-3 font-mono">{fmtClock(s.firstStartMs)}</td>
                   <td className="p-3 font-mono">{s.open ? <span className="text-teal font-semibold">trwa</span> : fmtClock(s.lastEndMs)}</td>
                   <td className="p-3 text-right font-mono font-semibold">{fmtHm(s.workMs)}</td>
+                  {hasAdmin && <td className="p-3 text-right font-mono text-inksoft">{s.adminMs ? fmtHm(s.adminMs) : "—"}</td>}
                   <td className="p-3 text-right font-mono text-inksoft">{s.breakMs ? fmtHm(s.breakMs) : "—"}</td>
                   <td className="p-3 text-right font-mono text-inksoft">{s.privateMs ? fmtHm(s.privateMs) : "—"}</td>
                   <td className="p-3 text-xs text-inksoft">{Object.entries(s.areaMs).map(([a, ms]) => `${a} ${fmtHm(ms)}`).join(" · ")}</td>
                 </tr>
               );
             })}
-            {monthDays.every((d) => !days.has(d)) && <tr><td colSpan={7} className="p-6 text-center text-inksoft text-sm">Brak zarejestrowanego czasu w tym miesiącu.</td></tr>}
+            {monthDays.every((d) => !days.has(d)) && <tr><td colSpan={8} className="p-6 text-center text-inksoft text-sm">Brak zarejestrowanego czasu w tym miesiącu.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -221,7 +225,7 @@ function NowBoard({ members }: { members: MemberLite[] }) {
     const day = summarizeDays(mine, now).get(warsawDay(now));
     return { m, cur, workMs: day?.workMs ?? 0, last: mine.length ? mine[mine.length - 1] : null };
   });
-  const rank = (r: (typeof rows)[number]) => (r.cur?.kind === "praca" ? 0 : r.cur ? 1 : r.last ? 2 : 3);
+  const rank = (r: (typeof rows)[number]) => (r.cur?.kind === "praca" || r.cur?.kind === "administracja" ? 0 : r.cur ? 1 : r.last ? 2 : 3);
   rows.sort((a, b) => rank(a) - rank(b) || displayNameForEmail(a.m.email, members).localeCompare(displayNameForEmail(b.m.email, members), "pl"));
   const count = (f: (r: (typeof rows)[number]) => boolean) => rows.filter(f).length;
 
@@ -230,8 +234,8 @@ function NowBoard({ members }: { members: MemberLite[] }) {
       {error && <p className="text-rust text-sm mb-3">{error}</p>}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-line border border-line mb-6">
         {[
-          ["W PRACY", count((r) => r.cur?.kind === "praca")],
-          ["PRZERWA / WYJŚCIE", count((r) => !!r.cur && r.cur.kind !== "praca")],
+          ["W PRACY", count((r) => r.cur?.kind === "praca" || r.cur?.kind === "administracja")],
+          ["PRZERWA / WYJŚCIE", count((r) => !!r.cur && r.cur.kind !== "praca" && r.cur.kind !== "administracja")],
           ["ZAKOŃCZYLI DZIŚ", count((r) => !r.cur && !!r.last)],
           ["NIE ROZPOCZĘLI DZIŚ", count((r) => !r.cur && !r.last)],
         ].map(([l, v]) => (

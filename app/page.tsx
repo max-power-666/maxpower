@@ -31,7 +31,7 @@ import ConsoleCatalogView from "./_components/ConsoleCatalogView";
 import ThemeSwitcher from "./_components/ThemeSwitcher";
 import { displayNameForEmail } from "@/lib/displayName";
 
-const ROLES = ["Admin", "Manager", "Magazyn", "Zamówienia", "Serwis", "Kierownik serwisu", "Testy", "Bidder", "Trade-in", "Sklep"];
+const ROLES = ["Admin", "Manager", "Magazyn", "Zamówienia", "Serwis", "Kierownik serwisu", "Testy", "Bidder", "Trade-in", "Kierownik trade-in", "Sklep"];
 
 type ViewKey =
   | "overview" | "inventory" | "sales" | "team" | "service" | "tests" | "tradein" | "orders" | "backlog" | "shipping" | "invoices" | "margin" | "points" | "nbp" | "ai" | "rcp" | "returns"
@@ -94,6 +94,8 @@ const ROLE_ACCESS: Record<string, ViewKey[]> = {
   Testy: ["tests", "backlog", "rcp", "returns"],
   Bidder: ["tradein", "backlog", "rcp", "returns"],
   "Trade-in": ["orders", "backlog", "rcp", "returns"],
+  // Kierownik trade-in (07.10.2026): zakładki jak Trade-in + prace administracyjne w RCP (wspólne dla kierowników).
+  "Kierownik trade-in": ["orders", "backlog", "rcp", "returns"],
   // Obsługa sklepu: katalog i stany. Edycję w bazie pilnuje can_edit_shop() (supabase/shop.sql) — Admin/Manager/Sklep.
   Sklep: ["shop_products", "shop_stock", "backlog", "rcp"],
 };

@@ -1,17 +1,22 @@
 // RCP — rejestracja czasu pracy (06.10.2026): czysta logika liczenia czasu z odcinków (patrz supabase/rcp.sql). Dni liczymy wg czasu polskiego (Europe/Warsaw).
-// Do czasu pracy liczą się "praca" i "wyjście służbowe"; "przerwa" i "wyjście prywatne" nie.
+// Do czasu pracy liczą się "praca", "prace administracyjne" (kierownicy, 07.10.2026) i "wyjście służbowe"; "przerwa" i "wyjście prywatne" nie.
 
 import { warsawMidnightUtcMs } from "./points";
 
 export const RCP_AREAS = ["Serwis", "Testy", "Trade-in", "Magazyn", "Zamówienia", "Inne"] as const;
-export type RcpKind = "praca" | "przerwa" | "wyjscie_prywatne" | "wyjscie_sluzbowe";
+export type RcpKind = "praca" | "administracja" | "przerwa" | "wyjscie_prywatne" | "wyjscie_sluzbowe";
 export const RCP_KIND_LABEL: Record<RcpKind, string> = {
   praca: "Praca",
+  administracja: "Prace administracyjne",
   przerwa: "Przerwa",
   wyjscie_prywatne: "Wyjście prywatne",
   wyjscie_sluzbowe: "Wyjście służbowe",
 };
-export const COUNTS_AS_WORK: RcpKind[] = ["praca", "wyjscie_sluzbowe"];
+export const COUNTS_AS_WORK: RcpKind[] = ["praca", "administracja", "wyjscie_sluzbowe"];
+// Kto może rejestrować prace administracyjne (decyzja właściciela 07.10.2026: "dla kierowników"). Czas liczy się do czasu pracy, ale jest wykazywany osobno (adminMs, obszar "Administracja"),
+// żeby późniejsze punkty na godzinę dało się liczyć bez czasu administracji.
+export const ADMIN_WORK_ROLES = ["Admin", "Manager", "Kierownik serwisu", "Kierownik trade-in"];
+export const ADMIN_AREA = "Administracja";
 
 export type RcpSegment = {
   id: number;
@@ -56,7 +61,8 @@ export function splitByDay(startMs: number, endMs: number): { day: string; ms: n
 
 export type DaySummary = {
   day: string;
-  workMs: number; // praca + wyjście służbowe
+  workMs: number; // praca + prace administracyjne + wyjście służbowe
+  adminMs: number; // w tym prace administracyjne
   breakMs: number;
   privateMs: number;
   firstStartMs: number | null; // pierwszy początek odcinka w tym dniu
@@ -70,7 +76,7 @@ export function summarizeDays(segments: RcpSegment[], nowMs: number): Map<string
   const days = new Map<string, DaySummary>();
   const get = (day: string): DaySummary => {
     let d = days.get(day);
-    if (!d) days.set(day, (d = { day, workMs: 0, breakMs: 0, privateMs: 0, firstStartMs: null, lastEndMs: 0, open: false, review: false, areaMs: {} }));
+    if (!d) days.set(day, (d = { day, workMs: 0, adminMs: 0, breakMs: 0, privateMs: 0, firstStartMs: null, lastEndMs: 0, open: false, review: false, areaMs: {} }));
     return d;
   };
   for (const s of segments) {
@@ -85,7 +91,8 @@ export function summarizeDays(segments: RcpSegment[], nowMs: number): Map<string
       const d = get(piece.day);
       if (COUNTS_AS_WORK.includes(s.kind)) {
         d.workMs += piece.ms;
-        const a = s.area || "Inne";
+        if (s.kind === "administracja") d.adminMs += piece.ms;
+        const a = s.kind === "administracja" ? ADMIN_AREA : s.area || "Inne";
         d.areaMs[a] = (d.areaMs[a] || 0) + piece.ms;
       } else if (s.kind === "przerwa") d.breakMs += piece.ms;
       else d.privateMs += piece.ms;
