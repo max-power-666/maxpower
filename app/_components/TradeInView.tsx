@@ -5,6 +5,7 @@ import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { parseDelta, planBulkChange } from "@/lib/bulkPrice";
+import { bidderPricePln, BIDDER_FEE_PCT, BIDDER_FIXED_FEE_EUR } from "@/lib/bidderPln";
 
 // Zakładka Trade-in: panel biddera cen skupu Back Market (dawny program "Buyback Bidder").
 // Sam bidder działa na serwerze (lib/buyback.ts, cron Vercela) — tu tylko czytamy
@@ -107,6 +108,7 @@ export default function TradeInView({ session, members }: { session: Session; me
   const [bulkDelta, setBulkDelta] = useState("");
   const [bulkBusy, setBulkBusy] = useState(false);
   const [selectedRunBusy, setSelectedRunBusy] = useState(false);
+  const [eurRate, setEurRate] = useState<{ mid: number; date: string } | null>(null); // bieżący kurs EUR z NBP (najświeższy zsynchronizowany) do kolumny "Cena PLN"
 
   // Zmiana wyszukiwania/filtra czyści zaznaczenie — inaczej hurtowa zmiana mogłaby dotknąć SKU, których już nie widać.
   useEffect(() => {
@@ -130,7 +132,11 @@ export default function TradeInView({ session, members }: { session: Session; me
   }, []);
 
   async function loadAll() {
-    await Promise.all([loadSettings(), loadSkus(), loadRuns()]);
+    await Promise.all([loadSettings(), loadSkus(), loadRuns(), loadEurRate()]);
+  }
+  async function loadEurRate() {
+    const { data } = await supabase.from("nbp_rates").select("mid, rate_date").eq("currency", "EUR").order("rate_date", { ascending: false }).limit(1).maybeSingle();
+    setEurRate(data ? { mid: Number(data.mid), date: String(data.rate_date) } : null);
   }
   async function loadSettings() {
     const { data, error } = await supabase.from("buyback_settings").select("*").eq("id", 1).maybeSingle();
@@ -460,6 +466,7 @@ export default function TradeInView({ session, members }: { session: Session; me
                   </th>
                   <th className="p-3">SKU</th>
                   <th className="p-3">Cena max</th>
+                  <th className="p-3 text-right" title={`(cena max + ${BIDDER_FEE_PCT * 100}% + ${BIDDER_FIXED_FEE_EUR} €) × kurs EUR NBP${eurRate ? ` (${eurRate.mid.toFixed(4)} z ${eurRate.date})` : ""}`}>Cena PLN</th>
                   {MARKETS.map((m) => (
                     <th key={m} className="p-3 text-right">{m}</th>
                   ))}
@@ -470,10 +477,10 @@ export default function TradeInView({ session, members }: { session: Session; me
               </thead>
               <tbody>
                 {skus.length === 0 && (
-                  <tr><td colSpan={10} className="p-6 text-center text-inksoft text-sm">Brak SKU — zaimportuj katalog skryptem scripts/import-buyback.mjs.</td></tr>
+                  <tr><td colSpan={11} className="p-6 text-center text-inksoft text-sm">Brak SKU — zaimportuj katalog skryptem scripts/import-buyback.mjs.</td></tr>
                 )}
                 {skus.length > 0 && visible.length === 0 && (
-                  <tr><td colSpan={10} className="p-6 text-center text-inksoft text-sm">Nic nie pasuje do filtra.</td></tr>
+                  <tr><td colSpan={11} className="p-6 text-center text-inksoft text-sm">Nic nie pasuje do filtra.</td></tr>
                 )}
                 {visible.map((s) => {
                   const draft = drafts[s.sku];
@@ -513,6 +520,12 @@ export default function TradeInView({ session, members }: { session: Session; me
                             <button onClick={() => saveMax(s.sku)} className="text-xs font-semibold px-2 py-1 rounded bg-ink text-paper">Zapisz</button>
                           )}
                         </div>
+                      </td>
+                      <td className="p-3 text-right font-mono whitespace-nowrap">
+                        {(() => {
+                          const pln = bidderPricePln(draft !== undefined ? draft.replace(",", ".") : s.max_price, eurRate?.mid);
+                          return pln === null ? <span className="text-inksoft">—</span> : <span title={`(${draft ?? s.max_price} € + ${BIDDER_FEE_PCT * 100}% + ${BIDDER_FIXED_FEE_EUR} €) × ${eurRate!.mid.toFixed(4)} (kurs NBP z ${eurRate!.date})`}>{pln.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} zł</span>;
+                        })()}
                       </td>
                       {MARKETS.map((m) => (
                         <td key={m} className="p-3 text-right font-mono whitespace-nowrap" title="nasza cena / cena do wygrania">
