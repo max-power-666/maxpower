@@ -117,13 +117,13 @@ export function isIpAllowed(ip: string | null | undefined, allowed: string[]): b
 export const isValidIp = (s: string): boolean => /^(\d{1,3}\.){3}\d{1,3}$/.test(s) ? s.split(".").every((x) => Number(x) <= 255) : /^[0-9a-f:]+$/i.test(s) && s.includes(":");
 
 // Miesięczna ewidencja jako CSV (średnik, UTF-8 z BOM — Excel w polskich ustawieniach): wiersz na osobę, kolumny dni miesiąca + suma.
-export function ewidencjaCsv(month: string, daysInMonth: number, rows: { name: string; byDay: Map<string, DaySummary> }[]): string {
+export function ewidencjaCsv(month: string, daysInMonth: number, rows: { name: string; byDay: Map<string, DaySummary>; absenceCode?: (day: string) => string }[]): string {
   const head = ["Pracownik", ...Array.from({ length: daysInMonth }, (_, i) => String(i + 1)), "Razem (h:mm)"];
   const lines = [head.join(";")];
   for (const r of rows) {
     const cells = Array.from({ length: daysInMonth }, (_, i) => {
       const d = r.byDay.get(`${month}-${String(i + 1).padStart(2, "0")}`);
-      return d && d.workMs > 0 ? fmtHm(d.workMs) : "";
+      return d && d.workMs > 0 ? fmtHm(d.workMs) : r.absenceCode?.(`${month}-${String(i + 1).padStart(2, "0")}`) ?? "";
     });
     lines.push([`"${r.name.replace(/"/g, '""')}"`, ...cells, fmtHm(totalWorkMs(r.byDay))].join(";"));
   }

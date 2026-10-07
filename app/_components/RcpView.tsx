@@ -5,6 +5,9 @@ import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { monthKeyOf, monthRange } from "@/lib/points";
+import { MyLeave, Requests, usePendingCount } from "./RcpAbsences";
+import { absenceKind, absenceOnDay, type Absence } from "@/lib/rcpAbsence";
+import { isHoliday } from "@/lib/holidays";
 import {
   RCP_AREAS, RCP_KIND_LABEL, dayStartMs, ewidencjaCsv, fmtClock, fmtHm, summarizeDays, totalWorkMs, warsawDay,
   type RcpKind, type RcpSegment,
@@ -13,7 +16,7 @@ import {
 // Zakładka RCP (06.10.2026, etap 1). Pracownik: "Mój czas" (dziś, miesiąc, godziny, przerwy), widzi TYLKO swoje (RLS w bazie). Admin i Manager dodatkowo: "Teraz w pracy",
 // "Ewidencja" miesięczna (z korektami i eksportem CSV) i ustawienia (adresy IP komputerów w firmie — zmienia tylko Admin). Rejestracja idzie z widżetu na lewym pasku.
 
-type Sub = "mine" | "now" | "records" | "settings";
+type Sub = "mine" | "leave" | "requests" | "now" | "records" | "settings";
 const pill = (active: boolean) => `px-3 py-1.5 rounded-full text-sm font-semibold border ${active ? "bg-ink text-paper border-ink" : "bg-white border-line"}`;
 const DOW = ["nd", "pn", "wt", "śr", "cz", "pt", "so"];
 const KIND_STYLE: Record<RcpKind, string> = {
@@ -53,16 +56,19 @@ export default function RcpView({ session, role, members }: { session: Session; 
   const isManager = role === "Admin" || role === "Manager";
   const isAdmin = role === "Admin";
   const [sub, setSub] = useState<Sub>(isManager ? "now" : "mine");
+  const pending = usePendingCount(isManager);
   return (
     <div>
-      {isManager && (
-        <div className="flex gap-2 mb-5">
-          <button onClick={() => setSub("now")} className={pill(sub === "now")}>Teraz w pracy</button>
-          <button onClick={() => setSub("records")} className={pill(sub === "records")}>Ewidencja</button>
-          <button onClick={() => setSub("mine")} className={pill(sub === "mine")}>Mój czas</button>
-          <button onClick={() => setSub("settings")} className={pill(sub === "settings")}>Ustawienia</button>
-        </div>
-      )}
+      <div className="flex gap-2 mb-5 flex-wrap">
+        {isManager && <button onClick={() => setSub("now")} className={pill(sub === "now")}>Teraz w pracy</button>}
+        {isManager && <button onClick={() => setSub("records")} className={pill(sub === "records")}>Ewidencja</button>}
+        <button onClick={() => setSub("mine")} className={pill(sub === "mine")}>Mój czas</button>
+        <button onClick={() => setSub("leave")} className={pill(sub === "leave")}>Urlopy</button>
+        {isManager && <button onClick={() => setSub("requests")} className={pill(sub === "requests")}>Wnioski{pending > 0 ? ` (${pending})` : ""}</button>}
+        {isManager && <button onClick={() => setSub("settings")} className={pill(sub === "settings")}>Ustawienia</button>}
+      </div>
+      {sub === "leave" && <MyLeave session={session} />}
+      {sub === "requests" && isManager && <Requests session={session} members={members} isAdmin={isAdmin} />}
       {sub === "mine" && <MyTime session={session} members={members} />}
       {sub === "now" && isManager && <NowBoard members={members} />}
       {sub === "records" && isManager && <Records session={session} members={members} isAdmin={isAdmin} />}
@@ -289,10 +295,17 @@ function Records({ session, members, isAdmin }: { session: Session; members: Mem
   const [error, setError] = useState("");
   const [now, setNow] = useState(Date.now());
   const [openCell, setOpenCell] = useState<{ userId: string; email: string; day: string } | null>(null);
+  const [absences, setAbsences] = useState<Absence[]>([]);
 
   const load = useCallback(async () => {
     try {
-      const [s, m] = await Promise.all([fetchSegments(month), supabase.from("members").select("user_id, email, role")]);
+      const nd = daysIn(month);
+      const [s, m, ab] = await Promise.all([
+        fetchSegments(month),
+        supabase.from("members").select("user_id, email, role"),
+        supabase.from("rcp_absences").select("*").eq("status", "zaakceptowany").lte("date_from", `${month}-${String(nd).padStart(2, "0")}`).gte("date_to", `${month}-01`).limit(1000),
+      ]);
+      setAbsences(ab.error ? [] : ((ab.data as Absence[]) || [])); // brak tabeli nieobecności nie psuje ewidencji
       setSegs(s);
       setList(((m.data as { user_id: string; email: string; role: string }[]) || []).filter((x) => x.role));
       setError("");
@@ -315,7 +328,7 @@ function Records({ session, members, isAdmin }: { session: Session; members: Mem
   const reviewCount = segs.filter((s) => s.needs_review).length;
 
   function exportCsv() {
-    const csv = ewidencjaCsv(month, n, people.filter((p) => p.byDay.size > 0).map((p) => ({ name: p.name, byDay: p.byDay })));
+    const csv = ewidencjaCsv(month, n, people.filter((p) => p.byDay.size > 0 || absences.some((a) => a.user_id === p.user_id)).map((p) => ({ name: p.name, byDay: p.byDay, absenceCode: (day: string) => absenceKind(absenceOnDay(absences.filter((a) => a.user_id === p.user_id), day)?.kind ?? "")?.short ?? "" })));
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     a.download = `ewidencja-czasu-${month}.csv`;
@@ -340,7 +353,7 @@ function Records({ session, members, isAdmin }: { session: Session; members: Mem
               <th className="p-2 text-left sticky left-0 bg-white">Pracownik</th>
               {dayKeys.map((d) => {
                 const wk = dowOf(d);
-                return <th key={d} className={`p-1.5 font-mono font-normal ${wk === "nd" || wk === "so" ? "bg-paper" : ""}`}><div>{d.slice(8)}</div><div className="text-[9px]">{wk}</div></th>;
+                return <th key={d} title={isHoliday(d) ? "Święto" : undefined} className={`p-1.5 font-mono font-normal ${wk === "nd" || wk === "so" || isHoliday(d) ? "bg-paper" : ""} ${isHoliday(d) ? "text-rust" : ""}`}><div>{d.slice(8)}</div><div className="text-[9px]">{wk}</div></th>;
               })}
               <th className="p-2 text-right">Razem</th>
             </tr>
@@ -352,9 +365,10 @@ function Records({ session, members, isAdmin }: { session: Session; members: Mem
                 {dayKeys.map((d) => {
                   const s = p.byDay.get(d);
                   const wk = dowOf(d);
+                  const ab = absenceOnDay(absences.filter((a) => a.user_id === p.user_id), d);
                   return (
-                    <td key={d} onClick={() => setOpenCell({ userId: p.user_id, email: p.email, day: d })} className={`p-1.5 text-center font-mono cursor-pointer hover:bg-tealsoft ${wk === "nd" || wk === "so" ? "bg-paper" : ""} ${s?.open ? "text-teal font-bold" : ""}`}>
-                      {s && s.workMs > 0 ? fmtHm(s.workMs) : ""}
+                    <td key={d} onClick={() => setOpenCell({ userId: p.user_id, email: p.email, day: d })} title={ab ? absenceKind(ab.kind)?.label : undefined} className={`p-1.5 text-center font-mono cursor-pointer hover:bg-tealsoft ${wk === "nd" || wk === "so" || isHoliday(d) ? "bg-paper" : ""} ${s?.open ? "text-teal font-bold" : ""}`}>
+                      {s && s.workMs > 0 ? fmtHm(s.workMs) : ab ? <span className="text-[10px] font-bold text-amber">{absenceKind(ab.kind)?.short}</span> : ""}
                       {s?.review && <span className="text-amber">⚠</span>}
                     </td>
                   );
@@ -366,7 +380,7 @@ function Records({ session, members, isAdmin }: { session: Session; members: Mem
           </tbody>
         </table>
       </div>
-      <p className="text-[11px] text-inksoft mt-3 max-w-3xl">Godziny pracy = praca + wyjścia służbowe (przerwy i wyjścia prywatne nie). Kliknij komórkę, żeby zobaczyć szczegóły dnia, poprawić wpis albo dodać brakujący. ⚠ = wpis zamknięty automatycznie (nikt nie kliknął „Zakończ”) — sprawdź i popraw.</p>
+      <p className="text-[11px] text-inksoft mt-3 max-w-3xl">Godziny pracy = praca + wyjścia służbowe (przerwy i wyjścia prywatne nie). Kody nieobecności: U urlop, UŻ na żądanie, UO okolicznościowy, UB bezpłatny, L4, N inna; szare tło = weekend lub święto. Kliknij komórkę, żeby zobaczyć szczegóły dnia, poprawić wpis albo dodać brakujący. ⚠ = wpis zamknięty automatycznie (nikt nie kliknął „Zakończ”) — sprawdź i popraw.</p>
       {openCell && <DayDrawer session={session} cell={openCell} segs={segs.filter((s) => s.user_id === openCell.userId)} members={members} isAdmin={isAdmin} onClose={() => setOpenCell(null)} onChanged={load} />}
     </div>
   );

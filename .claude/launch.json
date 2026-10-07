@@ -4,8 +4,20 @@
     {
       "name": "magazyn-erp-dev",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["node_modules/next/dist/bin/next", "dev"],
+      "runtimeArgs": [
+        "node_modules/next/dist/bin/next",
+        "dev"
+      ],
       "port": 3000
+    },
+    {
+      "name": "recoo-sklep-dev",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd ../recoo-sklep && exec node node_modules/next/dist/bin/next dev -p 3100"
+      ],
+      "port": 3100
     }
   ]
 }

@@ -130,3 +130,70 @@ revoke all on function rcp_act(uuid, text, text, text, text, text) from public, 
 revoke all on function rcp_close_stale(uuid) from public, anon, authenticated;
 grant execute on function rcp_act(uuid, text, text, text, text, text) to service_role;
 grant execute on function rcp_close_stale(uuid) to service_role;
+
+-- ---- Nieobecności i wnioski urlopowe (07.10.2026) ----
+-- rcp_absences: wniosek/wpis nieobecności na dni kalendarzowe [date_from, date_to]; workdays = dni robocze (pn–pt poza świętami, liczone przez serwer, lib/holidays.ts).
+-- Pracownik składa wniosek (status 'oczekuje'), Manager/Admin akceptuje lub odrzuca; Manager/Admin może też wpisać nieobecność za kogoś (od razu 'zaakceptowany', np. L4).
+-- Zapisuje WYŁĄCZNIE serwer (route rcp/absence): tabela nie ma polityk zapisu. Odczyt: pracownik swoje, Admin i Manager wszystkie. Usuwanie tylko Admin (audit_delete).
+create table if not exists rcp_absences (
+  id bigint generated always as identity primary key,
+  user_id uuid references auth.users(id) on delete set null,
+  user_email text not null,
+  kind text not null check (kind in ('urlop_wypoczynkowy', 'urlop_na_zadanie', 'urlop_okolicznosciowy', 'urlop_bezplatny', 'l4', 'inne')),
+  date_from date not null,
+  date_to date not null,
+  workdays int not null check (workdays >= 1),
+  note text,
+  status text not null default 'oczekuje' check (status in ('oczekuje', 'zaakceptowany', 'odrzucony', 'wycofany', 'anulowany')),
+  decided_by_email text,
+  decided_at timestamptz,
+  decision_note text,
+  created_by_email text,
+  created_at timestamptz not null default now(),
+  history jsonb not null default '[]'::jsonb,
+  check (date_to >= date_from)
+);
+create index if not exists rcp_absences_user_idx on rcp_absences (user_id, date_from desc);
+create index if not exists rcp_absences_status_idx on rcp_absences (status, date_from);
+
+-- Dwa aktywne (oczekujące/zaakceptowane) wnioski tej samej osoby nie mogą się nakładać — pilnuje też baza (serwer sprawdza wcześniej i daje czytelny komunikat).
+create or replace function rcp_absences_no_overlap() returns trigger
+language plpgsql as $$
+begin
+  if new.status in ('oczekuje', 'zaakceptowany') and exists (
+    select 1 from rcp_absences o
+     where o.user_id = new.user_id and o.id <> coalesce(new.id, -1) and o.status in ('oczekuje', 'zaakceptowany')
+       and o.date_from <= new.date_to and new.date_from <= o.date_to
+  ) then
+    raise exception 'Ta osoba ma już nieobecność w tym terminie.' using errcode = 'P0001';
+  end if;
+  return new;
+end $$;
+drop trigger if exists rcp_absences_no_overlap on rcp_absences;
+create trigger rcp_absences_no_overlap before insert or update of user_id, date_from, date_to, status on rcp_absences
+  for each row execute function rcp_absences_no_overlap();
+
+-- Roczny limit urlopowy per osoba (dni robocze) — ustawia Admin (tabela edytowalna wprost, polityki is_admin()); brak wiersza = limit nieustawiony (bez kontroli).
+create table if not exists rcp_leave_balances (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  year int not null,
+  days_total numeric not null check (days_total >= 0),
+  updated_at timestamptz not null default now(),
+  primary key (user_id, year)
+);
+
+alter table rcp_absences enable row level security;
+alter table rcp_leave_balances enable row level security;
+
+drop policy if exists "own or manager read rcp_absences" on rcp_absences;
+create policy "own or manager read rcp_absences" on rcp_absences for select using (user_id = auth.uid() or rcp_is_manager());
+drop policy if exists "admin delete rcp_absences" on rcp_absences;
+create policy "admin delete rcp_absences" on rcp_absences for delete using (is_admin());
+drop trigger if exists rcp_absences_audit_delete on rcp_absences;
+create trigger rcp_absences_audit_delete before delete on rcp_absences
+  for each row execute function audit_delete();
+
+drop policy if exists "own or manager read rcp_leave_balances" on rcp_leave_balances;
+create policy "own or manager read rcp_leave_balances" on rcp_leave_balances for select using (user_id = auth.uid() or rcp_is_manager());
+drop policy if exists "admin write rcp_leave_balances" on rcp_leave_balances;
+create policy "admin write rcp_leave_balances" on rcp_leave_balances for all using (is_admin()) with check (is_admin());
