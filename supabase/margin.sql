@@ -162,8 +162,9 @@ grant select on margin_items to service_role;
 --    test w repo porównuje oba widoki dla sztuk w magazynie) + stock_level i available. VAT tylko z cache (dla sprzedanych puste).
 create or replace view fakturownia_products_with_sku as
 select v.*,
-       nullif(btrim(split_part(v.sku, '-', 1)), '') as sku_category,
-       case when v.sku ~ '-[A-Za-z]+$' then substring(v.sku from '[A-Za-z]+$') end as sku_class,
+       case when v.sku ~ '\(\s*\d+\s*/\s*\d+\s*\)\s*$' then 'APARAT' else nullif(btrim(split_part(v.sku, '-', 1)), '') end as sku_category,
+       case when v.sku ~ '\(\s*\d+\s*/\s*\d+\s*\)\s*$' then regexp_replace(substring(v.sku from '\(([^)]*)\)\s*$'), '\s', '', 'g')
+            when v.sku ~ '-[A-Za-z]+$' then substring(v.sku from '[A-Za-z]+$') end as sku_class,
        (select ps.source from product_status_for(v.name) ps) as product_status_source,
        (select ps.status from product_status_for(v.name) ps) as product_status,
        (select ps.at from product_status_for(v.name) ps) as product_status_at

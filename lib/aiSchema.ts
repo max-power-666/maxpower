@@ -27,6 +27,8 @@ WIDOKI
    takiego członu).
 4) ai.nbp_rates — kursy NBP: currency, rate_date, mid (1 jednostka waluty = tyle PLN).
 
+WYJĄTEK — APARATY: ich SKU ma postać "237387 (3/5)" (numer produktu + ocena stanu w nawiasie, 1–5); sku_category to wtedy "APARAT", a sku_class np. "3/5" (nie litera A–D).
+
 SKU ma budowę KATEGORIA-POJEMNOŚĆ-KOLOR-KLASA (np. PS4P-1TB-BK-A); klasa A > B > C > D (stan), ostatnie litery. SKU w ai.stock (magazyn) ma
 TAKĄ postać, a SKU w ai.order_items (zamówienia) ma dodatkowo na końcu liczbę kontrolerów: "XSX-1TB-BK-B-1M" = to samo urządzenie co "XSX-1TB-BK-B" w
 magazynie, sprzedane z 1 kontrolerem (0M = bez kontrolera, 2M = dwa). Do łączenia/porównywania z magazynem i do klasy używaj kolumn sku_base (SKU bez końcówki

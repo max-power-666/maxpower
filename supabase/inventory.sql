@@ -33,6 +33,8 @@ create index if not exists buyback_order_intake_serial_norm_idx on buyback_order
 -- sku_class (03.10.2026) — "Klasa" = OSTATNI człon SKU po ostatnim myślniku, jeśli składa się wyłącznie z liter (NS-32-V1-D -> D,
 -- NS-32-V2-BC -> BC, NS-32-V1-C -> C, PS4P-1TB-BK-A -> A); inaczej null — np. SKU bez myślnika albo ze starego schematu, gdzie ostatni
 -- człon to liczba pad-ów/gwarancji ("PS4-500-B-2M" -> null, bo "2M" nie jest klasą). Dopisana na końcu widoku jak sku_category.
+-- APARATY (07.10.2026): SKU w postaci "237387 (3/5)" (numer + ocena stanu w nawiasie z ukośnikiem) dają kategorię APARAT i klasę "3/5" — wzorzec to nawias z ukośnikiem na końcu
+-- (nie sam ukośnik: zwykłe SKU z pamięcią, np. SGS22U51-12/256-E, zostają bez zmian); to samo robi lib/skuParts.ts.
 -- sku_category (02.10.2026) — "Kategoria z SKU" = pierwszy człon SKU przed pierwszym myślnikiem (XSX-1TB-BK-A -> XSX,
 -- PS4S-1TB-BK-AB -> PS4S, NS-32-V1-D -> NS); SKU bez myślnika -> cała wartość; brak SKU -> null. Kolumna dopisana NA KOŃCU
 -- widoku (create or replace view pozwala tylko dopisywać kolumny na końcu).
@@ -67,8 +69,9 @@ grant execute on function product_status_for(text) to authenticated;
 
 create or replace view fakturownia_stock_with_sku as
 select v.*,
-       nullif(btrim(split_part(v.sku, '-', 1)), '') as sku_category,
-       case when v.sku ~ '-[A-Za-z]+$' then substring(v.sku from '[A-Za-z]+$') end as sku_class,
+       case when v.sku ~ '\(\s*\d+\s*/\s*\d+\s*\)\s*$' then 'APARAT' else nullif(btrim(split_part(v.sku, '-', 1)), '') end as sku_category,
+       case when v.sku ~ '\(\s*\d+\s*/\s*\d+\s*\)\s*$' then regexp_replace(substring(v.sku from '\(([^)]*)\)\s*$'), '\s', '', 'g')
+            when v.sku ~ '-[A-Za-z]+$' then substring(v.sku from '[A-Za-z]+$') end as sku_class,
        (select ps.source from product_status_for(v.name) ps) as product_status_source,
        (select ps.status from product_status_for(v.name) ps) as product_status,
        (select ps.at from product_status_for(v.name) ps) as product_status_at

@@ -110,7 +110,7 @@ select
   o.is_counted,
   o.country_code,
   i.sku,
-  split_part(i.sku, '-', 1) as sku_category,
+  case when i.sku ~ '\(\s*\d+\s*/\s*\d+\s*\)\s*$' then 'APARAT' else split_part(i.sku, '-', 1) end as sku_category, -- aparaty: SKU "237387 (3/5)" (07.10.2026)
   i.name as product_name,
   i.serial_number,
   i.pads,
@@ -126,7 +126,8 @@ select
   -- sku_controllers = liczba kontrolerów z końcówki (null, gdy jej brak), sku_class = klasa (ostatni człon z liter sku_base).
   b.base as sku_base,
   nullif(substring(i.sku from '-(\d+)M$'), '')::int as sku_controllers,
-  case when b.base ~ '-[A-Za-z]+$' then substring(b.base from '[A-Za-z]+$') end as sku_class
+  case when b.base ~ '\(\s*\d+\s*/\s*\d+\s*\)\s*$' then regexp_replace(substring(b.base from '\(([^)]*)\)\s*$'), '\s', '', 'g')
+       when b.base ~ '-[A-Za-z]+$' then substring(b.base from '[A-Za-z]+$') end as sku_class
 from sales_order_items i
 left join lateral (select regexp_replace(i.sku, '-\d+M$', '') as base) b on true
 join ai.orders o on o.marketplace = i.marketplace and o.order_id = i.external_id
