@@ -2,6 +2,8 @@
 // Zasady wg Regulaminu premiowania (patrz CLAUDE.md): punkty tylko za PRAWIDŁOWO zakończony proces (§2 ust. 4), każda paczka/urządzenie raz (data zaliczenia =
 // points_awarded_at, nie przesuwa się przy zmianie statusu), punkty z różnych obszarów sumują się w jeden wynik miesięczny (§2 ust. 6).
 
+import { warsawYm } from "./warsawDate";
+
 export type PointsArea = "service" | "tests" | "tradein";
 export const POINTS_AREAS: { key: PointsArea; label: string; unit: string }[] = [
   { key: "service", label: "Serwis", unit: "napraw" },
@@ -33,7 +35,7 @@ export const monthKeyOf = (iso: string | null | undefined): string | null => {
   if (!iso) return null;
   const t = Date.parse(iso);
   if (!Number.isFinite(t)) return null;
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Warsaw", year: "numeric", month: "2-digit" }).format(new Date(t)); // YYYY-MM
+  return warsawYm(t); // YYYY-MM (z części, nie z locale — patrz lib/warsawDate.ts)
 };
 
 // Zakres miesiąca kalendarzowego wg czasu polskiego: [from, to) jako znaczniki ISO (UTC).

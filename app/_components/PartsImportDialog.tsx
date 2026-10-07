@@ -1,5 +1,6 @@
 "use client";
 
+import { warsawYmd } from "@/lib/warsawDate";
 import { useEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 
@@ -10,7 +11,7 @@ import type { Session } from "@supabase/supabase-js";
 type Row = { key: number; name: string; supplierCode: string; quantity: string; currency: string; priceNet: string; rate: string; pricePln: string; note: string | null };
 type Header = { supplier: string; invoiceNo: string; invoiceDate: string; receivedAt: string };
 
-const today = () => new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Warsaw" });
+const today = () => warsawYmd(Date.now());
 const toNum = (s: string) => {
   const n = Number(s.trim().replace(/\s/g, "").replace(",", "."));
   return s.trim() !== "" && Number.isFinite(n) ? n : null;

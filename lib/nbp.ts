@@ -1,3 +1,4 @@
+import { warsawYmd } from "./warsawDate";
 // Kursy walut NBP (zakładka NBP, 01.10.2026) — tabela A (kursy średnie), api.nbp.pl, bez klucza/autoryzacji.
 // Dziś potrzebne do przeliczania wartości zamówień z różnych kanałów na PLN na Przeglądzie (Back Market/
 // refurbed/Octopia/Amazon głównie EUR, część refurbed w DKK, Allegro/Erli w PLN — sprawdzone na żywych danych,
@@ -58,5 +59,5 @@ export function warsawDate(iso: string | null | undefined): string {
   if (!iso) return "";
   const t = Date.parse(iso);
   if (!Number.isFinite(t)) return "";
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Warsaw", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(t));
+  return warsawYmd(t);
 }

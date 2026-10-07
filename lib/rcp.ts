@@ -2,6 +2,7 @@
 // Do czasu pracy liczą się "praca", "prace administracyjne" (kierownicy, 07.10.2026) i "wyjście służbowe"; "przerwa" i "wyjście prywatne" nie.
 
 import { warsawMidnightUtcMs } from "./points";
+import { warsawYmd } from "./warsawDate";
 
 export const RCP_AREAS = ["Serwis", "Testy", "Trade-in", "Magazyn", "Zamówienia", "Inne"] as const;
 export type RcpKind = "praca" | "administracja" | "przerwa" | "wyjscie_prywatne" | "wyjscie_sluzbowe";
@@ -32,7 +33,7 @@ export type RcpSegment = {
   history?: { at: string; by_email: string | null; reason: string; changes?: { field: string; from: string | null; to: string | null }[] }[];
 };
 
-export const warsawDay = (ms: number): string => new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Warsaw" }).format(new Date(ms)); // YYYY-MM-DD
+export const warsawDay = (ms: number): string => warsawYmd(ms); // YYYY-MM-DD
 
 const nextDay = (day: string): string => {
   const [y, m, d] = day.split("-").map(Number);
