@@ -152,6 +152,12 @@ export default function ServiceView({
           if (ownOnly) q = q.eq("employee_user_id", session.user.id);
           else if (employeeFilter) q = q.ilike("employee_email", escapeLike(employeeFilter));
           if (search) q = q.ilike("device_ref", `%${escapeLike(search)}%`);
+          // Okres (Dziś / 7 / 30 dni) zawęża też listę: naprawy rozpoczęte lub zakończone w okresie oraz wciąż trwające (bez daty zakończenia). Wyszukiwanie po numerze seryjnym
+          // szuka w całej historii, więc okresu wtedy nie stosujemy.
+          else {
+            const from = rangeStart(interval);
+            q = q.or(`started_at.gte.${from},finished_at.gte.${from},finished_at.is.null`);
+          }
           // Przy wyszukiwaniu limit rośnie — szukany wpis mógł dawno wypaść poza najświeższe 50.
           return q.order("started_at", { ascending: false }).limit(search ? 200 : 50);
         })(),
