@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useRef, useState } from "react";
+import BmInvoicesView from "./BmInvoicesView";
 import type { Session } from "@supabase/supabase-js";
 import { MARKETPLACES } from "@/lib/salesOrders";
 import type { MemberLite } from "@/lib/displayName";
@@ -54,11 +55,10 @@ export default function MarginView({ session, members }: { session: Session; mem
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [uploadMsg, setUploadMsg] = useState("");
+  const [section, setSection] = useState<"margin" | "invoices">("margin"); // pigułki: Marża / Faktury BM (08.10.2026)
   const [expanded, setExpanded] = useState<Set<string>>(new Set()); // rozwinięte wiersze (szczegółowe wyliczenie marży)
   const [openOrder, setOpenOrder] = useState<{ marketplace: string; externalId: string } | null>(null);
   const [openSerial, setOpenSerial] = useState<string | null>(null); // karta produktu po numerze seryjnym
-  const fileRef = useRef<HTMLInputElement>(null);
   const seq = useRef(0);
   const auth = { Authorization: `Bearer ${session.access_token}` };
 
@@ -117,55 +117,19 @@ export default function MarginView({ session, members }: { session: Session; mem
     }
   }
 
-  async function upload(files: FileList | null) {
-    if (!files || files.length === 0) return;
-    setUploadMsg("");
-    const results: string[] = [];
-    for (const f of Array.from(files)) {
-      try {
-        const csv = await f.text();
-        const res = await fetch("/api/margin/bm-invoice", { method: "POST", headers: { ...auth, "Content-Type": "application/json" }, body: JSON.stringify({ filename: f.name, csv }) });
-        const data = await res.json().catch(() => ({}));
-        results.push(res.ok ? `${data.invoiceRef}: ${data.lines} wierszy, ${data.orders} zamówień` : `${f.name}: ${data?.error || "błąd"}`);
-      } catch (e: any) {
-        results.push(`${f.name}: ${e.message || "błąd"}`);
-      }
-    }
-    setUploadMsg(results.join(" · "));
-    if (fileRef.current) fileRef.current.value = "";
-    load();
-  }
-
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const marginCls = (n: number | null) => (n === null ? "" : n < 0 ? "text-rust" : "text-teal");
 
   return (
     <div>
-      <div className="border border-line bg-white p-4 mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div className="text-sm">
-          <div className="text-xs font-semibold text-inksoft mb-1">PROWIZJA BACK MARKET</div>
-          {bmRates ? (
-            <span>
-              Z faktur: średnio <span className="font-mono font-semibold">{bmRates.paymentPct.toFixed(2).replace(".", ",")}%</span> opłaty płatniczej,{" "}
-              <span className="font-mono font-semibold">{bmRates.ccbmFixedEur.toFixed(2).replace(".", ",")} €</span> CCBM za pozycję (akcesoria{" "}
-              <span className="font-mono font-semibold">{bmRates.ccbmAccessoryEur.toFixed(2).replace(".", ",")} €</span>) · z {bmRates.orders} zamówień, {invoiceCount} {invoiceCount === 1 ? "faktury" : "faktur"}.
-              Dla zamówień objętych fakturą liczone dokładnie z niej.
-            </span>
-          ) : (
-            <span className="text-inksoft">Brak wgranych faktur — używam stawek z regulaminu (1% opłaty płatniczej, CCBM 6,99 €). Wgraj fakturę tygodniową (CSV), żeby liczyć dokładnie i z faktycznych średnich.</span>
-          )}
-          <div className="text-[11px] text-inksoft mt-1">
-            Prowizja szacowana wg reguł (sprawdzone na zamówieniach z faktur): <span className="font-semibold">konsole do FR/DE/ES/IT — 6%</span> (program Accelerator, −5 pkt proc., 15.08–31.12.2026),
-            <span className="font-semibold">smartwatche (nie Apple) do FR/DE/ES/IT — 0%</span> (1.09–30.11.2026), konsole do pozostałych krajów 11%, akcesoria (pady) 20%, pozostałe produkty (w tym Apple Watch) 11%. refurbed i Octopia — prowizja wprost z danych zamówienia. Średnie z ostatnich 8 tygodni faktur; wgrywaj kolejne co tydzień.
-          </div>
-        </div>
-        <div className="shrink-0">
-          <input ref={fileRef} type="file" accept=".csv,text/csv" multiple className="hidden" onChange={(e) => upload(e.target.files)} />
-          <button onClick={() => fileRef.current?.click()} className="bg-ink text-paper px-4 py-2 rounded text-sm font-semibold">Wgraj fakturę BM (CSV)</button>
-        </div>
+      <div className="flex gap-2 mb-4">
+        <button onClick={() => setSection("margin")} className={pill(section === "margin")}>Marża</button>
+        <button onClick={() => setSection("invoices")} className={pill(section === "invoices")}>Faktury BM</button>
       </div>
-      {uploadMsg && <p className="text-xs text-teal font-semibold mb-3">{uploadMsg}</p>}
-
+      {section === "invoices" ? (
+        <BmInvoicesView session={session} members={members} bmRates={bmRates} invoiceCount={invoiceCount} onUploaded={load} />
+      ) : (
+      <>
       <div className="border border-line bg-white p-4 mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="text-sm">
           <div className="text-xs font-semibold text-inksoft mb-1">CENY ZAKUPU (z Fakturowni, produkty od 01.01.2025, także sprzedane)</div>
@@ -340,6 +304,9 @@ export default function MarginView({ session, members }: { session: Session; mem
         Towary na V23 (zakup ze standardowym VAT 23%, np. akcesoria) liczymy inaczej: kosztem jest cena zakupu NETTO, a „VAT” w tabeli to VAT należny 23% od pełnej ceny sprzedaży — marża = sprzedaż/1,23 − zakup netto − pozostałe koszty.
         Koszty serwisu = ceny netto części przypisanych do numeru seryjnego (Serwis → Części). Koszty zamówień z wieloma pozycjami dzielone wg ceny pozycji; waluty przeliczone kursem NBP z dnia poprzedniego względem daty zamówienia.
       </p>
+
+      </>
+      )}
 
       {openSerial && <ProductCardDrawer serial={openSerial} members={members} onClose={() => setOpenSerial(null)} />}
       {openOrder && <SalesOrderCard marketplace={openOrder.marketplace} externalId={openOrder.externalId} session={session} members={members} onClose={() => setOpenOrder(null)} />}
