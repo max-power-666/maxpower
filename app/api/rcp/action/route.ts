@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { rcpAdmin, rcpCaller, clientIp, loadAllowedIps } from "@/lib/rcpServer";
-import { isIpAllowed, RCP_AREAS, ADMIN_WORK_ROLES } from "@/lib/rcp";
+import { isIpAllowed, RCP_AREAS, ADMIN_WORK_ROLES, tracksWorkTime } from "@/lib/rcp";
 
 // Rejestracja czasu pracy: start | break | admin | resume | leave | change_area | end. Zapis WYŁĄCZNIE tu (tabela rcp_segments nie ma polityk zapisu), po sprawdzeniu adresu IP
 // komputera (tylko komputery w firmie — lista w rcp_settings; pusta = bez ograniczenia). Samą zmianę stanu robi atomowa funkcja bazy rcp_act (zegar serwera).
@@ -12,6 +12,7 @@ export async function POST(request: Request) {
   const db = rcpAdmin();
   const me = await rcpCaller(request, db);
   if (!me) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
+  if (!tracksWorkTime(me.role)) return NextResponse.json({ error: "Rejestrowanie czasu pracy jest wyłączone dla Admina i Managera." }, { status: 403 });
   const b = await request.json().catch(() => null);
   const action = typeof b?.action === "string" ? b.action : "";
   if (!ACTIONS.includes(action)) return NextResponse.json({ error: "Nieznana akcja." }, { status: 400 });

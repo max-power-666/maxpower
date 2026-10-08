@@ -9,7 +9,7 @@ import { MyLeave, Requests, usePendingCount } from "./RcpAbsences";
 import { absenceKind, absenceOnDay, type Absence } from "@/lib/rcpAbsence";
 import { isHoliday } from "@/lib/holidays";
 import {
-  RCP_AREAS, RCP_KIND_LABEL, dayStartMs, ewidencjaCsv, fmtClock, fmtHm, summarizeDays, totalWorkMs, warsawDay,
+  RCP_AREAS, RCP_KIND_LABEL, tracksWorkTime, dayStartMs, ewidencjaCsv, fmtClock, fmtHm, summarizeDays, totalWorkMs, warsawDay,
   type RcpKind, type RcpSegment,
 } from "@/lib/rcp";
 
@@ -63,7 +63,7 @@ export default function RcpView({ session, role, members }: { session: Session; 
       <div className="flex gap-2 mb-5 flex-wrap">
         {isManager && <button onClick={() => setSub("now")} className={pill(sub === "now")}>Teraz w pracy</button>}
         {isManager && <button onClick={() => setSub("records")} className={pill(sub === "records")}>Ewidencja</button>}
-        <button onClick={() => setSub("mine")} className={pill(sub === "mine")}>Mój czas</button>
+        {tracksWorkTime(role) && <button onClick={() => setSub("mine")} className={pill(sub === "mine")}>Mój czas</button>}
         <button onClick={() => setSub("leave")} className={pill(sub === "leave")}>Urlopy</button>
         {isManager && <button onClick={() => setSub("requests")} className={pill(sub === "requests")}>Wnioski{pending > 0 ? ` (${pending})` : ""}</button>}
         {isManager && <button onClick={() => setSub("settings")} className={pill(sub === "settings")}>Ustawienia</button>}
@@ -219,7 +219,7 @@ function NowBoard({ members }: { members: MemberLite[] }) {
     return () => clearInterval(t);
   }, [load]);
 
-  const rows = list.map((m) => {
+  const rows = list.filter((m) => tracksWorkTime(m.role) || open.some((s) => s.user_id === m.user_id) || todaySegs.some((s) => s.user_id === m.user_id)).map((m) => {
     const cur = open.find((s) => s.user_id === m.user_id) ?? null;
     const mine = todaySegs.filter((s) => s.user_id === m.user_id);
     const day = summarizeDays(mine, now).get(warsawDay(now));
@@ -325,6 +325,7 @@ function Records({ session, members, isAdmin }: { session: Session; members: Mem
   const people = useMemo(() => {
     return list
       .map((m) => ({ ...m, name: displayNameForEmail(m.email, members), byDay: summarizeDays(segs.filter((s) => s.user_id === m.user_id), now) }))
+      .filter((p) => tracksWorkTime(p.role) || p.byDay.size > 0) // Admin/Manager nie rejestrują czasu — pokazujemy ich tylko, jeśli mają zapisany wcześniejszy czas
       .sort((a, b) => a.name.localeCompare(b.name, "pl"));
   }, [list, segs, members, now]);
   const n = daysIn(month);

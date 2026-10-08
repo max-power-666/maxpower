@@ -16,7 +16,11 @@ export const RCP_KIND_LABEL: Record<RcpKind, string> = {
 export const COUNTS_AS_WORK: RcpKind[] = ["praca", "administracja", "wyjscie_sluzbowe"];
 // Kto może rejestrować prace administracyjne (decyzja właściciela 07.10.2026: "dla kierowników"). Czas liczy się do czasu pracy, ale jest wykazywany osobno (adminMs, obszar "Administracja"),
 // żeby późniejsze punkty na godzinę dało się liczyć bez czasu administracji.
-export const ADMIN_WORK_ROLES = ["Admin", "Manager", "Kierownik serwisu", "Kierownik trade-in"];
+export const ADMIN_WORK_ROLES = ["Kierownik serwisu", "Kierownik trade-in"];
+// Role, które NIE rejestrują czasu pracy (decyzja właściciela 07.10.2026: "wyłącz rejestrowanie czasu dla admin i manager"): bez widżetu, serwer odrzuca akcje, nie ma ich
+// na listach "Teraz w pracy" i w Ewidencji (chyba że mają zapisany wcześniejszy czas). Nadal widzą i prowadzą RCP jako zarządzający (ewidencja, korekty, wnioski, ustawienia).
+export const RCP_NO_TRACKING_ROLES = ["Admin", "Manager"];
+export const tracksWorkTime = (role: string | null | undefined): boolean => !RCP_NO_TRACKING_ROLES.includes(role || "");
 export const ADMIN_AREA = "Administracja";
 
 export type RcpSegment = {

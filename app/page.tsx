@@ -20,6 +20,7 @@ import OverviewSalesDashboard from "./_components/OverviewSalesDashboard";
 import OverviewMarginChart from "./_components/OverviewMarginChart";
 import RcpView from "./_components/RcpView";
 import RcpWidget from "./_components/RcpWidget";
+import { tracksWorkTime } from "@/lib/rcp";
 import ReturnsView from "./_components/ReturnsView";
 import ShopProductsView from "./_components/ShopProductsView";
 import ShopStockView from "./_components/ShopStockView";
@@ -549,7 +550,7 @@ export default function Home() {
             if (target) setView(target);
           }}
         />
-        <RcpWidget session={session} role={role} onOpenRcp={() => effectiveAccess(role ?? "", viewAccess).includes("rcp") && setView("rcp")} />
+        {tracksWorkTime(role) && <RcpWidget session={session} role={role ?? ""} onOpenRcp={() => effectiveAccess(role ?? "", viewAccess).includes("rcp") && setView("rcp")} />}
         <nav className="flex flex-col gap-1">
           {TABS.filter((t) => spaceOf(t.key) === spaceOf(view) && effectiveAccess(role ?? "", viewAccess).includes(t.key)).map((t) => (
             <button key={t.key} onClick={() => setView(t.key)} className={`text-left px-2 py-2 rounded text-sm font-medium ${view === t.key ? "bg-white border border-line" : "text-inksoft"}`}>
