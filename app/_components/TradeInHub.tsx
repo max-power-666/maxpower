@@ -40,6 +40,7 @@ const INTAKE_STATUS_STYLE: Record<IntakeStatus, string> = {
   kontroferta: "bg-[#e3ecf9] text-[#2a6bb5]",
   ok_dok: "bg-[#efe6f8] text-[#7a3fb0]",
   problem: "bg-rustsoft text-rust",
+  zwrocona: "bg-paper text-inksoft border border-line", // paczka odesłana do klienta — zamknięta, bez punktów (07.10.2026)
 };
 // Statusy "zakończenia" paczki, które naliczają punkty do podsumowania (30.09.2026: rozszerzone z samej
 // "Obsłużona" o "Kontroferta", "Ok. Dok." i "Problem", na wyraźną prośbę właściciela).

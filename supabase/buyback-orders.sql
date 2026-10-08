@@ -97,7 +97,7 @@ create table if not exists buyback_order_intake (
   entered_by_email text,
   entered_at timestamptz not null default now(),
   history jsonb not null default '[]'::jsonb,  -- [{action: "created"|"edited", by_email, at, changes?}, ...]
-  status text not null default 'w_trakcie',    -- w_trakcie | obsluzona | kontroferta | ok_dok | problem
+  status text not null default 'w_trakcie',    -- w_trakcie | obsluzona | kontroferta | ok_dok | problem | zwrocona
   finished_at timestamptz,
   -- Migawka punktów za paczkę: 100/6 (Regulamin §2 tabela). Celowo bez zaokrąglania (§2 ust. 7,
   -- §4 ust. 8) — zaokrąglamy dopiero przy wyświetlaniu. Gdyby stawka się zmieniła, zmieniamy

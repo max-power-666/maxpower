@@ -95,6 +95,7 @@ export const INTAKE_STATUSES = [
   { key: "kontroferta", label: "Kontroferta" },
   { key: "ok_dok", label: "Ok. Dok." },
   { key: "problem", label: "Problem" },
+  { key: "zwrocona", label: "Zwrócona" },
 ] as const;
 
 // Kanały skupu w Trade-in -> Wprowadzanie (06.10.2026). "buyback" = zamówienia Back Market (numer zamówienia/przesyłki szukany w buyback_orders,
