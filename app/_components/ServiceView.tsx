@@ -79,6 +79,7 @@ export default function ServiceView({
 }) {
   // Zwykły pracownik widzi tylko własne naprawy (02.10.2026); Admin i Manager — wszystkie.
   const ownOnly = !isAdminOrManager && !isServiceLead;
+  const canEditAnyStatus = isServiceLead || isAdminOrManager; // edycja numeru seryjnego/części/uwag poza statusem "W naprawie" (08.10.2026: dla wszystkich kierowników)
   const canDelete = isAdmin || isServiceLead; // usuwanie wpisów: Admin i Kierownik serwisu
   const [interval, setInterval] = useState<Interval>("today");
   const [rangeRows, setRangeRows] = useState<{ employee_email: string | null; points: number; task_type: string }[]>([]);
@@ -364,7 +365,7 @@ export default function ServiceView({
             {recent.map((r) => {
               // Wiersz edytowalny tylko w statusie "w naprawie" (02.10.2026) — żeby nic nie zmienić przez przypadek.
               // Zmiana statusu zostaje zawsze dostępna (inaczej nie dałoby się wrócić do edycji ani zakończyć naprawy).
-              const locked = r.status !== "w_naprawie" && !isServiceLead; // Kierownik serwisu edytuje rozpoczętą czynność w każdym statusie
+              const locked = r.status !== "w_naprawie" && !canEditAnyStatus; // kierownicy (Kierownik serwisu, Admin, Manager) edytują rozpoczętą czynność w każdym statusie
               return (
               <tr key={r.id} className="border-b border-line last:border-b-0 hover:bg-paper">
                 <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDateTime(r.started_at)}</td>
