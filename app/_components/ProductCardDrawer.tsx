@@ -116,6 +116,9 @@ export default function ProductCardDrawer({
     if (!c || c.pccPln === null || c.valuePln === null) return "— (brak kursu NBP)";
     return `${c.pccPln.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} zł (wartość ${c.valuePln.toLocaleString("pl-PL", { maximumFractionDigits: 0 })} zł)`;
   }
+  // Części przypisane do tego numeru (Serwis -> Części): koszt serwisu sztuki = suma cen netto PLN; numer w polu z kilkoma numerami dzieli koszt po równo, wiersze "Demontaż" nie
+  // są kupowane (jak w Marży, lib/margin.ts).
+  const [parts, setParts] = useState<{ name: string; part_code: string | null; status: string | null; cost: number | null }[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -211,7 +214,21 @@ export default function ProductCardDrawer({
         }
         list.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
 
+        // części przypisane do numeru (brak tabeli = brak sekcji, bez błędu karty)
+        const wanted = serial.trim().toLowerCase();
+        const partsRes = await supabase.from("service_parts").select("name, part_code, status, price_pln, device_ref").ilike("device_ref", `%${pattern}%`).limit(200);
+        const partRows = partsRes.error
+          ? []
+          : ((partsRes.data as { name: string; part_code: string | null; status: string | null; price_pln: number | null; device_ref: string | null }[]) || [])
+              .map((r) => {
+                const tokens = (r.device_ref || "").split(/[\s,;]+/).map((t) => t.trim().toLowerCase()).filter(Boolean);
+                return { r, share: tokens.includes(wanted) ? tokens.length : 0 };
+              })
+              .filter((x) => x.share > 0 && !/demonta/i.test(x.r.status || ""))
+              .map(({ r, share }) => ({ name: r.name, part_code: r.part_code, status: r.status, cost: r.price_pln === null ? null : Number(r.price_pln) / share }));
+
         if (cancelled) return;
+        setParts(partRows);
         setStock(stockRows);
         setOrders(orderRows);
         setIntakes(intakes);
@@ -228,7 +245,9 @@ export default function ProductCardDrawer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serial]);
 
-  const nothingFound = !loading && !error && stock.length === 0 && orders.length === 0 && intakes.length === 0 && events.length === 0;
+  const pricedParts = parts.filter((p) => p.cost !== null);
+  const partsCost = parts.length > 0 ? pricedParts.reduce((n, p) => n + (p.cost as number), 0) : null;
+  const nothingFound = !loading && !error && stock.length === 0 && parts.length === 0 && orders.length === 0 && intakes.length === 0 && events.length === 0;
 
   return (
     <div className="fixed inset-0 bg-black/30 flex justify-end z-50" onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -259,11 +278,24 @@ export default function ProductCardDrawer({
                     <Row label="Zamówienie" value={s.description} mono />
                     <Row label="Cena zakupu" value={fmtMoney(s.purchase_price_gross, "zł")} />
                     <Row label={`PCC (${Math.round(PCC_RATE * 100)}% od wartości > ${PCC_THRESHOLD_PLN.toLocaleString("pl-PL")} zł)`} value={pccText(s.description)} />
+                    {partsCost !== null && <Row label="Koszty serwisu (części)" value={`${fmtMoney(partsCost, "zł")} (${parts.length} ${parts.length === 1 ? "część" : "części"}, netto)`} />}
                     <Row label="VAT" value={s.vat} />
                     <Row label="Status produktu" value={productStatusLabel(s.product_status_source, s.product_status)} />
                     <Row label="Dodano" value={s.product_created_at ? fmtDateTime(s.product_created_at) : null} />
                   </div>
                 ))}
+              </div>
+            )}
+
+            {parts.length > 0 && (
+              <div className="mt-6">
+                <h3 className="text-xs font-semibold text-inksoft mb-2">CZĘŚCI W NAPRAWACH (SERWIS)</h3>
+                <div className="border border-line bg-white mb-2">
+                  {parts.map((p, i) => (
+                    <Row key={i} label={`${p.name}${p.part_code ? ` · ${p.part_code}` : ""}${p.status && p.status !== "Dotarło" ? ` · ${p.status}` : ""}`} value={p.cost === null ? "brak ceny" : fmtMoney(p.cost, "zł")} />
+                  ))}
+                  <Row label="Razem (netto)" value={fmtMoney(partsCost ?? 0, "zł")} />
+                </div>
               </div>
             )}
 
