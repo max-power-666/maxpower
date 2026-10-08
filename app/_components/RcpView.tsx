@@ -9,7 +9,7 @@ import { MyLeave, Requests, usePendingCount } from "./RcpAbsences";
 import { absenceKind, absenceOnDay, type Absence } from "@/lib/rcpAbsence";
 import { isHoliday } from "@/lib/holidays";
 import {
-  RCP_AREAS, RCP_KIND_LABEL, tracksWorkTime, dayStartMs, ewidencjaCsv, fmtClock, fmtHm, summarizeDays, totalWorkMs, warsawDay,
+  RCP_KIND_LABEL, tracksWorkTime, dayStartMs, ewidencjaCsv, fmtClock, fmtHm, summarizeDays, totalWorkMs, warsawDay,
   type RcpKind, type RcpSegment,
 } from "@/lib/rcp";
 
@@ -86,7 +86,7 @@ function SegmentChips({ segs }: { segs: RcpSegment[] }) {
       {segs.map((s) => (
         <span key={s.id} className={`text-xs font-semibold px-2 py-1 rounded ${KIND_STYLE[s.kind]}`}>
           {RCP_KIND_LABEL[s.kind]}
-          {s.kind === "praca" && s.area ? ` · ${s.area}` : ""} {fmtClock(Date.parse(s.started_at))}–{s.ended_at ? fmtClock(Date.parse(s.ended_at)) : "trwa"}
+          {" "}{fmtClock(Date.parse(s.started_at))}–{s.ended_at ? fmtClock(Date.parse(s.ended_at)) : "trwa"}
         </span>
       ))}
     </div>
@@ -162,7 +162,6 @@ function MyTime({ session, members }: { session: Session; members: MemberLite[] 
               {hasAdmin && <th className="p-3 text-right" title="Wliczone w Pracę">w tym admin.</th>}
               <th className="p-3 text-right">Przerwy</th>
               <th className="p-3 text-right">Wyjścia prywatne</th>
-              <th className="p-3">Obszary</th>
             </tr>
           </thead>
           <tbody>
@@ -177,11 +176,10 @@ function MyTime({ session, members }: { session: Session; members: MemberLite[] 
                   {hasAdmin && <td className="p-3 text-right font-mono text-inksoft">{s.adminMs ? fmtHm(s.adminMs) : "—"}</td>}
                   <td className="p-3 text-right font-mono text-inksoft">{s.breakMs ? fmtHm(s.breakMs) : "—"}</td>
                   <td className="p-3 text-right font-mono text-inksoft">{s.privateMs ? fmtHm(s.privateMs) : "—"}</td>
-                  <td className="p-3 text-xs text-inksoft">{Object.entries(s.areaMs).map(([a, ms]) => `${a} ${fmtHm(ms)}`).join(" · ")}</td>
                 </tr>
               );
             })}
-            {monthDays.every((d) => !days.has(d)) && <tr><td colSpan={8} className="p-6 text-center text-inksoft text-sm">Brak zarejestrowanego czasu w tym miesiącu.</td></tr>}
+            {monthDays.every((d) => !days.has(d)) && <tr><td colSpan={hasAdmin ? 7 : 6} className="p-6 text-center text-inksoft text-sm">Brak zarejestrowanego czasu w tym miesiącu.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -251,7 +249,6 @@ function NowBoard({ members }: { members: MemberLite[] }) {
             <tr className="text-left text-xs text-inksoft border-b border-line">
               <th className="p-3">Pracownik</th>
               <th className="p-3">Status</th>
-              <th className="p-3">Obszar</th>
               <th className="p-3">Od</th>
               <th className="p-3 text-right">Dziś przepracowano</th>
             </tr>
@@ -269,7 +266,6 @@ function NowBoard({ members }: { members: MemberLite[] }) {
                     <span className="text-xs text-inksoft">Nie rozpoczął(a)</span>
                   )}
                 </td>
-                <td className="p-3 text-xs">{cur?.area ?? "—"}</td>
                 <td className="p-3 font-mono text-xs">{cur ? fmtClock(Date.parse(cur.started_at)) : "—"}</td>
                 <td className="p-3 text-right font-mono font-semibold">{workMs ? fmtHm(workMs) : "—"}</td>
               </tr>
@@ -396,7 +392,7 @@ function DayDrawer({ session, cell, segs, members, isAdmin, onClose, onChanged }
   const dayTo = dayFrom + 25 * 3600_000;
   const todays = segs.filter((s) => Date.parse(s.started_at) < dayTo && (!s.ended_at || Date.parse(s.ended_at) > dayFrom) && warsawDay(Date.parse(s.started_at)) === cell.day);
   const [editing, setEditing] = useState<number | "new" | null>(null);
-  const [form, setForm] = useState({ kind: "praca" as RcpKind, area: "Serwis", start: "", end: "", reason: "" });
+  const [form, setForm] = useState({ kind: "praca" as RcpKind, start: "", end: "", reason: "" });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const auth = { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" };
@@ -405,7 +401,7 @@ function DayDrawer({ session, cell, segs, members, isAdmin, onClose, onChanged }
     setError("");
     setEditing(s ? s.id : "new");
     const base = `${cell.day}T08:00`;
-    setForm(s ? { kind: s.kind, area: s.area || "Serwis", start: toLocalInput(s.started_at), end: toLocalInput(s.ended_at), reason: "" } : { kind: "praca", area: "Serwis", start: base, end: `${cell.day}T16:00`, reason: "" });
+    setForm(s ? { kind: s.kind, start: toLocalInput(s.started_at), end: toLocalInput(s.ended_at), reason: "" } : { kind: "praca", start: base, end: `${cell.day}T16:00`, reason: "" });
   }
   async function save() {
     setBusy(true);
@@ -413,8 +409,8 @@ function DayDrawer({ session, cell, segs, members, isAdmin, onClose, onChanged }
     try {
       const body =
         editing === "new"
-          ? { action: "add", user_id: cell.userId, kind: form.kind, area: form.kind === "praca" || form.kind === "przerwa" ? form.area : form.area, started_at: new Date(form.start).toISOString(), ended_at: form.end ? new Date(form.end).toISOString() : null, reason: form.reason }
-          : { action: "update", id: editing, kind: form.kind, area: form.area, started_at: new Date(form.start).toISOString(), ended_at: form.end ? new Date(form.end).toISOString() : null, reason: form.reason };
+          ? { action: "add", user_id: cell.userId, kind: form.kind, started_at: new Date(form.start).toISOString(), ended_at: form.end ? new Date(form.end).toISOString() : null, reason: form.reason }
+          : { action: "update", id: editing, kind: form.kind, started_at: new Date(form.start).toISOString(), ended_at: form.end ? new Date(form.end).toISOString() : null, reason: form.reason };
       const res = await fetch("/api/rcp/edit", { method: "POST", headers: auth, body: JSON.stringify(body) });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data?.error) throw new Error(data?.error || "Nie udało się zapisać.");
@@ -453,7 +449,6 @@ function DayDrawer({ session, cell, segs, members, isAdmin, onClose, onChanged }
                 <div>
                   <span className={`text-xs font-semibold px-2 py-1 rounded mr-2 ${KIND_STYLE[s.kind]}`}>{RCP_KIND_LABEL[s.kind]}</span>
                   <span className="font-mono">{fmtClock(Date.parse(s.started_at))}–{s.ended_at ? fmtClock(Date.parse(s.ended_at)) : "trwa"}</span>
-                  {s.area && <span className="text-xs text-inksoft ml-2">{s.area}</span>}
                   {s.needs_review && <span className="ml-2 text-amber" title="Zamknięty automatycznie">⚠</span>}
                   {s.source === "manual" && <span className="ml-2 text-[10px] text-inksoft">ręczny</span>}
                 </div>
@@ -481,11 +476,6 @@ function DayDrawer({ session, cell, segs, members, isAdmin, onClose, onChanged }
               <label className="text-xs font-semibold text-inksoft">Rodzaj
                 <select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value as RcpKind })} className={inp + " mt-1 font-normal"}>
                   {(Object.keys(RCP_KIND_LABEL) as RcpKind[]).map((k) => <option key={k} value={k}>{RCP_KIND_LABEL[k]}</option>)}
-                </select>
-              </label>
-              <label className="text-xs font-semibold text-inksoft">Obszar
-                <select value={form.area} onChange={(e) => setForm({ ...form, area: e.target.value })} className={inp + " mt-1 font-normal"}>
-                  {RCP_AREAS.map((a) => <option key={a} value={a}>{a}</option>)}
                 </select>
               </label>
               <label className="text-xs font-semibold text-inksoft">Początek<input type="datetime-local" value={form.start} onChange={(e) => setForm({ ...form, start: e.target.value })} className={inp + " mt-1 font-normal"} /></label>

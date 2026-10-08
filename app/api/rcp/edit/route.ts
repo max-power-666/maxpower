@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { rcpAdmin, rcpCaller } from "@/lib/rcpServer";
-import { RCP_AREAS, RCP_KIND_LABEL } from "@/lib/rcp";
+import { RCP_KIND_LABEL } from "@/lib/rcp";
 
 // Korekty czasu pracy (Admin i Manager): poprawa odcinka albo dodanie brakującego. Każda zmiana wymaga uzasadnienia i zostaje w history odcinka (kto, kiedy, co z czego na co);
 // odcinek po korekcie nie jest już "do sprawdzenia". Usuwanie to osobna operacja tylko dla Admina (polityka delete + audit_delete w bazie).
@@ -40,8 +40,6 @@ export async function POST(request: Request) {
     if (!member) return NextResponse.json({ error: "Nie znaleziono pracownika." }, { status: 400 });
     const kind = String(b.kind || "");
     if (!KINDS.includes(kind)) return NextResponse.json({ error: "Nieprawidłowy rodzaj." }, { status: 400 });
-    const area = typeof b.area === "string" && b.area ? b.area : null;
-    if (area && !(RCP_AREAS as readonly string[]).includes(area)) return NextResponse.json({ error: "Nieznany obszar." }, { status: 400 });
     const start = iso(b.started_at);
     const end = iso(b.ended_at);
     if (!start || !end) return NextResponse.json({ error: "Podaj początek i koniec." }, { status: 400 });
@@ -49,7 +47,7 @@ export async function POST(request: Request) {
     if (Date.parse(end) > now + 5 * 60_000) return NextResponse.json({ error: "Koniec nie może być w przyszłości." }, { status: 400 });
     if (await overlaps(userId, start, end)) return NextResponse.json({ error: "Ten czas nakłada się na inny wpis tej osoby." }, { status: 409 });
     const history = [{ at: new Date().toISOString(), by_email: me.email, reason, changes: [{ field: "Dodano ręcznie", from: null, to: `${RCP_KIND_LABEL[kind as keyof typeof RCP_KIND_LABEL]} ${start} – ${end}` }] }];
-    const { data, error } = await db.from("rcp_segments").insert({ user_id: userId, user_email: member.email, kind, area, started_at: start, ended_at: end, source: "manual", needs_review: false, history }).select("id").single();
+    const { data, error } = await db.from("rcp_segments").insert({ user_id: userId, user_email: member.email, kind, started_at: start, ended_at: end, source: "manual", needs_review: false, history }).select("id").single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ ok: true, id: (data as { id: number }).id });
   }
@@ -69,11 +67,6 @@ export async function POST(request: Request) {
     if (b.kind !== undefined) {
       if (!KINDS.includes(String(b.kind))) return NextResponse.json({ error: "Nieprawidłowy rodzaj." }, { status: 400 });
       set("kind", "Rodzaj", String(b.kind), cur.kind);
-    }
-    if (b.area !== undefined) {
-      const a = b.area ? String(b.area) : null;
-      if (a && !(RCP_AREAS as readonly string[]).includes(a)) return NextResponse.json({ error: "Nieznany obszar." }, { status: 400 });
-      set("area", "Obszar", a, cur.area);
     }
     const start = b.started_at !== undefined ? iso(b.started_at) : (cur.started_at as string);
     const end = b.ended_at !== undefined ? (b.ended_at ? iso(b.ended_at) : null) : (cur.ended_at as string | null);

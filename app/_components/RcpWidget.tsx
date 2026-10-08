@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
-import { RCP_AREAS, fmtHm, RCP_KIND_LABEL, ADMIN_WORK_ROLES, dayStartMs, summarizeDays, warsawDay, type RcpKind, type RcpSegment } from "@/lib/rcp";
+import { fmtHm, RCP_KIND_LABEL, ADMIN_WORK_ROLES, dayStartMs, summarizeDays, warsawDay, type RcpKind, type RcpSegment } from "@/lib/rcp";
 
 // Widżet RCP na górze paska bocznego po lewej (06.10.2026; wcześniej w prawym górnym rogu): zegar i JEDEN duży przycisk, którego kolor mówi o stanie — czerwony (nie pracujesz),
 // zielony (pracujesz), pomarańczowy (przerwa / wyjście); kliknięcie otwiera menu akcji dla bieżącego stanu. Widoczny na każdej zakładce dla każdej osoby z rolą.
@@ -12,7 +12,6 @@ import { RCP_AREAS, fmtHm, RCP_KIND_LABEL, ADMIN_WORK_ROLES, dayStartMs, summari
 type Open = { id: number; kind: RcpKind; area: string | null; started_at: string; needs_review: boolean };
 type State = { open: Open | null; ip: string; restricted: boolean; ipAllowed: boolean };
 
-const ROLE_AREA: Record<string, string> = { Serwis: "Serwis", "Kierownik serwisu": "Serwis", Testy: "Testy", "Trade-in": "Trade-in", "Kierownik trade-in": "Trade-in", Magazyn: "Magazyn", Zamówienia: "Zamówienia" };
 
 export default function RcpWidget({ session, role, onOpenRcp }: { session: Session; role: string; onOpenRcp: () => void }) {
   const [st, setSt] = useState<State | null>(null);
@@ -21,7 +20,7 @@ export default function RcpWidget({ session, role, onOpenRcp }: { session: Sessi
   const [todaySegs, setTodaySegs] = useState<RcpSegment[]>([]); // odcinki z dzisiejszej doby — do liczników narastających (praca / przerwy łącznie)
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [menu, setMenu] = useState<"main" | "area" | "end" | null>(null);
+  const [menu, setMenu] = useState<"main" | "end" | null>(null);
   const [loadError, setLoadError] = useState("");
   const box = useRef<HTMLDivElement>(null);
   const auth = { Authorization: `Bearer ${session.access_token}` };
@@ -101,21 +100,19 @@ export default function RcpWidget({ session, role, onOpenRcp }: { session: Sessi
   // (praca łącznie / przerwy łącznie / wyjścia prywatne łącznie / administracja łącznie), pod nim podsumowanie dnia.
   const day = summarizeDays(todaySegs, tick).get(warsawDay(tick));
   const since = !open ? 0 : open.kind === "przerwa" ? day?.breakMs ?? 0 : open.kind === "wyjscie_prywatne" ? day?.privateMs ?? 0 : open.kind === "administracja" ? day?.adminMs ?? 0 : day?.workMs ?? 0;
-  const suggested = ROLE_AREA[role];
-  const areas = suggested ? [suggested, ...RCP_AREAS.filter((a) => a !== suggested)] : [...RCP_AREAS];
   const working = open?.kind === "praca";
   // Kolor przycisku = stan: czerwony (nie pracujesz), zielony (pracujesz), pomarańczowy (przerwa albo wyjście).
   const admin = open?.kind === "administracja"; // prace administracyjne (kierownicy) — to też praca, więc inny odcień niż przerwa
   const canAdmin = ADMIN_WORK_ROLES.includes(role);
   const tone = !open ? "bg-rust text-paper" : working ? "bg-teal text-paper" : admin ? "bg-[#2a6bb5] text-paper" : "bg-amber text-paper";
-  const label = !open ? "Rozpocznij pracę" : working ? `W pracy${open.area ? ` · ${open.area}` : ""}` : RCP_KIND_LABEL[open.kind];
+  const label = !open ? "Rozpocznij pracę" : working ? "W pracy" : RCP_KIND_LABEL[open.kind];
   const item = "w-full text-left px-3 py-2 text-sm font-semibold hover:bg-paper";
 
   return (
     <div ref={box} className="relative mb-5">
       <div className="font-mono text-lg font-bold tabular-nums text-center mb-2">{clock}</div>
       <button
-        onClick={() => setMenu(menu ? null : "main")}
+        onClick={() => (!open ? act("start") : setMenu(menu ? null : "main"))} // bez wyboru obszaru: jedno kliknięcie rozpoczyna pracę
         disabled={busy || blocked}
         title={blocked ? "Tylko komputery w firmie" : "Rejestracja czasu pracy"}
         className={`w-full rounded px-2 py-3 text-center font-bold leading-tight shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${tone}`}
@@ -127,21 +124,12 @@ export default function RcpWidget({ session, role, onOpenRcp }: { session: Sessi
 
       {menu && (
         <div className="absolute left-0 top-full mt-1 z-30 w-56 border border-line bg-white rounded shadow-sm py-1">
-          {menu === "main" && !open && (
-            <>
-              <div className="px-3 py-1 text-[11px] font-semibold text-inksoft">W JAKIM OBSZARZE PRACUJESZ?</div>
-              {areas.map((a) => (
-                <button key={a} onClick={() => act("start", { area: a })} className={item}>{a}</button>
-              ))}
-            </>
-          )}
           {menu === "main" && open && working && (
             <>
               <button onClick={() => act("break")} className={item}>⏸ Przerwa</button>
               {canAdmin && <button onClick={() => act("admin")} className={item}>🗂 Prace administracyjne</button>}
               <button onClick={() => act("leave", { leave: "sluzbowe" })} className={item}>Wyjście służbowe</button>
               <button onClick={() => act("leave", { leave: "prywatne" })} className={item}>Wyjście prywatne</button>
-              <button onClick={() => setMenu("area")} className={item}>Zmień obszar ›</button>
               <button onClick={() => setMenu("end")} className={`${item} text-rust`}>⏹ Zakończ pracę</button>
             </>
           )}
@@ -156,14 +144,6 @@ export default function RcpWidget({ session, role, onOpenRcp }: { session: Sessi
               <div className="px-3 py-1 text-[11px] font-semibold text-inksoft">ZAKOŃCZYĆ PRACĘ NA DZIŚ?</div>
               <button onClick={() => act("end")} className={`${item} text-rust`}>Tak, zakończ</button>
               <button onClick={() => setMenu("main")} className={item}>Anuluj</button>
-            </>
-          )}
-          {menu === "area" && open && (
-            <>
-              <div className="px-3 py-1 text-[11px] font-semibold text-inksoft">ZMIEŃ OBSZAR PRACY</div>
-              {areas.filter((a) => a !== open.area).map((a) => (
-                <button key={a} onClick={() => act("change_area", { area: a })} className={item}>→ {a}</button>
-              ))}
             </>
           )}
         </div>

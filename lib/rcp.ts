@@ -4,7 +4,7 @@
 import { warsawMidnightUtcMs } from "./points";
 import { warsawYmd } from "./warsawDate";
 
-export const RCP_AREAS = ["Serwis", "Testy", "Trade-in", "Magazyn", "Zamówienia", "Inne"] as const;
+// Obszary pracy (Serwis/Testy/…) zlikwidowane 08.10.2026 — rejestrujemy po prostu czas pracy; kolumna rcp_segments.area zostaje tylko jako historia starych wpisów.
 export type RcpKind = "praca" | "administracja" | "przerwa" | "wyjscie_prywatne" | "wyjscie_sluzbowe";
 export const RCP_KIND_LABEL: Record<RcpKind, string> = {
   praca: "Praca",
@@ -14,14 +14,13 @@ export const RCP_KIND_LABEL: Record<RcpKind, string> = {
   wyjscie_sluzbowe: "Wyjście służbowe",
 };
 export const COUNTS_AS_WORK: RcpKind[] = ["praca", "administracja", "wyjscie_sluzbowe"];
-// Kto może rejestrować prace administracyjne (decyzja właściciela 07.10.2026: "dla kierowników"). Czas liczy się do czasu pracy, ale jest wykazywany osobno (adminMs, obszar "Administracja"),
+// Kto może rejestrować prace administracyjne (decyzja właściciela 07.10.2026: "dla kierowników"). Czas liczy się do czasu pracy, ale jest wykazywany osobno (adminMs),
 // żeby późniejsze punkty na godzinę dało się liczyć bez czasu administracji.
 export const ADMIN_WORK_ROLES = ["Kierownik serwisu", "Kierownik trade-in"];
 // Role, które NIE rejestrują czasu pracy (decyzja właściciela 07.10.2026: "wyłącz rejestrowanie czasu dla admin i manager"): bez widżetu, serwer odrzuca akcje, nie ma ich
 // na listach "Teraz w pracy" i w Ewidencji (chyba że mają zapisany wcześniejszy czas). Nadal widzą i prowadzą RCP jako zarządzający (ewidencja, korekty, wnioski, ustawienia).
 export const RCP_NO_TRACKING_ROLES = ["Admin", "Manager"];
 export const tracksWorkTime = (role: string | null | undefined): boolean => !RCP_NO_TRACKING_ROLES.includes(role || "");
-export const ADMIN_AREA = "Administracja";
 
 export type RcpSegment = {
   id: number;
@@ -74,14 +73,13 @@ export type DaySummary = {
   lastEndMs: number | null; // koniec ostatniego odcinka (null, gdy trwa)
   open: boolean;
   review: boolean;
-  areaMs: Record<string, number>; // czas pracy wg obszaru
 };
 
 export function summarizeDays(segments: RcpSegment[], nowMs: number): Map<string, DaySummary> {
   const days = new Map<string, DaySummary>();
   const get = (day: string): DaySummary => {
     let d = days.get(day);
-    if (!d) days.set(day, (d = { day, workMs: 0, adminMs: 0, breakMs: 0, privateMs: 0, firstStartMs: null, lastEndMs: 0, open: false, review: false, areaMs: {} }));
+    if (!d) days.set(day, (d = { day, workMs: 0, adminMs: 0, breakMs: 0, privateMs: 0, firstStartMs: null, lastEndMs: 0, open: false, review: false }));
     return d;
   };
   for (const s of segments) {
@@ -97,8 +95,6 @@ export function summarizeDays(segments: RcpSegment[], nowMs: number): Map<string
       if (COUNTS_AS_WORK.includes(s.kind)) {
         d.workMs += piece.ms;
         if (s.kind === "administracja") d.adminMs += piece.ms;
-        const a = s.kind === "administracja" ? ADMIN_AREA : s.area || "Inne";
-        d.areaMs[a] = (d.areaMs[a] || 0) + piece.ms;
       } else if (s.kind === "przerwa") d.breakMs += piece.ms;
       else d.privateMs += piece.ms;
       if (isOpen) d.open = true;

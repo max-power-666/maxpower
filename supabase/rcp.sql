@@ -82,7 +82,7 @@ end $$;
 alter table rcp_segments drop constraint if exists rcp_segments_kind_check;
 alter table rcp_segments add constraint rcp_segments_kind_check check (kind in ('praca', 'administracja', 'przerwa', 'wyjscie_prywatne', 'wyjscie_sluzbowe'));
 
--- Rejestracja: start | break | admin | resume | leave | change_area | end. Atomowo (blokada na pracownika), zegar serwera. Błędy biznesowe to wyjątki P0001 z polskim komunikatem.
+-- Rejestracja: start | break | admin | resume | leave | end (zmiana obszaru usunięta 08.10.2026). Atomowo (blokada na pracownika), zegar serwera. Błędy biznesowe to wyjątki P0001 z polskim komunikatem.
 create or replace function rcp_act(p_user uuid, p_email text, p_action text, p_area text, p_leave text, p_ip text) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare
@@ -97,8 +97,8 @@ begin
 
   if p_action = 'start' then
     if found then raise exception 'Praca jest już rozpoczęta.' using errcode = 'P0001'; end if;
-    if area is null then raise exception 'Wybierz obszar pracy.' using errcode = 'P0001'; end if;
-    insert into rcp_segments (user_id, user_email, kind, area, started_at, ip) values (p_user, p_email, 'praca', area, t, p_ip) returning * into res;
+    -- obszary pracy zlikwidowane (08.10.2026): start bez wyboru obszaru, area zostaje null (kolumna to tylko historia starych wpisów)
+    insert into rcp_segments (user_id, user_email, kind, area, started_at, ip) values (p_user, p_email, 'praca', null, t, p_ip) returning * into res;
   elsif p_action = 'end' then
     if not found then raise exception 'Nie masz rozpoczętej pracy.' using errcode = 'P0001'; end if;
     update rcp_segments set ended_at = t where id = cur.id;
@@ -124,12 +124,6 @@ begin
     if cur.kind = 'praca' then raise exception 'Już pracujesz.' using errcode = 'P0001'; end if;
     update rcp_segments set ended_at = t where id = cur.id;
     insert into rcp_segments (user_id, user_email, kind, area, started_at, ip) values (p_user, p_email, 'praca', cur.area, t, p_ip) returning * into res;
-  elsif p_action = 'change_area' then
-    if cur.kind <> 'praca' then raise exception 'Obszar można zmienić tylko w trakcie pracy.' using errcode = 'P0001'; end if;
-    if area is null then raise exception 'Wybierz obszar pracy.' using errcode = 'P0001'; end if;
-    if area = cur.area then raise exception 'To już jest Twój obecny obszar.' using errcode = 'P0001'; end if;
-    update rcp_segments set ended_at = t where id = cur.id;
-    insert into rcp_segments (user_id, user_email, kind, area, started_at, ip) values (p_user, p_email, 'praca', area, t, p_ip) returning * into res;
   else
     raise exception 'Nieznana akcja.' using errcode = 'P0001';
   end if;
