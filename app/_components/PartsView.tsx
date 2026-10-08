@@ -53,7 +53,7 @@ const STATUS_STYLE: Record<string, string> = {
 export default function PartsView({ members, session }: { members: MemberLite[]; session: Session }) {
   const [rows, setRows] = useState<Part[]>([]);
   const [total, setTotal] = useState(0);
-  const [sum, setSum] = useState<{ pln: number; count: number } | null>(null);
+  const [sum, setSum] = useState<{ pln: number; count: number; freePln: number; freeCount: number } | null>(null);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<FilterKey>("all");
@@ -115,16 +115,23 @@ export default function PartsView({ members, session }: { members: MemberLite[];
     (async () => {
       let pln = 0;
       let count = 0;
+      let freePln = 0; // części DOSTĘPNE = bez przypisanego numeru seryjnego/IMEI urządzenia (08.10.2026)
+      let freeCount = 0;
       for (let from = 0; ; from += 1000) {
-        const { data, error: err } = await applyFilters(supabase.from("service_parts").select("price_pln") as any).order("id").range(from, from + 999);
+        const { data, error: err } = await applyFilters(supabase.from("service_parts").select("price_pln, device_ref") as any).order("id").range(from, from + 999);
         if (err) return;
-        for (const r of (data as { price_pln: number | null }[]) || []) {
-          if (r.price_pln !== null) pln += Number(r.price_pln);
+        for (const r of (data as { price_pln: number | null; device_ref: string | null }[]) || []) {
+          const free = !r.device_ref || !r.device_ref.trim();
+          if (r.price_pln !== null) {
+            pln += Number(r.price_pln);
+            if (free) freePln += Number(r.price_pln);
+          }
           count++;
+          if (free) freeCount++;
         }
         if (!data || data.length < 1000) break;
       }
-      if (!cancelled) setSum({ pln, count });
+      if (!cancelled) setSum({ pln, count, freePln, freeCount });
     })();
     return () => {
       cancelled = true;
@@ -221,7 +228,8 @@ export default function PartsView({ members, session }: { members: MemberLite[];
       <div className="border border-line border-t-0 bg-white px-4 py-3 flex flex-wrap items-center gap-x-8 gap-y-1 text-sm">
         <span className="text-xs font-semibold text-inksoft">PODSUMOWANIE WYNIKU — wszystkie strony</span>
         <span>Części: <span className="font-mono font-semibold">{sum ? sum.count.toLocaleString("pl-PL") : "…"}</span></span>
-        <span>Wartość (netto PLN): <span className="font-mono font-bold">{sum ? `${fmt(sum.pln)} zł` : "…"}</span></span>
+        <span title="Części bez przypisanego numeru seryjnego/IMEI urządzenia">Dostępne: <span className="font-mono font-semibold">{sum ? sum.freeCount.toLocaleString("pl-PL") : "…"}</span></span>
+        <span title="Suma cen netto części dostępnych (bez przypisanego numeru seryjnego/IMEI)">Wartość dostępnych (netto PLN): <span className="font-mono font-bold">{sum ? `${fmt(sum.freePln)} zł` : "…"}</span></span>
       </div>
       <p className="text-[11px] text-inksoft mt-3 max-w-4xl">
         Cena netto PLN to cena jednostkowa części. Części przypisane do numeru seryjnego wchodzą do kosztu serwisu w zakładce Marża (części przyjęte do dnia zamówienia, bez wierszy „Demontaż”).
