@@ -7,7 +7,7 @@ import { escapeLike } from "@/lib/search";
 import { warsawYmd } from "@/lib/warsawDate";
 import { countryFromOrderNo, goodsPricePln, goodsTotalPln, suggestTradeInFees } from "@/lib/goods";
 
-// Formularz "Dodaj towar" (10.10.2026): jeden wiersz rejestru goods_register dla bieżącej pigułki (VM/V23 albo Trade-in).
+// Formularz "Dodaj towar" (10.10.2026): jeden wiersz rejestru goods_register dla bieżącej pigułki (VM, V23 albo Skup).
 // Pola liczone — kurs NBP (ostatni dzień roboczy PRZED datą zakupu), Cena PLN, PCC, prowizja + PCC, cena PLN + koszty — są PODPOWIEDZIĄ:
 // wypełniają się same, a każde można poprawić ręcznie (wtedy przestaje się przeliczać). Zapis idzie wprost do bazy (RLS: Admin i Manager).
 
@@ -50,7 +50,7 @@ type Form = {
 };
 type Computed = "nbp_rate" | "price_pln" | "pcc" | "commission_pcc" | "total_pln" | "country";
 
-const initial = (kind: Kind): Form => {
+const initial = (kind: Kind, vat: string): Form => {
   const today = warsawYmd(Date.now());
   return {
     serial: "",
@@ -62,7 +62,7 @@ const initial = (kind: Kind): Form => {
     invoice_no: "",
     category: kind === "trade_in" ? "Konsola" : "",
     price: "",
-    vat: "VM",
+    vat,
     currency: kind === "trade_in" ? "EUR" : "PLN",
     nbp_rate: "",
     costs: "",
@@ -76,6 +76,7 @@ const initial = (kind: Kind): Form => {
 
 export default function GoodsAddForm({
   kind,
+  vatFixed,
   session,
   categories,
   suppliers,
@@ -83,6 +84,7 @@ export default function GoodsAddForm({
   onClose,
 }: {
   kind: Kind;
+  vatFixed: "VM" | "V23"; // VAT wynika z pigułki (VM / V23 / Skup = VM) — formularz go nie zmienia
   session: Session;
   categories: string[];
   suppliers: string[];
@@ -90,7 +92,7 @@ export default function GoodsAddForm({
   onClose: () => void;
 }) {
   const isTradeIn = kind === "trade_in";
-  const [f, setF] = useState<Form>(() => initial(kind));
+  const [f, setF] = useState<Form>(() => initial(kind, vatFixed));
   const [manual, setManual] = useState<Set<Computed>>(new Set());
   const [autoRate, setAutoRate] = useState<{ mid: number; date: string } | null>(null);
   const [saving, setSaving] = useState(false);
@@ -152,9 +154,10 @@ export default function GoodsAddForm({
 
     setSaving(true);
     // Ostrzeżenie o duplikacie numeru seryjnego (w całym rejestrze) — dopuszczamy, ale po potwierdzeniu.
-    const dup = await supabase.from("goods_register").select("id, kind").ilike("serial", escapeLike(serial)).limit(1);
+    const dup = await supabase.from("goods_register").select("id, kind, vat").ilike("serial", escapeLike(serial)).limit(1);
     if (dup.data && dup.data.length > 0) {
-      const where = (dup.data[0] as { kind: string }).kind === "trade_in" ? "Trade-in" : "VM/V23";
+      const d = dup.data[0] as { kind: string; vat: string | null };
+      const where = d.vat === "V23" ? "V23" : d.kind === "trade_in" ? "Skup" : "VM";
       if (!confirm(`Numer seryjny ${serial} jest już w rejestrze Towar (${where}). Dodać mimo to?`)) {
         setSaving(false);
         return;
@@ -171,7 +174,7 @@ export default function GoodsAddForm({
       invoice_no: f.invoice_no.trim() || null,
       category: f.category.trim() || null,
       price,
-      vat: f.vat || null,
+      vat: vatFixed,
       currency: f.currency,
       nbp_rate: f.currency === "PLN" ? null : clean(nbp),
       costs: clean(costs),
@@ -191,7 +194,7 @@ export default function GoodsAddForm({
       return;
     }
     // Zostawiamy datę, dostawcę, kategorię, walutę i VAT — przy dodawaniu kilku sztuk z jednej dostawy to oszczędza pisanie.
-    setF((prev) => ({ ...initial(kind), purchased_on: prev.purchased_on, delivered_on: prev.delivered_on, supplier: prev.supplier, category: prev.category, currency: prev.currency, vat: prev.vat, invoice_no: prev.invoice_no, order_no: "" }));
+    setF((prev) => ({ ...initial(kind, vatFixed), purchased_on: prev.purchased_on, delivered_on: prev.delivered_on, supplier: prev.supplier, category: prev.category, currency: prev.currency, invoice_no: prev.invoice_no, order_no: "" }));
     setManual(new Set());
     setInfo(`Dodano: ${serial}.`);
     onAdded();
@@ -221,7 +224,7 @@ export default function GoodsAddForm({
   return (
     <div className="border border-line bg-white p-4 mb-4">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-xs font-semibold text-inksoft">DODAJ TOWAR — {isTradeIn ? "TRADE-IN" : "VM/V23"}</h2>
+        <h2 className="text-xs font-semibold text-inksoft">DODAJ TOWAR — {isTradeIn ? "SKUP" : vatFixed}</h2>
         <button onClick={onClose} className="text-inksoft text-sm">✕</button>
       </div>
       <datalist id="goods-categories">{categories.map((c) => <option key={c} value={c} />)}</datalist>
@@ -255,10 +258,7 @@ export default function GoodsAddForm({
         </div>
         <div>
           <label className={labelCls}>VAT</label>
-          <select value={f.vat} onChange={(e) => set("vat", e.target.value)} className={inputCls}>
-            <option value="VM">VM</option>
-            <option value="V23">V23</option>
-          </select>
+          <input value={vatFixed} disabled readOnly className={`${inputCls} bg-paper text-inksoft`} title="Wynika z pigułki, w której dodajesz towar" />
         </div>
 
         <div>
@@ -297,7 +297,7 @@ export default function GoodsAddForm({
       {info && <p className="text-teal text-xs mt-3">{info}</p>}
       <div className="flex gap-2 mt-4">
         <button onClick={submit} disabled={saving} className="bg-ink text-paper px-4 py-2 rounded text-sm font-semibold disabled:opacity-50">{saving ? "Zapisywanie…" : "Dodaj"}</button>
-        <button onClick={() => { setF(initial(kind)); setManual(new Set()); setError(""); setInfo(""); }} disabled={saving} className="px-4 py-2 border border-line rounded text-sm font-semibold disabled:opacity-50">Wyczyść</button>
+        <button onClick={() => { setF(initial(kind, vatFixed)); setManual(new Set()); setError(""); setInfo(""); }} disabled={saving} className="px-4 py-2 border border-line rounded text-sm font-semibold disabled:opacity-50">Wyczyść</button>
       </div>
     </div>
   );

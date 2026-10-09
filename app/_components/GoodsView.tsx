@@ -9,7 +9,7 @@ import ProductCardDrawer from "./ProductCardDrawer";
 import GoodsAddForm from "./GoodsAddForm";
 
 // Zakładka Towar (10.10.2026, na prośbę właściciela): rejestr zakupionego towaru z arkusza Towar.numbers, dwie pigułki jak arkusze:
-// "VM/V23" (zakupy od firm i z Allegro) i "Trade-in" (zakupy ze skupu Back Market). Dane w tabeli goods_register (supabase/goods.sql),
+// VM, V23 (zakupy od firm i z Allegro, podział wg VAT) i Skup (dawniej Trade-in: zakupy ze skupu Back Market). Dane w tabeli goods_register (supabase/goods.sql),
 // tylko do odczytu; kwoty ("cena PLN + koszty", "Cena PLN", "prowizja + PCC") to wartości z arkusza, niczego tu nie przeliczamy.
 
 type Kind = "vm_v23" | "trade_in";
@@ -38,10 +38,19 @@ type Row = {
 
 type Totals = { price_pln: number; costs: number; total_pln: number; pcc: number; commission_pcc: number };
 
-const KINDS: { key: Kind; label: string }[] = [
-  { key: "vm_v23", label: "VM/V23" },
-  { key: "trade_in", label: "Trade-in" },
+// Trzy pigułki (10.10.2026): VM i V23 to podział wg VAT, Skup (dawniej "Trade-in") to zakupy ze skupu Back Market.
+// V23 = każdy wiersz z VAT V23 (niezależnie od arkusza), VM i Skup = reszta swojego rodzaju (VAT VM albo pusty).
+type Tab = "vm" | "v23" | "skup";
+const TABS: { key: Tab; label: string }[] = [
+  { key: "vm", label: "VM" },
+  { key: "v23", label: "V23" },
+  { key: "skup", label: "Skup" },
 ];
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function scopeFilter(q: any, tab: Tab) {
+  if (tab === "v23") return q.eq("vat", "V23");
+  return q.eq("kind", tab === "skup" ? "trade_in" : "vm_v23").or("vat.is.null,vat.neq.V23");
+}
 const PAGE_SIZES = [50, 100, 200];
 const NONE = "__brak__"; // w filtrach: wiersze z pustą wartością
 const COLUMNS = "id, serial, name, supplier, purchased_on, delivered_on, order_no, invoice_no, category, price, vat, currency, nbp_rate, costs, total_pln, price_pln, pcc, country, commission_pcc";
@@ -54,22 +63,21 @@ const fmtNum = (n: number | null | undefined, digits = 2) =>
   n === null || n === undefined ? "—" : Number(n).toLocaleString("pl-PL", { minimumFractionDigits: digits, maximumFractionDigits: digits });
 const fmtPln = (n: number | null | undefined) => (n === null || n === undefined ? "—" : `${fmtNum(n)} zł`);
 
-type Facets = { category: Map<string, number>; vat: Map<string, number>; supplier: Map<string, number> };
+type Facets = { category: Map<string, number>; supplier: Map<string, number> };
 
 export default function GoodsView({ session, members, isAdmin }: { session: Session; members: MemberLite[]; isAdmin: boolean }) {
-  const [kind, setKind] = useState<Kind>("vm_v23");
+  const [tab, setTab] = useState<Tab>("vm");
   const [pageSize, setPageSize] = useState(100);
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
-  const [vat, setVat] = useState("");
   const [supplier, setSupplier] = useState("");
   const [rows, setRows] = useState<Row[]>([]);
   const [count, setCount] = useState<number | null>(null);
   const [totals, setTotals] = useState<Totals | null>(null);
   const [facets, setFacets] = useState<Facets | null>(null);
-  const [kindCounts, setKindCounts] = useState<Partial<Record<Kind, number>>>({});
+  const [tabCounts, setTabCounts] = useState<Partial<Record<Tab, number>>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [openSerial, setOpenSerial] = useState<string | null>(null);
@@ -86,12 +94,11 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
     return () => clearTimeout(t);
   }, [searchInput]);
 
-  // Zmiana pigułki czyści filtry (każdy arkusz ma inne kategorie i dostawców).
-  function changeKind(k: Kind) {
-    if (k === kind) return;
-    setKind(k);
+  // Zmiana pigułki czyści filtry (każda ma inne kategorie i dostawców).
+  function changeTab(t: Tab) {
+    if (t === tab) return;
+    setTab(t);
     setCategory("");
-    setVat("");
     setSupplier("");
     setPage(1);
   }
@@ -100,9 +107,8 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
   const applyFilters = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (q: any) => {
-      q = q.eq("kind", kind);
+      q = scopeFilter(q, tab);
       if (category) q = category === NONE ? q.is("category", null) : q.eq("category", category);
-      if (vat) q = vat === NONE ? q.is("vat", null) : q.eq("vat", vat);
       if (supplier) q = supplier === NONE ? q.is("supplier", null) : q.eq("supplier", supplier);
       if (search) {
         const s = escapeLike(search).replace(/[,()"]/g, " ").trim(); // przecinki i nawiasy rozbiłyby składnię .or()
@@ -110,7 +116,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
       }
       return q;
     },
-    [kind, category, vat, supplier, search]
+    [tab, category, supplier, search]
   );
 
   const load = useCallback(async () => {
@@ -175,14 +181,13 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const f: Facets = { category: new Map(), vat: new Map(), supplier: new Map() };
+      const f: Facets = { category: new Map(), supplier: new Map() };
       const bump = (m: Map<string, number>, v: string | null) => m.set(v ?? NONE, (m.get(v ?? NONE) ?? 0) + 1);
       for (let from = 0; ; from += 1000) {
-        const { data, error: err } = await supabase.from("goods_register").select("category, vat, supplier").eq("kind", kind).order("id").range(from, from + 999);
+        const { data, error: err } = await scopeFilter(supabase.from("goods_register").select("category, supplier"), tab).order("id").range(from, from + 999);
         if (cancelled || err) return;
-        for (const r of (data as { category: string | null; vat: string | null; supplier: string | null }[]) || []) {
+        for (const r of (data as { category: string | null; supplier: string | null }[]) || []) {
           bump(f.category, r.category);
-          bump(f.vat, r.vat);
           bump(f.supplier, r.supplier);
         }
         if (!data || data.length < 1000) break;
@@ -192,16 +197,16 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
     return () => {
       cancelled = true;
     };
-  }, [kind, reloadKey]);
+  }, [tab, reloadKey]);
 
   useEffect(() => {
     (async () => {
-      const out: Partial<Record<Kind, number>> = {};
-      for (const k of KINDS) {
-        const { count: c } = await supabase.from("goods_register").select("id", { count: "exact", head: true }).eq("kind", k.key);
-        if (c !== null) out[k.key] = c;
+      const out: Partial<Record<Tab, number>> = {};
+      for (const t of TABS) {
+        const { count: c } = await scopeFilter(supabase.from("goods_register").select("id", { count: "exact", head: true }), t.key);
+        if (c !== null && c !== undefined) out[t.key] = c;
       }
-      setKindCounts(out);
+      setTabCounts(out);
     })();
   }, [reloadKey]);
 
@@ -214,12 +219,13 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
   }
 
   const totalPages = Math.max(1, Math.ceil((count ?? 0) / pageSize));
-  const isTradeIn = kind === "trade_in";
+  const isTradeIn = tab === "skup";
+  const kind: Kind = isTradeIn ? "trade_in" : "vm_v23"; // rodzaj wiersza zapisywany z formularza (arkusz źródłowy)
   const options = (m: Map<string, number> | undefined) =>
     Array.from(m?.entries() ?? [])
       .sort((a, b) => (a[0] === NONE ? 1 : b[0] === NONE ? -1 : a[0].localeCompare(b[0], "pl")))
       .map(([v, n]) => ({ value: v, label: `${v === NONE ? "— (brak)" : v} (${n})` }));
-  const anyFilter = !!(search || category || vat || supplier);
+  const anyFilter = !!(search || category || supplier);
   const colSpan = (isTradeIn ? 17 : 14) + (isAdmin ? 1 : 0);
 
   const headers = useMemo(
@@ -247,10 +253,10 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
   return (
     <div>
       <div className="flex gap-2 mb-4">
-        {KINDS.map((k) => (
-          <button key={k.key} onClick={() => changeKind(k.key)} className={pill(kind === k.key)}>
-            {k.label}
-            {kindCounts[k.key] !== undefined && <span className="ml-1.5 text-xs font-normal opacity-70">{kindCounts[k.key]}</span>}
+        {TABS.map((t) => (
+          <button key={t.key} onClick={() => changeTab(t.key)} className={pill(tab === t.key)}>
+            {t.label}
+            {tabCounts[t.key] !== undefined && <span className="ml-1.5 text-xs font-normal opacity-70">{tabCounts[t.key]}</span>}
           </button>
         ))}
         <button onClick={() => setAdding((a) => !a)} className="ml-auto bg-ink text-paper px-4 py-1.5 rounded text-sm font-semibold">{adding ? "Zamknij formularz" : "+ Dodaj towar"}</button>
@@ -258,8 +264,9 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
 
       {adding && (
         <GoodsAddForm
-          key={kind}
+          key={tab}
           kind={kind}
+          vatFixed={tab === "v23" ? "V23" : "VM"}
           session={session}
           categories={options(facets?.category).map((o) => o.value).filter((v) => v !== NONE)}
           suppliers={options(facets?.supplier).map((o) => o.value).filter((v) => v !== NONE)}
@@ -282,10 +289,6 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
           <option value="">Kategoria: wszystkie</option>
           {options(facets?.category).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
-        <select value={vat} onChange={(e) => { setVat(e.target.value); setPage(1); }} className={selectCls}>
-          <option value="">VAT: wszystkie</option>
-          {options(facets?.vat).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
         <select value={supplier} onChange={(e) => { setSupplier(e.target.value); setPage(1); }} className={selectCls}>
           <option value="">Dostawca: wszyscy</option>
           {options(facets?.supplier).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -296,7 +299,6 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
               setSearchInput("");
               setSearch("");
               setCategory("");
-              setVat("");
               setSupplier("");
               setPage(1);
             }}
