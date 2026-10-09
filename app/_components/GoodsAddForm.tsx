@@ -6,12 +6,48 @@ import { supabase } from "@/lib/supabaseClient";
 import { escapeLike } from "@/lib/search";
 import { warsawYmd } from "@/lib/warsawDate";
 import { countryFromOrderNo, goodsPricePln, goodsTotalPln, suggestTradeInFees } from "@/lib/goods";
+import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 
 // Formularz "Dodaj towar" (10.10.2026): jeden wiersz rejestru goods_register dla bieżącej pigułki (VM, V23 albo Skup).
+// Ten sam formularz służy Adminowi do EDYCJI istniejącego wiersza (prop `edit`): pola z zapisaną wartością są wtedy traktowane jak wpisane ręcznie
+// (zmiana ceny/waluty/daty NIE przelicza po cichu kursu ani kwot — jest link "przelicz ponownie"), jest pole Grupa (VM / V23 / Skup) i historia zmian.
 // Pola liczone — kurs NBP (ostatni dzień roboczy PRZED datą zakupu), Cena PLN, PCC, prowizja + PCC, cena PLN + koszty — są PODPOWIEDZIĄ:
 // wypełniają się same, a każde można poprawić ręcznie (wtedy przestaje się przeliczać). Zapis idzie wprost do bazy (RLS: Admin i Manager).
 
 type Kind = "vm_v23" | "trade_in";
+type Group = "VM" | "V23" | "Skup";
+
+export type GoodsEditRow = {
+  id: number;
+  kind: Kind;
+  serial: string | null;
+  name: string | null;
+  supplier: string | null;
+  purchased_on: string | null;
+  delivered_on: string | null;
+  order_no: string | null;
+  invoice_no: string | null;
+  category: string | null;
+  price: number | null;
+  vat: string | null;
+  currency: string | null;
+  nbp_rate: number | null;
+  costs: number | null;
+  total_pln: number | null;
+  price_pln: number | null;
+  pcc: number | null;
+  country: string | null;
+  commission_pcc: number | null;
+  history?: { at: string; by: string | null; changes: { field: string; from: unknown; to: unknown }[] }[];
+};
+
+const groupOfRow = (r: { vat: string | null; kind: Kind }): Group => (r.vat === "V23" ? "V23" : r.kind === "trade_in" ? "Skup" : "VM");
+const FIELD_LABEL: Record<string, string> = {
+  kind: "Rodzaj", serial: "Numer seryjny", name: "Nazwa", supplier: "Dostawca", purchased_on: "Data zakupu", delivered_on: "Data dostawy", order_no: "Nr zamówienia",
+  invoice_no: "Nr faktury/DW", category: "Kategoria", price: "Cena zakupu", vat: "VAT", currency: "Waluta", nbp_rate: "Kurs NBP", costs: "Koszty",
+  total_pln: "Cena PLN + koszty", price_pln: "Cena PLN", pcc: "PCC", country: "Kraj", commission_pcc: "Prowizja + PCC",
+};
+const fmtVal = (v: unknown) => (v === null || v === undefined || v === "" ? "—" : String(v));
 
 const CURRENCIES = ["PLN", "EUR", "GBP"];
 const COUNTRIES = ["FR", "DE", "ES", "IT"];
@@ -74,6 +110,38 @@ const initial = (kind: Kind, vat: string): Form => {
   };
 };
 
+const fromEdit = (e: GoodsEditRow): Form => ({
+  serial: e.serial ?? "",
+  name: e.name ?? "",
+  supplier: e.supplier ?? "",
+  purchased_on: e.purchased_on ?? "",
+  delivered_on: e.delivered_on ?? "",
+  order_no: e.order_no ?? "",
+  invoice_no: e.invoice_no ?? "",
+  category: e.category ?? "",
+  price: show(e.price),
+  vat: e.vat ?? "",
+  currency: e.currency ?? "",
+  nbp_rate: show(e.nbp_rate),
+  costs: show(e.costs),
+  price_pln: show(e.price_pln),
+  pcc: show(e.pcc),
+  country: e.country ?? "",
+  commission_pcc: show(e.commission_pcc),
+  total_pln: show(e.total_pln),
+});
+// Pola liczone, które mają zapisaną wartość — przy edycji zostają "ręczne", żeby zapis nie przeliczył ich po cichu innym kursem.
+const manualFromEdit = (e: GoodsEditRow): Set<Computed> => {
+  const m = new Set<Computed>();
+  if (e.nbp_rate !== null) m.add("nbp_rate");
+  if (e.price_pln !== null) m.add("price_pln");
+  if (e.pcc !== null) m.add("pcc");
+  if (e.commission_pcc !== null) m.add("commission_pcc");
+  if (e.total_pln !== null) m.add("total_pln");
+  if (e.country) m.add("country");
+  return m;
+};
+
 export default function GoodsAddForm({
   kind,
   vatFixed,
@@ -82,6 +150,8 @@ export default function GoodsAddForm({
   suppliers,
   onAdded,
   onClose,
+  edit = null,
+  members = [],
 }: {
   kind: Kind;
   vatFixed: "VM" | "V23"; // VAT wynika z pigułki (VM / V23 / Skup = VM) — formularz go nie zmienia
@@ -90,10 +160,19 @@ export default function GoodsAddForm({
   suppliers: string[];
   onAdded: () => void;
   onClose: () => void;
+  edit?: GoodsEditRow | null; // tryb edycji (Admin): zapis to UPDATE tego wiersza
+  members?: MemberLite[];
 }) {
-  const isTradeIn = kind === "trade_in";
-  const [f, setF] = useState<Form>(() => initial(kind, vatFixed));
-  const [manual, setManual] = useState<Set<Computed>>(new Set());
+  const isEdit = !!edit;
+  const initialGroup: Group = edit ? groupOfRow(edit) : vatFixed === "V23" ? "V23" : kind === "trade_in" ? "Skup" : "VM";
+  const [group, setGroup] = useState<Group>(initialGroup);
+  const groupChanged = isEdit && group !== initialGroup;
+  // Rodzaj i VAT: przy dodawaniu wynikają z pigułki; przy edycji — z pola Grupa (bez zmiany grupy zostają dokładnie takie, jakie były, np. pusty VAT).
+  const effKind: Kind = isEdit ? (groupChanged ? (group === "Skup" ? "trade_in" : "vm_v23") : edit!.kind) : kind;
+  const effVat: string | null = isEdit ? (groupChanged ? (group === "V23" ? "V23" : "VM") : edit!.vat) : vatFixed;
+  const isTradeIn = effKind === "trade_in";
+  const [f, setF] = useState<Form>(() => (edit ? fromEdit(edit) : initial(kind, vatFixed)));
+  const [manual, setManual] = useState<Set<Computed>>(() => (edit ? manualFromEdit(edit) : new Set()));
   const [autoRate, setAutoRate] = useState<{ mid: number; date: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -115,7 +194,7 @@ export default function GoodsAddForm({
   useEffect(() => {
     let cancelled = false;
     setAutoRate(null);
-    if (f.currency === "PLN" || !/^\d{4}-\d{2}-\d{2}$/.test(f.purchased_on)) return;
+    if (!f.currency || f.currency === "PLN" || !/^\d{4}-\d{2}-\d{2}$/.test(f.purchased_on)) return;
     (async () => {
       const { data } = await supabase.from("nbp_rates").select("mid, rate_date").eq("currency", f.currency).lt("rate_date", f.purchased_on).order("rate_date", { ascending: false }).limit(1);
       const row = (data as { mid: number; rate_date: string }[] | null)?.[0];
@@ -128,7 +207,7 @@ export default function GoodsAddForm({
 
   // Wartości wyliczone (używane, dopóki pole nie zostało ręcznie poprawione).
   const price = parseNum(f.price);
-  const nbp = f.currency === "PLN" ? null : manual.has("nbp_rate") ? parseNum(f.nbp_rate) : autoRate?.mid ?? null;
+  const nbp = !f.currency || f.currency === "PLN" ? null : manual.has("nbp_rate") ? parseNum(f.nbp_rate) : autoRate?.mid ?? null;
   const pricePln = manual.has("price_pln") ? parseNum(f.price_pln) : goodsPricePln(price !== null && !Number.isNaN(price) ? price : null, f.currency, nbp !== null && !Number.isNaN(nbp) ? nbp : null);
   const fees = isTradeIn ? suggestTradeInFees({ price: price !== null && !Number.isNaN(price) ? price : null, pricePln: pricePln !== null && !Number.isNaN(pricePln) ? pricePln : null, nbp: nbp !== null && !Number.isNaN(nbp) ? nbp : null, category: f.category }) : null;
   const pcc = manual.has("pcc") ? parseNum(f.pcc) : fees?.pcc ?? null;
@@ -141,12 +220,14 @@ export default function GoodsAddForm({
   async function submit() {
     setError("");
     setInfo("");
-    const serial = f.serial.trim().toUpperCase();
+    // Przy edycji niezmieniony numer (z dokładnością do wielkości liter) zostaje dokładnie taki, jaki był.
+    const upper = f.serial.trim().toUpperCase();
+    const serial = edit && edit.serial && edit.serial.trim().toUpperCase() === upper ? edit.serial : upper;
     if (!serial) return setError("Podaj numer seryjny.");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(f.purchased_on)) return setError("Podaj datę zakupu.");
     if (price === null || Number.isNaN(price) || price < 0) return setError("Podaj poprawną cenę zakupu.");
     if (costs !== null && Number.isNaN(costs)) return setError("Koszty muszą być liczbą.");
-    if (f.currency !== "PLN" && !manual.has("price_pln") && (nbp === null || Number.isNaN(nbp) || nbp <= 0)) return setError(`Brak kursu NBP dla ${f.currency} — wpisz kurs albo ręcznie Cenę PLN.`);
+    if (f.currency && f.currency !== "PLN" && !manual.has("price_pln") && (nbp === null || Number.isNaN(nbp) || nbp <= 0)) return setError(`Brak kursu NBP dla ${f.currency} — wpisz kurs albo ręcznie Cenę PLN.`);
     if (pricePln === null || Number.isNaN(pricePln)) return setError("Cena PLN musi być liczbą.");
     for (const [label, v] of [["PCC", pcc], ["Prowizja + PCC", commissionPcc], ["Cena PLN + koszty", total]] as const) {
       if (v !== null && Number.isNaN(v)) return setError(`${label} musi być liczbą.`);
@@ -154,17 +235,20 @@ export default function GoodsAddForm({
 
     setSaving(true);
     // Ostrzeżenie o duplikacie numeru seryjnego (w całym rejestrze) — dopuszczamy, ale po potwierdzeniu.
-    const dup = await supabase.from("goods_register").select("id, kind, vat").ilike("serial", escapeLike(serial)).limit(1);
+    const serialChanged = !edit || (edit.serial ?? "").trim().toUpperCase() !== upper;
+    let dupQuery = supabase.from("goods_register").select("id, kind, vat").ilike("serial", escapeLike(serial)).limit(1);
+    if (edit) dupQuery = dupQuery.neq("id", edit.id);
+    const dup = serialChanged ? await dupQuery : { data: null };
     if (dup.data && dup.data.length > 0) {
       const d = dup.data[0] as { kind: string; vat: string | null };
       const where = d.vat === "V23" ? "V23" : d.kind === "trade_in" ? "Skup" : "VM";
-      if (!confirm(`Numer seryjny ${serial} jest już w rejestrze Towar (${where}). Dodać mimo to?`)) {
+      if (!confirm(`Numer seryjny ${serial} jest już w rejestrze Towar (${where}). ${isEdit ? "Zapisać mimo to?" : "Dodać mimo to?"}`)) {
         setSaving(false);
         return;
       }
     }
     const row: Record<string, unknown> = {
-      kind,
+      kind: effKind,
       serial,
       name: f.name.trim() || null,
       supplier: f.supplier.trim() || null,
@@ -174,18 +258,32 @@ export default function GoodsAddForm({
       invoice_no: f.invoice_no.trim() || null,
       category: f.category.trim() || null,
       price,
-      vat: vatFixed,
-      currency: f.currency,
-      nbp_rate: f.currency === "PLN" ? null : clean(nbp),
+      vat: effVat,
+      currency: f.currency || null,
+      nbp_rate: !f.currency || f.currency === "PLN" ? null : clean(nbp),
       costs: clean(costs),
       total_pln: clean(total),
       price_pln: pricePln,
-      created_by_email: session.user.email ?? null,
     };
+    if (!isEdit) row.created_by_email = session.user.email ?? null;
     if (isTradeIn) {
       row.pcc = clean(pcc);
       row.country = country.trim().toUpperCase() || null;
       row.commission_pcc = clean(commissionPcc);
+    } else if (isEdit) {
+      // zmiana grupy ze Skupu na VM/V23: pola tylko-Skupowe wyczyszczone (jak przy przenoszeniu "recykling" wcześniej)
+      row.pcc = null;
+      row.country = null;
+      row.commission_pcc = null;
+    }
+    if (edit) {
+      const { data: upd, error: updErr } = await supabase.from("goods_register").update(row).eq("id", edit.id).select("id");
+      setSaving(false);
+      if (updErr) return setError(updErr.code === "PGRST204" || updErr.code === "42703" ? "Baza nie ma jeszcze kolumn edycji — uruchom ponownie supabase/goods.sql w Supabase." : `Nie udało się zapisać: ${updErr.message}`);
+      if (!upd || upd.length === 0) return setError("Nie zapisano — edytować może tylko Admin (albo wiersz już nie istnieje).");
+      onAdded();
+      onClose();
+      return;
     }
     const { error: err } = await supabase.from("goods_register").insert(row);
     setSaving(false);
@@ -224,7 +322,7 @@ export default function GoodsAddForm({
   return (
     <div className="border border-line bg-white p-4 mb-4">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-xs font-semibold text-inksoft">DODAJ TOWAR — {isTradeIn ? "SKUP" : vatFixed}</h2>
+        <h2 className="text-xs font-semibold text-inksoft">{isEdit ? `EDYTUJ TOWAR — ${edit!.serial ?? edit!.id}` : `DODAJ TOWAR — ${isTradeIn ? "SKUP" : vatFixed}`}</h2>
         <button onClick={onClose} className="text-inksoft text-sm">✕</button>
       </div>
       <datalist id="goods-categories">{categories.map((c) => <option key={c} value={c} />)}</datalist>
@@ -233,7 +331,7 @@ export default function GoodsAddForm({
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div>
           <label className={labelCls}>Numer seryjny *</label>
-          <input value={f.serial} onChange={(e) => set("serial", e.target.value)} className={`${inputCls} font-mono`} autoFocus />
+          <input value={f.serial} onChange={(e) => set("serial", e.target.value)} className={`${inputCls} font-mono`} autoFocus={!isEdit} />
         </div>
         <div className="md:col-span-2">
           <label className={labelCls}>Nazwa</label>
@@ -257,8 +355,21 @@ export default function GoodsAddForm({
           <input type="date" value={f.delivered_on} onChange={(e) => set("delivered_on", e.target.value)} className={inputCls} />
         </div>
         <div>
-          <label className={labelCls}>VAT</label>
-          <input value={vatFixed} disabled readOnly className={`${inputCls} bg-paper text-inksoft`} title="Wynika z pigułki, w której dodajesz towar" />
+          {isEdit ? (
+            <>
+              <label className={labelCls}>Grupa (VAT)</label>
+              <select value={group} onChange={(e) => setGroup(e.target.value as Group)} className={inputCls} title="Zmiana grupy przenosi pozycję do innej pigułki (VM → VAT VM, V23 → VAT V23, Skup → rodzaj Skup)">
+                <option value="VM">VM</option>
+                <option value="V23">V23</option>
+                <option value="Skup">Skup</option>
+              </select>
+            </>
+          ) : (
+            <>
+              <label className={labelCls}>VAT</label>
+              <input value={vatFixed} disabled readOnly className={`${inputCls} bg-paper text-inksoft`} title="Wynika z pigułki, w której dodajesz towar" />
+            </>
+          )}
         </div>
 
         <div>
@@ -276,11 +387,12 @@ export default function GoodsAddForm({
         <div>
           <label className={labelCls}>Waluta</label>
           <select value={f.currency} onChange={(e) => set("currency", e.target.value)} className={inputCls}>
+            {isEdit && !f.currency && <option value="">—</option>}
             {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
         </div>
 
-        {f.currency !== "PLN" && computedInput("nbp_rate", nbp, autoRate ? `z ${fmtDate(autoRate.date)}` : "brak kursu — wpisz")}
+        {f.currency && f.currency !== "PLN" && computedInput("nbp_rate", nbp, autoRate ? `z ${fmtDate(autoRate.date)}` : "brak kursu — wpisz")}
         {computedInput("price_pln", pricePln)}
         <div>
           <label className={labelCls}>Koszty (PLN)</label>
@@ -293,12 +405,51 @@ export default function GoodsAddForm({
       </div>
       {isTradeIn && <datalist id="goods-countries">{COUNTRIES.map((c) => <option key={c} value={c} />)}</datalist>}
 
+      {isEdit && (price !== edit!.price || (f.currency || null) !== edit!.currency || f.purchased_on !== (edit!.purchased_on ?? "")) && (
+        <p className="text-amber text-xs mt-3">Zmieniłeś cenę, walutę lub datę zakupu — kurs NBP, Cena PLN, PCC, prowizja i Cena PLN + koszty zostają bez zmian, dopóki nie klikniesz „przelicz ponownie” przy danym polu.</p>
+      )}
       {error && <p className="text-rust text-xs mt-3">{error}</p>}
       {info && <p className="text-teal text-xs mt-3">{info}</p>}
       <div className="flex gap-2 mt-4">
-        <button onClick={submit} disabled={saving} className="bg-ink text-paper px-4 py-2 rounded text-sm font-semibold disabled:opacity-50">{saving ? "Zapisywanie…" : "Dodaj"}</button>
-        <button onClick={() => { setF(initial(kind, vatFixed)); setManual(new Set()); setError(""); setInfo(""); }} disabled={saving} className="px-4 py-2 border border-line rounded text-sm font-semibold disabled:opacity-50">Wyczyść</button>
+        <button onClick={submit} disabled={saving} className="bg-ink text-paper px-4 py-2 rounded text-sm font-semibold disabled:opacity-50">{saving ? "Zapisywanie…" : isEdit ? "Zapisz zmiany" : "Dodaj"}</button>
+        <button
+          onClick={() => {
+            if (edit) {
+              setF(fromEdit(edit));
+              setManual(manualFromEdit(edit));
+              setGroup(initialGroup);
+            } else {
+              setF(initial(kind, vatFixed));
+              setManual(new Set());
+            }
+            setError("");
+            setInfo("");
+          }}
+          disabled={saving}
+          className="px-4 py-2 border border-line rounded text-sm font-semibold disabled:opacity-50"
+        >
+          {isEdit ? "Przywróć" : "Wyczyść"}
+        </button>
       </div>
+
+      {isEdit && (
+        <div className="mt-5 border-t border-line pt-3">
+          <h3 className="text-xs font-semibold text-inksoft mb-2">HISTORIA ZMIAN</h3>
+          {!edit!.history?.length ? (
+            <p className="text-xs text-inksoft">Brak zmian od importu z arkusza.</p>
+          ) : (
+            <ul className="text-xs space-y-1">
+              {[...edit!.history!].reverse().map((h, i) => (
+                <li key={i}>
+                  <span className="font-mono text-inksoft">{new Date(h.at).toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>{" "}
+                  <span className="font-semibold">{displayNameForEmail(h.by, members)}</span>:{" "}
+                  {h.changes.map((c) => `${FIELD_LABEL[c.field] ?? c.field}: ${fmtVal(c.from)} → ${fmtVal(c.to)}`).join("; ")}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   );
 }

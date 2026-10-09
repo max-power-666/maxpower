@@ -6,7 +6,7 @@ import { escapeLike } from "@/lib/search";
 import type { MemberLite } from "@/lib/displayName";
 import type { Session } from "@supabase/supabase-js";
 import ProductCardDrawer from "./ProductCardDrawer";
-import GoodsAddForm from "./GoodsAddForm";
+import GoodsAddForm, { type GoodsEditRow } from "./GoodsAddForm";
 
 // Zakładka Towar (10.10.2026, na prośbę właściciela): rejestr zakupionego towaru z arkusza Towar.numbers, dwie pigułki jak arkusze:
 // VM, V23 (zakupy od firm i z Allegro, podział wg VAT) i Skup (dawniej Trade-in: zakupy ze skupu Back Market). Dane w tabeli goods_register (supabase/goods.sql),
@@ -85,6 +85,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
   const [error, setError] = useState("");
   const [openSerial, setOpenSerial] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [editRow, setEditRow] = useState<GoodsEditRow | null>(null); // edycja wiersza (tylko Admin)
   const [reloadKey, setReloadKey] = useState(0); // rośnie po dodaniu/usunięciu wiersza — odświeża listę, sumy i listy filtrów
   const seq = useRef(0);
 
@@ -221,6 +222,17 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
     setReloadKey((k) => k + 1);
   }
 
+  // Edycja: dociągamy cały wiersz razem z historią zmian (lista jej nie niesie; bez kolumny history — sam wiersz).
+  async function startEdit(r: Row) {
+    setError("");
+    let res = await supabase.from("goods_register").select(`${COLUMNS}, history`).eq("id", r.id).maybeSingle();
+    if (res.error && (res.error.code === "42703" || res.error.code === "PGRST204")) res = await supabase.from("goods_register").select(COLUMNS).eq("id", r.id).maybeSingle();
+    if (res.error || !res.data) return setError(`Nie udało się wczytać pozycji do edycji: ${res.error?.message ?? "nie istnieje"}`);
+    setAdding(false);
+    setEditRow(res.data as unknown as GoodsEditRow);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
   const totalPages = Math.max(1, Math.ceil((count ?? 0) / pageSize));
   const isTradeIn = tab === "skup" || tab === "all"; // kolumny PCC / Kraj / Prowizja + PCC (w "Wszystkie" puste dla VM i V23)
   const kind: Kind = tab === "skup" ? "trade_in" : "vm_v23"; // rodzaj wiersza zapisywany z formularza (arkusz źródłowy)
@@ -265,10 +277,25 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
             {tabCounts[t.key] !== undefined && <span className="ml-1.5 text-xs font-normal opacity-70">{tabCounts[t.key]}</span>}
           </button>
         ))}
-        {tab !== "all" && <button onClick={() => setAdding((a) => !a)} className="ml-auto bg-ink text-paper px-4 py-1.5 rounded text-sm font-semibold">{adding ? "Zamknij formularz" : "+ Dodaj towar"}</button>}
+        {tab !== "all" && <button onClick={() => { setEditRow(null); setAdding((a) => !a); }} className="ml-auto bg-ink text-paper px-4 py-1.5 rounded text-sm font-semibold">{adding ? "Zamknij formularz" : "+ Dodaj towar"}</button>}
       </div>
 
-      {adding && tab !== "all" && (
+      {editRow && (
+        <GoodsAddForm
+          key={`edit-${editRow.id}`}
+          kind={editRow.kind}
+          vatFixed={editRow.vat === "V23" ? "V23" : "VM"}
+          session={session}
+          categories={options(facets?.category).map((o) => o.value).filter((v) => v !== NONE)}
+          suppliers={options(facets?.supplier).map((o) => o.value).filter((v) => v !== NONE)}
+          onAdded={() => setReloadKey((k) => k + 1)}
+          onClose={() => setEditRow(null)}
+          edit={editRow}
+          members={members}
+        />
+      )}
+
+      {adding && tab !== "all" && !editRow && (
         <GoodsAddForm
           key={tab}
           kind={kind}
@@ -366,6 +393,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
                 )}
                 {isAdmin && (
                   <td className="p-2 whitespace-nowrap text-right">
+                    <button onClick={() => startEdit(r)} className="text-teal hover:underline mr-3">Edytuj</button>
                     <button onClick={() => removeRow(r)} className="text-rust hover:underline">Usuń</button>
                   </td>
                 )}
@@ -385,7 +413,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
         {isTradeIn && <span>PCC: <span className="font-semibold">{fmtPln(totals?.pcc)}</span></span>}
         {isTradeIn && <span>Prowizja + PCC: <span className="font-semibold">{fmtPln(totals?.commission_pcc)}</span></span>}
       </div>
-      <p className="text-[11px] text-inksoft mt-2 max-w-3xl">Dane z arkusza Towar.numbers i dopisane formularzem „Dodaj towar” (bez edycji istniejących wierszy; usuwa tylko Admin). Kwoty „Cena PLN”, „Koszty”, „Cena PLN + koszty” i „Prowizja + PCC” to wartości z arkusza, nie przeliczenia aplikacji; sumy dotyczą całego wyniku filtrów.</p>
+      <p className="text-[11px] text-inksoft mt-2 max-w-3xl">Dane z arkusza Towar.numbers i dopisane formularzem „Dodaj towar”; edytować i usuwać może tylko Admin (każda edycja zapisuje się w historii zmian). Kwoty „Cena PLN”, „Koszty”, „Cena PLN + koszty” i „Prowizja + PCC” to wartości z arkusza, nie przeliczenia aplikacji; sumy dotyczą całego wyniku filtrów.</p>
 
       {openSerial && <ProductCardDrawer serial={openSerial} members={members} onClose={() => setOpenSerial(null)} />}
     </div>

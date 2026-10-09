@@ -45,7 +45,7 @@ create policy "admin manager read goods_register" on goods_register for select u
 
 -- ===== Formularz "Dodaj towar" (10.10.2026) =====
 -- Dodawać może każdy, kto czyta towar (Admin i Manager); usuwać (np. pomyłkę we wpisie) tylko Admin — usunięcie zapisuje audit_delete() w deleted_records.
--- Edycji istniejących wierszy nie ma. row_no i autora (created_by_email) uzupełnia trigger, więc nie da się ich podrobić z przeglądarki.
+-- Edycja: patrz niżej (tylko Admin). row_no i autora (created_by_email) uzupełnia trigger, więc nie da się ich podrobić z przeglądarki.
 alter table goods_register add column if not exists created_by_email text;     -- puste = wiersz z arkusza; wypełnione = dodany w aplikacji
 
 create or replace function goods_register_before_insert() returns trigger
@@ -68,3 +68,51 @@ create policy "admin delete goods_register" on goods_register for delete using (
 drop trigger if exists goods_register_audit_delete on goods_register;
 create trigger goods_register_audit_delete before delete on goods_register
   for each row execute function audit_delete();
+
+-- ===== Edycja wierszy przez Admina (10.10.2026) =====
+-- Edytować może tylko Admin (RLS update). Każda realna zmiana trafia do `history` (kto, kiedy, pole: było -> jest) — trigger, więc nie da się jej ominąć
+-- z przeglądarki; id, row_no, autor i data dodania są niezmienne. Zapis bez zmiany wartości niczego nie loguje.
+alter table goods_register add column if not exists updated_at timestamptz;
+alter table goods_register add column if not exists updated_by_email text;
+alter table goods_register add column if not exists history jsonb not null default '[]'::jsonb;
+
+create or replace function goods_register_before_update() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare
+  o jsonb;
+  n jsonb;
+  k text;
+  ch jsonb := '[]'::jsonb;
+  who text;
+begin
+  -- pola niezmienne
+  new.id := old.id;
+  new.row_no := old.row_no;
+  new.created_at := old.created_at;
+  new.created_by_email := old.created_by_email;
+  new.history := old.history;
+  new.updated_at := old.updated_at;
+  new.updated_by_email := old.updated_by_email;
+  o := to_jsonb(old);
+  n := to_jsonb(new);
+  for k in select jsonb_object_keys(n) loop
+    if (o -> k) is distinct from (n -> k) then
+      ch := ch || jsonb_build_array(jsonb_build_object('field', k, 'from', o -> k, 'to', n -> k));
+    end if;
+  end loop;
+  if jsonb_array_length(ch) = 0 then
+    return new;
+  end if;
+  who := coalesce(auth.jwt() ->> 'email', old.updated_by_email);
+  new.updated_at := now();
+  new.updated_by_email := who;
+  new.history := coalesce(old.history, '[]'::jsonb) || jsonb_build_array(jsonb_build_object('at', now(), 'by', who, 'changes', ch));
+  return new;
+end;
+$$;
+drop trigger if exists goods_register_before_update on goods_register;
+create trigger goods_register_before_update before update on goods_register
+  for each row execute function goods_register_before_update();
+
+drop policy if exists "admin update goods_register" on goods_register;
+create policy "admin update goods_register" on goods_register for update using (is_admin()) with check (is_admin());
