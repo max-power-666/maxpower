@@ -42,6 +42,8 @@ numerach seryjnych, wielokanałowa synchronizacja stanów, naprawy, auto-wycena)
 
 ## Zakładki i role
 
+**Grupy zakładek w pasku bocznym (10.10.2026, na prośbę właściciela):** menu przestrzeni ERP jest podzielone na grupy z małymi nagłówkami (`NAV_GROUPS`/`navSections` w `app/page.tsx`): Przegląd (bez nagłówka, na górze) · **Sprzedaż** (Zamówienia, Wysyłka, Zwroty) · **Magazyn i serwis** (Magazyn, Serwis, Testy) · **Skup** (Trade-in, Bidder) · **Finanse** (Faktury, Marża, NBP) · **Zespół** (RCP, Punktacja, Zespół) · **Narzędzia** (Backlog, Przypomnienia, AI). Nagłówki pokazują się tylko, gdy osoba widzi zakładki z co najmniej dwóch grup z nagłówkiem (inaczej to szum); pusta grupa jest ukryta, a nowa zakładka niedopisana do grup ląduje w grupie "Inne" (nie zniknie z menu). Sklep (przestrzeń SKLEP) bez grup. To tylko wygląd — uprawnienia, klucze widoków i lista checkboxów w Zespole bez zmian; przeniesienie zakładki między grupami = edycja `NAV_GROUPS`.
+
 **Tytuł zakładki nad treścią usunięty (10.10.2026, na prośbę właściciela — "zajmuje tylko miejsce"):** nazwa aktywnej zakładki widać już w menu bocznym, więc nagłówek `<h1>` z paska nad treścią zniknął na wszystkich stronach; pasek z przyciskiem "Odśwież" i datą synchronizacji został tylko w Magazynie (`app/page.tsx`).
 
 Role: **Admin, Manager, Magazyn, Zamówienia, Serwis, Kierownik serwisu (05.10.2026), Testy, Bidder, Trade-in, Kierownik trade-in (07.10.2026)** (+ Sklep). Rolę nadaje Admin w zakładce Zespół (tam też

@@ -70,6 +70,37 @@ const TABS: { key: ViewKey; label: string; space?: Space }[] = [
   { key: "shop_stock", label: "Magazyn", space: "shop" },
 ];
 
+// Grupy zakładek w pasku bocznym przestrzeni ERP (10.10.2026): kolejność grup i zakładek w grupie = kolejność w menu. Grupa bez nagłówka (title = null) to Przegląd na samej górze.
+// Zakładka spoza listy (nowa, jeszcze niedopisana) trafia na koniec w grupie "Inne", więc nigdy nie zniknie z menu.
+const NAV_GROUPS: { title: string | null; keys: ViewKey[] }[] = [
+  { title: null, keys: ["overview"] },
+  { title: "Sprzedaż", keys: ["sales", "shipping", "returns"] },
+  { title: "Magazyn i serwis", keys: ["inventory", "service", "tests"] },
+  { title: "Skup", keys: ["orders", "tradein"] },
+  { title: "Finanse", keys: ["invoices", "margin", "nbp"] },
+  { title: "Zespół", keys: ["rcp", "points", "team"] },
+  { title: "Narzędzia", keys: ["backlog", "reminders", "ai"] },
+];
+function navSections(space: Space, visible: ViewKey[]): { title: string | null; tabs: { key: ViewKey; label: string }[] }[] {
+  const tabs = TABS.filter((t) => spaceOf(t.key) === space && visible.includes(t.key));
+  if (space !== "erp") return [{ title: null, tabs }];
+  const placed = new Set<ViewKey>();
+  const sections = NAV_GROUPS.map((g) => ({
+    title: g.title,
+    tabs: g.keys.flatMap((k) => {
+      const t = tabs.find((x) => x.key === k);
+      if (!t) return [];
+      placed.add(k);
+      return [t];
+    }),
+  })).filter((g) => g.tabs.length > 0);
+  const rest = tabs.filter((t) => !placed.has(t.key));
+  if (rest.length > 0) sections.push({ title: "Inne", tabs: rest });
+  // Nagłówki tylko, gdy osoba widzi zakładki z co najmniej dwóch grup z nagłówkiem — inaczej to szum.
+  if (sections.filter((g) => g.title !== null).length < 2) return [{ title: null, tabs: sections.flatMap((g) => g.tabs) }];
+  return sections;
+}
+
 // Kto widzi jaką zakładkę — DOMYŚLNY zestaw wg roli, Admin ma dostęp do wszystkiego.
 // Przegląd jest domyślnie TYLKO dla Admina i Managera (02.10.2026, na prośbę właściciela)
 // — dla innych ról zakładką startową jest ich własna, główna zakładka (pierwszy element
@@ -556,10 +587,17 @@ export default function Home() {
         />
         {tracksWorkTime(role) && <RcpWidget session={session} role={role ?? ""} onOpenRcp={() => effectiveAccess(role ?? "", viewAccess).includes("rcp") && setView("rcp")} />}
         <nav className="flex flex-col gap-1">
-          {TABS.filter((t) => spaceOf(t.key) === spaceOf(view) && effectiveAccess(role ?? "", viewAccess).includes(t.key)).map((t) => (
-            <button key={t.key} onClick={() => setView(t.key)} className={`text-left px-2 py-2 rounded text-sm font-medium ${view === t.key ? "bg-white border border-line" : "text-inksoft"}`}>
-              {t.label}
-            </button>
+          {navSections(spaceOf(view), effectiveAccess(role ?? "", viewAccess)).map((g, gi) => (
+            <div key={g.title ?? `g${gi}`} className={gi > 0 && g.title ? "mt-3" : ""}>
+              {g.title && <div className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-inksoft/70">{g.title}</div>}
+              <div className="flex flex-col gap-1">
+                {g.tabs.map((t) => (
+                  <button key={t.key} onClick={() => setView(t.key)} className={`text-left px-2 py-2 rounded text-sm font-medium ${view === t.key ? "bg-white border border-line" : "text-inksoft"}`}>
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            </div>
           ))}
         </nav>
         <div className="mt-auto text-xs text-inksoft">
