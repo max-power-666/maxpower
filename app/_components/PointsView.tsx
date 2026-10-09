@@ -5,12 +5,14 @@ import type { Session } from "@supabase/supabase-js";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { SERVICE_TASKS } from "@/lib/workLog";
 import { emptyMonth, monthCount, monthTotal, POINTS_AREAS, type EmployeeMonth } from "@/lib/points";
+import { fmtHm } from "@/lib/rcp";
 
 // Punktacja pracowników (06.10.2026, Admin i Manager): miesięczne podsumowanie punktów z Serwisu, Testów i Trade-in wg Regulaminu premiowania —
 // punkty tylko za prawidłowo zakończony proces, każda paczka/urządzenie raz (data zaliczenia), obszary sumują się w jeden wynik miesięczny (§2 ust. 6).
 // Czego tu jeszcze NIE ma: Zwroty (17 pkt — moduł nie istnieje) oraz wszystko, co wymaga godzin pracy (wydajność pkt/h, norma 45 pkt/h, kwota premii) — brak ewidencji RCP.
 
-type Employee = { email: string; months: Record<string, EmployeeMonth> };
+type Employee = { email: string; months: Record<string, EmployeeMonth>; hours?: Record<string, { workMs: number; adminMs: number }> };
+const PPH_NORM = 45; // norma wydajności z regulaminu (§4): 45 pkt/h — tylko podpowiedź kolorem, bez liczenia premii
 const MONTH_NAMES = ["sty", "lut", "mar", "kwi", "maj", "cze", "lip", "sie", "wrz", "paź", "lis", "gru"];
 const monthLabel = (key: string) => `${MONTH_NAMES[Number(key.slice(5, 7)) - 1]} ${key.slice(0, 4)}`;
 const fmtPts = (n: number) => n.toLocaleString("pl-PL", { minimumFractionDigits: 0, maximumFractionDigits: 1 });
@@ -47,7 +49,11 @@ export default function PointsView({ session, members }: { session: Session; mem
 
   const rows = useMemo(() => {
     return employees
-      .map((e) => ({ email: e.email, m: e.months[month] ?? emptyMonth(), trend: months.map((k) => monthTotal(e.months[k] ?? emptyMonth())) }))
+      .map((e) => {
+        const h = e.hours?.[month];
+        const netMs = h ? Math.max(0, h.workMs - h.adminMs) : 0; // czas pracy bez prac administracyjnych
+        return { email: e.email, netMs, adminMs: h?.adminMs ?? 0, m: e.months[month] ?? emptyMonth(), trend: months.map((k) => monthTotal(e.months[k] ?? emptyMonth())) };
+      })
       .filter((r) => monthCount(r.m) > 0)
       .sort((a, b) => monthTotal(b.m) - monthTotal(a.m));
   }, [employees, month, months]);
@@ -59,6 +65,13 @@ export default function PointsView({ session, members }: { session: Session; mem
       t[a.key].points += r.m[a.key].points;
     }
     return t;
+  }, [rows]);
+  // Pkt/h zespołu: punkty osób, które mają godziny, przez ich łączny czas (osoby bez ewidencji czasu — np. Admin/Manager lub sprzed RCP — nie zaniżają średniej).
+  const team = useMemo(() => {
+    const withHours = rows.filter((r) => r.netMs > 0);
+    const ms = withHours.reduce((n, r) => n + r.netMs, 0);
+    const pts = withHours.reduce((n, r) => n + monthTotal(r.m), 0);
+    return { people: withHours.length, ms, pph: ms > 0 ? pts / (ms / 3_600_000) : null };
   }, [rows]);
   const maxTotal = Math.max(1, ...rows.map((r) => monthTotal(r.m)));
   const trendMax = Math.max(1, ...rows.flatMap((r) => r.trend));
@@ -75,7 +88,7 @@ export default function PointsView({ session, members }: { session: Session; mem
         ))}
       </div>
 
-      <div className="grid grid-cols-4 gap-px bg-line border border-line mb-px">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-px bg-line border border-line mb-px">
         <div className="bg-white p-5"><div className="text-xs text-inksoft mb-2">PUNKTY RAZEM — {monthLabel(month).toUpperCase()}</div><div className="text-2xl font-bold font-mono">{fmtPts(monthTotal(totals))}</div></div>
         {POINTS_AREAS.map((a) => (
           <div key={a.key} className="bg-white p-5">
@@ -84,6 +97,11 @@ export default function PointsView({ session, members }: { session: Session; mem
             <div className="text-xs text-inksoft mt-1">{totals[a.key].count} {a.unit}</div>
           </div>
         ))}
+        <div className="bg-white p-5" title="Punkty osób z ewidencją czasu ÷ ich godziny pracy (bez prac administracyjnych)">
+          <div className="text-xs text-inksoft mb-2">PUNKTY NA GODZINĘ — ZESPÓŁ</div>
+          <div className="text-2xl font-bold font-mono">{team.pph === null ? "—" : fmtPts(team.pph)}</div>
+          <div className="text-xs text-inksoft mt-1">{team.pph === null ? "brak godzin z RCP" : `${team.people} os. · ${fmtHm(team.ms)} h`}</div>
+        </div>
       </div>
 
       <div className="border border-line bg-white overflow-x-auto">
@@ -97,12 +115,14 @@ export default function PointsView({ session, members }: { session: Session; mem
               ))}
               <th className="p-3 text-right" title="Obsługa zwrotu — 17 pkt wg regulaminu; moduł Zwroty jeszcze nie istnieje">Zwroty</th>
               <th className="p-3 text-right">Razem</th>
+              <th className="p-3 text-right" title="Czas pracy z RCP w tym miesiącu (praca + wyjścia służbowe), BEZ prac administracyjnych">Godziny</th>
+              <th className="p-3 text-right" title={`Punkty razem ÷ godziny pracy; norma z regulaminu ${PPH_NORM} pkt/h`}>Pkt/h</th>
               <th className="p-3 w-48"></th>
               <th className="p-3">Ostatnie {months.length} mies.</th>
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 && <tr><td colSpan={9} className="p-6 text-center text-inksoft text-sm">Brak zaliczonych punktów w tym miesiącu.</td></tr>}
+            {rows.length === 0 && <tr><td colSpan={11} className="p-6 text-center text-inksoft text-sm">Brak zaliczonych punktów w tym miesiącu.</td></tr>}
             {rows.map((r) => {
               const open = expanded.has(r.email);
               const total = monthTotal(r.m);
@@ -122,6 +142,8 @@ export default function PointsView({ session, members }: { session: Session; mem
                     ))}
                     <td className="p-3 text-right text-inksoft">—</td>
                     <td className="p-3 text-right font-mono font-bold">{fmtPts(total)}</td>
+                    <td className="p-3 text-right font-mono text-xs whitespace-nowrap" title={r.adminMs > 0 ? `w tym prace administracyjne (niewliczone): ${fmtHm(r.adminMs)}` : undefined}>{r.netMs > 0 ? fmtHm(r.netMs) : <span className="text-inksoft">—</span>}</td>
+                    <td className={`p-3 text-right font-mono font-semibold ${r.netMs > 0 ? (total / (r.netMs / 3_600_000) >= PPH_NORM ? "text-teal" : "text-amber") : ""}`}>{r.netMs > 0 ? fmtPts(total / (r.netMs / 3_600_000)) : <span className="text-inksoft font-normal">—</span>}</td>
                     <td className="p-3">
                       <div className="bg-paper rounded h-3 w-full overflow-hidden"><div className="h-full bg-teal rounded" style={{ width: `${(total / maxTotal) * 100}%` }} /></div>
                     </td>
@@ -135,7 +157,7 @@ export default function PointsView({ session, members }: { session: Session; mem
                   </tr>
                   {open && (
                     <tr className="border-b border-line bg-paper">
-                      <td colSpan={9} className="p-3 text-xs">
+                      <td colSpan={11} className="p-3 text-xs">
                         <ul className="space-y-0.5 max-w-md">
                           {Object.entries(r.m.serviceByTask).sort((a, b) => b[1].points - a[1].points).map(([task, v]) => (
                             <li key={task} className="flex justify-between"><span>Serwis — {TASK_LABEL[task] || task}</span><span className="font-mono">{v.count} × → {fmtPts(v.points)} pkt</span></li>
@@ -153,7 +175,7 @@ export default function PointsView({ session, members }: { session: Session; mem
 
       <div className="text-[11px] text-inksoft mt-3 max-w-4xl space-y-1">
         <p>W nawiasie liczba zaliczonych sztuk. Liczą się wyłącznie prawidłowo zakończone procesy (Regulamin §2 ust. 4): Serwis — „naprawiony”, Testy — „przetestowane”, Trade-in — obsłużona / kontroferta / ok. dok. / problem. Każda paczka i urządzenie raz — miesiąc to data pierwszego zaliczenia (zmiana statusu jej nie przesuwa); miesiące wg czasu polskiego. Punkty z obszarów sumują się w jeden wynik miesięczny (§2 ust. 6).</p>
-        <p>Jeszcze nie uwzględnione: obsługa zwrotów (17 pkt — zakładka Zwroty to na razie szkielet) oraz wszystko oparte na godzinach pracy — wydajność pkt/h, norma 45 pkt/h, wskaźnik kwalifikacyjny 80%, kwota premii i rozliczenie niepełnego miesiąca (§4–§7) — do tego potrzebna jest ewidencja czasu pracy (RCP).</p>
+        <p>Godziny i pkt/h: czas pracy z RCP (praca + wyjścia służbowe, bez przerw, wyjść prywatnych i prac administracyjnych) w danym miesiącu; pkt/h = punkty razem ÷ godziny. Kolor: zielony od {PPH_NORM} pkt/h (norma z regulaminu §4), pomarańczowy poniżej. RCP działa od 06.10.2026 i nie obejmuje Admina/Managera — dla wcześniejszych miesięcy i osób bez ewidencji pokazujemy „—”. Jeszcze nie uwzględnione: obsługa zwrotów (17 pkt — zakładka Zwroty to szkielet) oraz wskaźnik kwalifikacyjny 80%, kwota premii i rozliczenie niepełnego miesiąca (§5–§7).</p>
         {fallback && <p className="text-amber">Uwaga: daty zaliczenia liczone jeszcze po dacie zakończenia — uruchom service.sql, tests.sql i buyback-orders.sql, żeby punkty nie przeskakiwały między miesiącami przy zmianie statusu.</p>}
       </div>
     </div>

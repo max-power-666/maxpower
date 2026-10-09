@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { requireRole } from "@/lib/serverAuth";
 import { addAreaRows, lastMonths, monthRange, type EmployeeMonth, type PointRow } from "@/lib/points";
+import { summarizeDays, type RcpSegment } from "@/lib/rcp";
 
 // Podsumowanie punktacji pracowników (zakładka Punktacja, 06.10.2026) — Admin i Manager (też po stronie serwera, nie tylko ukrycie zakładki).
 // Ostatnie 6 miesięcy kalendarzowych wg czasu polskiego, punkty z Serwisu ("naprawiony"), Testów ("przetestowane") i Trade-in (obsłużona/kontroferta/ok. dok./problem)
@@ -33,6 +34,46 @@ async function fetchRows(db: ReturnType<typeof admin>, s: Src, col: string, from
   return { rows: out };
 }
 
+// Godziny pracy z RCP (09.10.2026) per pracownik i miesiąc (wg czasu polskiego): czas pracy = praca + wyjścia służbowe + prace administracyjne; do pkt/h bierzemy czas BEZ administracji
+// (workMs − adminMs). Brak tabel RCP albo brak wpisów danej osoby = brak godzin (UI pokazuje "—"). RCP działa od 06.10.2026, więc wcześniejsze miesiące nie mają godzin.
+async function fetchHours(db: ReturnType<typeof admin>, from: string, to: string): Promise<Record<string, Record<string, { workMs: number; adminMs: number }>> | null> {
+  const segs: RcpSegment[] = [];
+  for (let off = 0; ; off += 1000) {
+    const { data, error } = await db
+      .from("rcp_segments")
+      .select("user_email, kind, area, started_at, ended_at, needs_review")
+      .lt("started_at", to)
+      .or(`ended_at.is.null,ended_at.gte.${from}`)
+      .order("id")
+      .range(off, off + 999);
+    if (error) {
+      if (error.code === "42P01" || error.code === "PGRST205") return null;
+      throw new Error(`rcp_segments: ${error.message}`);
+    }
+    segs.push(...((data as unknown as RcpSegment[]) || []));
+    if (!data || data.length < 1000) break;
+  }
+  const byEmail = new Map<string, RcpSegment[]>();
+  for (const s of segs) {
+    const e = (s.user_email || "").trim().toLowerCase();
+    if (!e) continue;
+    byEmail.set(e, [...(byEmail.get(e) ?? []), s]);
+  }
+  const now = Date.now();
+  const out: Record<string, Record<string, { workMs: number; adminMs: number }>> = {};
+  for (const [email, list] of byEmail) {
+    const perMonth: Record<string, { workMs: number; adminMs: number }> = {};
+    for (const d of summarizeDays(list, now).values()) {
+      const m = d.day.slice(0, 7);
+      const cur = (perMonth[m] ??= { workMs: 0, adminMs: 0 });
+      cur.workMs += d.workMs;
+      cur.adminMs += d.adminMs;
+    }
+    out[email] = perMonth;
+  }
+  return out;
+}
+
 export async function GET(request: Request) {
   const db = admin();
   if (!(await requireRole(request, db, ["Admin", "Manager"]))) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
@@ -50,8 +91,9 @@ export async function GET(request: Request) {
       }
       addAreaRows(acc, s.area, res.rows || [], months);
     }
-    const employees = Array.from(acc.entries()).map(([email, byMonth]) => ({ email, months: byMonth }));
-    return NextResponse.json({ ok: true, months, employees, fallbackDate: usedFallback });
+    const hours = await fetchHours(db, from, to);
+    const employees = Array.from(acc.entries()).map(([email, byMonth]) => ({ email, months: byMonth, hours: hours?.[email] ?? {} }));
+    return NextResponse.json({ ok: true, months, employees, fallbackDate: usedFallback, hasHours: hours !== null });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "Błąd liczenia punktacji." }, { status: 500 });
   }
