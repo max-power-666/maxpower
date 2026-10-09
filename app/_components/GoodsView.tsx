@@ -16,6 +16,7 @@ type Kind = "vm_v23" | "trade_in";
 
 type Row = {
   id: number;
+  kind: Kind;
   serial: string | null;
   name: string | null;
   supplier: string | null;
@@ -40,20 +41,22 @@ type Totals = { price_pln: number; costs: number; total_pln: number; pcc: number
 
 // Trzy pigułki (10.10.2026): VM i V23 to podział wg VAT, Skup (dawniej "Trade-in") to zakupy ze skupu Back Market.
 // V23 = każdy wiersz z VAT V23 (niezależnie od arkusza), VM i Skup = reszta swojego rodzaju (VAT VM albo pusty).
-type Tab = "vm" | "v23" | "skup";
+type Tab = "vm" | "v23" | "skup" | "all";
 const TABS: { key: Tab; label: string }[] = [
   { key: "vm", label: "VM" },
   { key: "v23", label: "V23" },
   { key: "skup", label: "Skup" },
+  { key: "all", label: "Wszystkie" }, // wszystkie wiersze razem (10.10.2026)
 ];
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function scopeFilter(q: any, tab: Tab) {
+  if (tab === "all") return q;
   if (tab === "v23") return q.eq("vat", "V23");
   return q.eq("kind", tab === "skup" ? "trade_in" : "vm_v23").or("vat.is.null,vat.neq.V23");
 }
 const PAGE_SIZES = [50, 100, 200];
 const NONE = "__brak__"; // w filtrach: wiersze z pustą wartością
-const COLUMNS = "id, serial, name, supplier, purchased_on, delivered_on, order_no, invoice_no, category, price, vat, currency, nbp_rate, costs, total_pln, price_pln, pcc, country, commission_pcc";
+const COLUMNS = "id, kind, serial, name, supplier, purchased_on, delivered_on, order_no, invoice_no, category, price, vat, currency, nbp_rate, costs, total_pln, price_pln, pcc, country, commission_pcc";
 
 const pill = (active: boolean) => `px-3 py-1.5 rounded-full text-sm font-semibold border ${active ? "bg-ink text-paper border-ink" : "bg-white border-line"}`;
 const selectCls = "border border-line bg-white px-2 py-2 rounded text-sm";
@@ -219,17 +222,20 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
   }
 
   const totalPages = Math.max(1, Math.ceil((count ?? 0) / pageSize));
-  const isTradeIn = tab === "skup";
-  const kind: Kind = isTradeIn ? "trade_in" : "vm_v23"; // rodzaj wiersza zapisywany z formularza (arkusz źródłowy)
+  const isTradeIn = tab === "skup" || tab === "all"; // kolumny PCC / Kraj / Prowizja + PCC (w "Wszystkie" puste dla VM i V23)
+  const kind: Kind = tab === "skup" ? "trade_in" : "vm_v23"; // rodzaj wiersza zapisywany z formularza (arkusz źródłowy)
   const options = (m: Map<string, number> | undefined) =>
     Array.from(m?.entries() ?? [])
       .sort((a, b) => (a[0] === NONE ? 1 : b[0] === NONE ? -1 : a[0].localeCompare(b[0], "pl")))
       .map(([v, n]) => ({ value: v, label: `${v === NONE ? "— (brak)" : v} (${n})` }));
   const anyFilter = !!(search || category || supplier);
-  const colSpan = (isTradeIn ? 17 : 14) + (isAdmin ? 1 : 0);
+  const showGroup = tab === "all"; // w "Wszystkie" pierwsza kolumna mówi, do której pigułki należy wiersz
+  const colSpan = (isTradeIn ? 17 : 14) + (showGroup ? 1 : 0) + (isAdmin ? 1 : 0);
+  const groupOf = (r: Row) => (r.vat === "V23" ? "V23" : r.kind === "trade_in" ? "Skup" : "VM");
 
   const headers = useMemo(
     () => [
+      ...(showGroup ? ["Grupa"] : []),
       "Numer seryjny",
       "Nazwa",
       "Dostawca",
@@ -247,7 +253,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
       ...(isTradeIn ? ["PCC", "Kraj", "Prowizja + PCC"] : []),
       ...(isAdmin ? [""] : []),
     ],
-    [isTradeIn, isAdmin]
+    [isTradeIn, isAdmin, showGroup]
   );
 
   return (
@@ -259,10 +265,10 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
             {tabCounts[t.key] !== undefined && <span className="ml-1.5 text-xs font-normal opacity-70">{tabCounts[t.key]}</span>}
           </button>
         ))}
-        <button onClick={() => setAdding((a) => !a)} className="ml-auto bg-ink text-paper px-4 py-1.5 rounded text-sm font-semibold">{adding ? "Zamknij formularz" : "+ Dodaj towar"}</button>
+        {tab !== "all" && <button onClick={() => setAdding((a) => !a)} className="ml-auto bg-ink text-paper px-4 py-1.5 rounded text-sm font-semibold">{adding ? "Zamknij formularz" : "+ Dodaj towar"}</button>}
       </div>
 
-      {adding && (
+      {adding && tab !== "all" && (
         <GoodsAddForm
           key={tab}
           kind={kind}
@@ -334,6 +340,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
             )}
             {rows.map((r) => (
               <tr key={r.id} className="border-b border-line last:border-b-0 hover:bg-paper align-top">
+                {showGroup && <td className="p-2 whitespace-nowrap font-semibold">{groupOf(r)}</td>}
                 <td className="p-2 font-mono whitespace-nowrap">
                   {r.serial ? <button onClick={() => setOpenSerial(r.serial)} className="text-teal hover:underline">{r.serial}</button> : "—"}
                 </td>
