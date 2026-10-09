@@ -4,7 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { escapeLike } from "@/lib/search";
 import type { MemberLite } from "@/lib/displayName";
+import type { Session } from "@supabase/supabase-js";
 import ProductCardDrawer from "./ProductCardDrawer";
+import GoodsAddForm from "./GoodsAddForm";
 
 // Zakładka Towar (10.10.2026, na prośbę właściciela): rejestr zakupionego towaru z arkusza Towar.numbers, dwie pigułki jak arkusze:
 // "VM/V23" (zakupy od firm i z Allegro) i "Trade-in" (zakupy ze skupu Back Market). Dane w tabeli goods_register (supabase/goods.sql),
@@ -54,7 +56,7 @@ const fmtPln = (n: number | null | undefined) => (n === null || n === undefined 
 
 type Facets = { category: Map<string, number>; vat: Map<string, number>; supplier: Map<string, number> };
 
-export default function GoodsView({ members }: { members: MemberLite[] }) {
+export default function GoodsView({ session, members, isAdmin }: { session: Session; members: MemberLite[]; isAdmin: boolean }) {
   const [kind, setKind] = useState<Kind>("vm_v23");
   const [pageSize, setPageSize] = useState(100);
   const [page, setPage] = useState(1);
@@ -71,6 +73,8 @@ export default function GoodsView({ members }: { members: MemberLite[] }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [openSerial, setOpenSerial] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0); // rośnie po dodaniu/usunięciu wiersza — odświeża listę, sumy i listy filtrów
   const seq = useRef(0);
 
   // Wyszukiwanie z opóźnieniem — zapytanie nie leci przy każdym znaku.
@@ -134,7 +138,7 @@ export default function GoodsView({ members }: { members: MemberLite[] }) {
     } finally {
       if (mine === seq.current) setLoading(false);
     }
-  }, [applyFilters, page, pageSize]);
+  }, [applyFilters, page, pageSize, reloadKey]);
 
   useEffect(() => {
     load();
@@ -165,7 +169,7 @@ export default function GoodsView({ members }: { members: MemberLite[] }) {
     return () => {
       cancelled = true;
     };
-  }, [applyFilters]);
+  }, [applyFilters, reloadKey]);
 
   // Wartości do list rozwijanych (z licznikami) i liczniki pigułek — raz na rodzaj.
   useEffect(() => {
@@ -188,7 +192,7 @@ export default function GoodsView({ members }: { members: MemberLite[] }) {
     return () => {
       cancelled = true;
     };
-  }, [kind]);
+  }, [kind, reloadKey]);
 
   useEffect(() => {
     (async () => {
@@ -199,7 +203,15 @@ export default function GoodsView({ members }: { members: MemberLite[] }) {
       }
       setKindCounts(out);
     })();
-  }, []);
+  }, [reloadKey]);
+
+  async function removeRow(r: Row) {
+    if (!confirm(`Usunąć z rejestru pozycję ${r.serial ?? r.name ?? r.id}? Tej operacji nie można cofnąć (zapis zostaje tylko w dzienniku usunięć).`)) return;
+    const { data, error: err } = await supabase.from("goods_register").delete().eq("id", r.id).select("id");
+    if (err) return setError(`Nie udało się usunąć: ${err.message}`);
+    if (!data?.length) return setError("Nie usunięto — brak uprawnień (tylko Admin) albo pozycja już nie istnieje.");
+    setReloadKey((k) => k + 1);
+  }
 
   const totalPages = Math.max(1, Math.ceil((count ?? 0) / pageSize));
   const isTradeIn = kind === "trade_in";
@@ -208,7 +220,7 @@ export default function GoodsView({ members }: { members: MemberLite[] }) {
       .sort((a, b) => (a[0] === NONE ? 1 : b[0] === NONE ? -1 : a[0].localeCompare(b[0], "pl")))
       .map(([v, n]) => ({ value: v, label: `${v === NONE ? "— (brak)" : v} (${n})` }));
   const anyFilter = !!(search || category || vat || supplier);
-  const colSpan = isTradeIn ? 17 : 14;
+  const colSpan = (isTradeIn ? 17 : 14) + (isAdmin ? 1 : 0);
 
   const headers = useMemo(
     () => [
@@ -227,8 +239,9 @@ export default function GoodsView({ members }: { members: MemberLite[] }) {
       "Cena PLN + koszty",
       "Cena PLN",
       ...(isTradeIn ? ["PCC", "Kraj", "Prowizja + PCC"] : []),
+      ...(isAdmin ? [""] : []),
     ],
-    [isTradeIn]
+    [isTradeIn, isAdmin]
   );
 
   return (
@@ -240,7 +253,23 @@ export default function GoodsView({ members }: { members: MemberLite[] }) {
             {kindCounts[k.key] !== undefined && <span className="ml-1.5 text-xs font-normal opacity-70">{kindCounts[k.key]}</span>}
           </button>
         ))}
+        <button onClick={() => setAdding((a) => !a)} className="ml-auto bg-ink text-paper px-4 py-1.5 rounded text-sm font-semibold">{adding ? "Zamknij formularz" : "+ Dodaj towar"}</button>
       </div>
+
+      {adding && (
+        <GoodsAddForm
+          key={kind}
+          kind={kind}
+          session={session}
+          categories={options(facets?.category).map((o) => o.value).filter((v) => v !== NONE)}
+          suppliers={options(facets?.supplier).map((o) => o.value).filter((v) => v !== NONE)}
+          onAdded={() => {
+            setPage(1);
+            setReloadKey((k) => k + 1);
+          }}
+          onClose={() => setAdding(false)}
+        />
+      )}
 
       <div className="flex flex-wrap items-center gap-3 mb-3">
         <input
@@ -326,6 +355,11 @@ export default function GoodsView({ members }: { members: MemberLite[] }) {
                     <td className="p-2 whitespace-nowrap text-right">{fmtNum(r.commission_pcc)}</td>
                   </>
                 )}
+                {isAdmin && (
+                  <td className="p-2 whitespace-nowrap text-right">
+                    <button onClick={() => removeRow(r)} className="text-rust hover:underline">Usuń</button>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
@@ -342,7 +376,7 @@ export default function GoodsView({ members }: { members: MemberLite[] }) {
         {isTradeIn && <span>PCC: <span className="font-semibold">{fmtPln(totals?.pcc)}</span></span>}
         {isTradeIn && <span>Prowizja + PCC: <span className="font-semibold">{fmtPln(totals?.commission_pcc)}</span></span>}
       </div>
-      <p className="text-[11px] text-inksoft mt-2 max-w-3xl">Dane z arkusza Towar.numbers (tylko do odczytu). Kwoty „Cena PLN”, „Koszty”, „Cena PLN + koszty” i „Prowizja + PCC” to wartości z arkusza, nie przeliczenia aplikacji; sumy dotyczą całego wyniku filtrów.</p>
+      <p className="text-[11px] text-inksoft mt-2 max-w-3xl">Dane z arkusza Towar.numbers i dopisane formularzem „Dodaj towar” (bez edycji istniejących wierszy; usuwa tylko Admin). Kwoty „Cena PLN”, „Koszty”, „Cena PLN + koszty” i „Prowizja + PCC” to wartości z arkusza, nie przeliczenia aplikacji; sumy dotyczą całego wyniku filtrów.</p>
 
       {openSerial && <ProductCardDrawer serial={openSerial} members={members} onClose={() => setOpenSerial(null)} />}
     </div>

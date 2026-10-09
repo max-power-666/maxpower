@@ -42,3 +42,29 @@ create index if not exists goods_register_serial_idx on goods_register (lower(bt
 alter table goods_register enable row level security;
 drop policy if exists "admin manager read goods_register" on goods_register;
 create policy "admin manager read goods_register" on goods_register for select using (goods_can_read());
+
+-- ===== Formularz "Dodaj towar" (10.10.2026) =====
+-- Dodawać może każdy, kto czyta towar (Admin i Manager); usuwać (np. pomyłkę we wpisie) tylko Admin — usunięcie zapisuje audit_delete() w deleted_records.
+-- Edycji istniejących wierszy nie ma. row_no i autora (created_by_email) uzupełnia trigger, więc nie da się ich podrobić z przeglądarki.
+alter table goods_register add column if not exists created_by_email text;     -- puste = wiersz z arkusza; wypełnione = dodany w aplikacji
+
+create or replace function goods_register_before_insert() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  new.row_no := coalesce((select max(row_no) from goods_register where kind = new.kind), 0) + 1;
+  new.created_by_email := coalesce(auth.jwt() ->> 'email', new.created_by_email);
+  return new;
+end;
+$$;
+drop trigger if exists goods_register_before_insert on goods_register;
+create trigger goods_register_before_insert before insert on goods_register
+  for each row execute function goods_register_before_insert();
+
+drop policy if exists "admin manager insert goods_register" on goods_register;
+create policy "admin manager insert goods_register" on goods_register for insert with check (goods_can_read());
+drop policy if exists "admin delete goods_register" on goods_register;
+create policy "admin delete goods_register" on goods_register for delete using (is_admin());
+
+drop trigger if exists goods_register_audit_delete on goods_register;
+create trigger goods_register_audit_delete before delete on goods_register
+  for each row execute function audit_delete();
