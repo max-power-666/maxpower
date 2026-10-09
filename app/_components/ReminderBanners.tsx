@@ -27,7 +27,7 @@ export default function ReminderBanners({ session, role, onOpen }: { session: Se
     const [rem, leave, backlog, reqs] = await Promise.all([
       !isAdmin ? Promise.resolve(none) : supabase.from("reminders").select("id, message, due_date, recurrence, anchor_day, done_count, lead_days").is("done_at", null).lte("due_date", warsawYmd(horizon.getTime())).order("due_date").limit(200),
       !isAdmin ? Promise.resolve(none) : supabase.from("rcp_absences").select("id", { count: "exact", head: true }).eq("status", "oczekuje"),
-      isAdmin && email ? supabase.from("backlog_items").select("id, priority").ilike("assignee_email", email.replace(/[\\%_]/g, "\\$&")).in("status", ["todo", "in_progress", "review"]).limit(500) : Promise.resolve({ data: [], error: null }),
+      !isAdmin ? Promise.resolve(none) : supabase.from("backlog_items").select("id", { count: "exact", head: true }).neq("status", "done"),
       !isService ? Promise.resolve(none) : supabase.from("service_requests").select("id", { count: "exact", head: true }).eq("status", "nowe"),
     ]);
     let remRows = rem.error ? [] : ((rem.data as Active[]) || []);
@@ -40,15 +40,12 @@ export default function ReminderBanners({ session, role, onOpen }: { session: Se
     const list: Auto[] = [];
     const leaveN = leave.error ? 0 : leave.count ?? 0;
     if (leaveN > 0) list.push({ key: "leave", icon: "🏖", text: `Wnioski urlopowe do rozpatrzenia: ${leaveN}`, view: "rcp", sub: { storage: "rcp-sub", value: "requests" } });
-    const bl = (backlog.error ? [] : (backlog.data as { id: number; priority: string }[])) || [];
-    if (bl.length > 0) {
-      const p1 = bl.filter((b) => b.priority === "p1").length;
-      list.push({ key: "backlog", icon: "📋", text: `Zadania w Backlogu przypisane do Ciebie: ${bl.length}${p1 > 0 ? ` (w tym pilne P1: ${p1})` : ""}`, view: "backlog" });
-    }
+    const blN = backlog.error ? 0 : backlog.count ?? 0; // Backlog to teraz lista wiadomości (10.10.2026) — liczymy wszystkie niezrobione
+    if (blN > 0) list.push({ key: "backlog", icon: "📋", text: `Wiadomości w Backlogu do zrobienia: ${blN}`, view: "backlog" });
     const reqN = reqs.error ? 0 : reqs.count ?? 0;
     if (reqN > 0) list.push({ key: "requests", icon: "🔧", text: `Nowe zapotrzebowania dla serwisu: ${reqN}`, view: "sales", sub: { storage: "sales-sub", value: "requests" } });
     setAuto(list);
-  }, [email, isAdmin, isService]);
+  }, [isAdmin, isService]);
 
   useEffect(() => {
     load();

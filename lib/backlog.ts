@@ -109,3 +109,25 @@ export function validateAttachments(files: { name: string; size: number; type: s
   }
   return problems;
 }
+
+/* ---------------- uproszczony Backlog: wiadomości (10.10.2026) ---------------- */
+
+const TITLE_MAX = 150;
+
+// Wiadomość -> pola tabeli: title = pierwsza linia (do 150 znaków), description = pełna treść, gdy jest dłuższa niż tytuł (kilka linii albo ucięta); w przeciwnym razie pusta.
+export function messageToFields(message: string): { title: string; description: string } {
+  const text = message.trim();
+  const firstLine = text.split(/\r?\n/)[0].trim();
+  const title = firstLine.length > TITLE_MAX ? firstLine.slice(0, TITLE_MAX - 1).trimEnd() + "…" : firstLine;
+  return { title, description: text === title ? "" : text };
+}
+
+// Treść do wyświetlenia: nowe wiadomości (opis zaczyna się od tytułu albo go nie ma) -> sama treść bez nagłówka; stare zadania z osobnym tytułem i opisem -> tytuł (pogrubiony) + opis.
+export function backlogMessage(item: { title: string; description: string }): { head: string; body: string } {
+  const title = item.title ?? "";
+  const description = item.description ?? "";
+  if (!description) return { head: "", body: title };
+  const stem = title.replace(/…$/, "");
+  if (description.startsWith(stem)) return { head: "", body: description };
+  return { head: title, body: description };
+}
