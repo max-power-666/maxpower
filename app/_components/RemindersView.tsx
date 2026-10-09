@@ -37,7 +37,7 @@ export default function RemindersView({ session }: { session: Session }) {
 
   const load = useCallback(async () => {
     const { data, error: err } = await supabase.from("reminders").select(COLS).order("due_date").order("id").limit(500);
-    if (err) setError(err.code === "42P01" ? "Brak tabeli przypomnień — uruchom supabase/reminders.sql w Supabase." : `Nie udało się wczytać przypomnień: ${err.message}`);
+    if (err) setError(err.code === "42P01" || err.code === "PGRST205" ? "Brak tabeli przypomnień — uruchom supabase/reminders.sql w Supabase." : `Nie udało się wczytać przypomnień: ${err.message}`);
     else {
       setError("");
       setRows((data as Reminder[]) || []);
