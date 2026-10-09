@@ -11,10 +11,12 @@ export default function PadSerialsCell({
   count,
   values,
   onSave,
+  readOnly = false,
 }: {
   count: number | null;
   values: string[] | null;
   onSave: (index: number, value: string | null) => void;
+  readOnly?: boolean; // tylko podgląd (np. serwis w Zamówieniach)
 }) {
   const n = Math.min(count ?? 0, MAX_PADS);
   if (n <= 0) return <span className="text-inksoft px-2">—</span>;
@@ -34,6 +36,7 @@ export default function PadSerialsCell({
           placeholder={`Pad ${i + 1}`}
           className="w-48 font-mono"
           onSave={(v) => onSave(i, v)}
+          readOnly={readOnly}
         />
       ))}
     </div>

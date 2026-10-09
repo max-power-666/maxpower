@@ -10,6 +10,8 @@ import type { ShipPrefill } from "@/lib/shipping";
 import InlineEditCell from "./InlineEditCell";
 import SalesOrderCard, { itemFieldLabel, updateSalesItem, type SalesHistoryEntry, type SalesItem } from "./SalesOrderCard";
 import PadSerialsCell, { MAX_PADS } from "./PadSerialsCell";
+import ServiceRequestsView from "./ServiceRequestsView";
+import { SERVICE_STAFF_ROLES } from "@/lib/serviceRequests";
 
 // Zakładka Zamówienia: sprzedaż z marketplace'ów — wspólna lista ze wszystkich kanałów (tabela sales_orders).
 // Dane wypełnia serwer (app/api/orders/*-sync, cron co 15 min); przycisk "Odśwież" uruchamia synchronizację od razu.
@@ -84,13 +86,18 @@ export default function SalesOrdersHub({
   isAdmin,
   canShip,
   onShip,
+  readOnly,
+  role,
 }: {
   session: Session;
   members: MemberLite[];
   isAdmin: boolean;
+  readOnly: boolean; // serwisanci (i inne role spoza Admin/Manager/Zamówienia) tylko oglądają zamówienia — bez edycji, akceptacji, nadawania i synchronizacji
+  role: string;
   canShip: boolean; // wyliczane z ROLE_ACCESS[role] w app/page.tsx (rola ma dostęp do Wysyłki)
   onShip: (prefill: ShipPrefill) => void;
 }) {
+  const [sub, setSub] = useState<"orders" | "requests">("orders"); // pigułki: Zamówienia / Zapotrzebowanie (08.10.2026)
   const [reloadKey, setReloadKey] = useState(0);
   const [lastSynced, setLastSynced] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -194,12 +201,23 @@ export default function SalesOrdersHub({
     setSyncing(false);
   }
 
+  const pillBtn = (active: boolean) => `px-3 py-1.5 rounded-full text-sm font-semibold border ${active ? "bg-ink text-paper border-ink" : "bg-white border-line"}`;
   return (
     <div>
+      <div className="flex gap-2 mb-4">
+        <button onClick={() => setSub("orders")} className={pillBtn(sub === "orders")}>Zamówienia</button>
+        <button onClick={() => setSub("requests")} className={pillBtn(sub === "requests")}>Zapotrzebowanie</button>
+      </div>
+      {sub === "requests" ? (
+        <ServiceRequestsView session={session} members={members} canHandle={SERVICE_STAFF_ROLES.includes(role)} />
+      ) : (
+      <>
       <div className="flex items-center justify-end gap-3 mb-4">
-        <button onClick={syncNow} disabled={syncing} className="bg-white border border-line px-4 py-2 rounded text-sm font-semibold disabled:opacity-50">
-          {syncing ? "Synchronizowanie…" : "Odśwież"}
-        </button>
+        {!readOnly && (
+          <button onClick={syncNow} disabled={syncing} className="bg-white border border-line px-4 py-2 rounded text-sm font-semibold disabled:opacity-50">
+            {syncing ? "Synchronizowanie…" : "Odśwież"}
+          </button>
+        )}
         <span className="text-xs text-inksoft lowercase">
           {lastSynced ? `ostatnia synchronizacja: ${fmtDateTime(lastSynced)}` : "brak jeszcze synchronizacji"}
         </span>
@@ -226,7 +244,7 @@ export default function SalesOrdersHub({
 
       <DaySummary reloadKey={reloadKey} />
 
-      <OrdersList reloadKey={reloadKey} session={session} onOpen={(marketplace, externalId) => setOpenOrder({ marketplace, externalId })} />
+      <OrdersList reloadKey={reloadKey} session={session} readOnly={readOnly} onOpen={(marketplace, externalId) => setOpenOrder({ marketplace, externalId })} />
 
       {openOrder && (
         <SalesOrderCard
@@ -235,8 +253,11 @@ export default function SalesOrdersHub({
           session={session}
           members={members}
           onClose={() => setOpenOrder(null)}
-          onShip={canShip ? onShip : undefined}
+          onShip={canShip && !readOnly ? onShip : undefined}
+          readOnly={readOnly}
         />
+      )}
+      </>
       )}
     </div>
   );
@@ -387,10 +408,12 @@ function OrdersList({
   reloadKey,
   session,
   onOpen,
+  readOnly,
 }: {
   reloadKey: number;
   session: Session;
   onOpen: (marketplace: string, externalId: string) => void;
+  readOnly: boolean;
 }) {
   const [rows, setRows] = useState<SalesRow[]>([]);
   const [total, setTotal] = useState<number | null>(null);
@@ -672,13 +695,13 @@ function OrdersList({
                       <td className="p-3 text-right font-mono">1</td>
                       <td className="p-3 text-right font-mono whitespace-nowrap">{fmtPrice(it.price, it.currency)}</td>
                       <td className="p-3">
-                        <InlineEditCell value={it.serial_number} placeholder="Dodaj numer" className="w-44 font-mono" onSave={(v) => saveSerial(r, it, v)} />
+                        <InlineEditCell value={it.serial_number} placeholder="Dodaj numer" className="w-44 font-mono" onSave={(v) => saveSerial(r, it, v)} readOnly={readOnly} />
                       </td>
                       <td className="p-3">
-                        <InlineEditCell value={it.pads === null ? null : String(it.pads)} placeholder="np. 2" className="w-16 font-mono" onSave={(v) => savePads(r, it, v)} />
+                        <InlineEditCell value={it.pads === null ? null : String(it.pads)} placeholder="np. 2" className="w-16 font-mono" onSave={(v) => savePads(r, it, v)} readOnly={readOnly} />
                       </td>
                       <td className="p-3">
-                        <PadSerialsCell count={it.pads} values={it.pad_serials} onSave={(i, v) => savePadSerial(r, it, i, v)} />
+                        <PadSerialsCell count={it.pads} values={it.pad_serials} onSave={(i, v) => savePadSerial(r, it, i, v)} readOnly={readOnly} />
                       </td>
                     </>
                   ) : (

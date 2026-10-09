@@ -4,9 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
-import { ACTIVE_REQUEST_STATUSES, REQUEST_STATUSES, REQUEST_STATUS_LABEL, requestCode, type RequestStatus } from "@/lib/serviceRequests";
+import { ACTIVE_REQUEST_STATUSES, REQUEST_PRIORITIES, REQUEST_PRIORITY_LABEL, REQUEST_PRIORITY_RANK, REQUEST_STATUSES, REQUEST_STATUS_LABEL, requestCode, type RequestPriority, type RequestStatus } from "@/lib/serviceRequests";
 
-// Serwis -> Zapotrzebowanie (08.10.2026): pracownicy zlecają dodatkowe zadania dla serwisu (treść + automatycznie autor, data i numer ZAP-n), serwisant przyjmuje zlecenie i ustawia status.
+// Zamówienia -> Zapotrzebowanie (08.10.2026): pracownicy zlecają zadania dla serwisu (dowolna treść albo numer zamówienia + priorytet; autor, data i numer ZAP-n automatycznie), serwisant przyjmuje zlecenie i ustawia status.
 // Kto może zmieniać status, pilnuje baza (trigger service_requests_guard); tu przyciski i lista statusu pokazują się tylko serwisantom (canHandle).
 
 type Req = {
@@ -15,18 +15,24 @@ type Req = {
   created_by_email: string | null;
   created_at: string;
   status: RequestStatus;
+  priority: RequestPriority;
   accepted_by_email: string | null;
   accepted_at: string | null;
   status_changed_by_email: string | null;
   status_changed_at: string | null;
 };
-const COLS = "id, message, created_by_email, created_at, status, accepted_by_email, accepted_at, status_changed_by_email, status_changed_at";
+const COLS = "id, message, created_by_email, created_at, status, priority, accepted_by_email, accepted_at, status_changed_by_email, status_changed_at";
 const STATUS_STYLE: Record<RequestStatus, string> = {
   nowe: "bg-ambersoft text-amber",
   przyjete: "bg-[#e3ecf9] text-[#2a6bb5]",
   w_realizacji: "bg-[#efe6f8] text-[#7a3fb0]",
   zrobione: "bg-tealsoft text-teal",
   odrzucone: "bg-rustsoft text-rust",
+};
+const PRIORITY_STYLE: Record<RequestPriority, string> = {
+  wysoki: "bg-rustsoft text-rust",
+  sredni: "bg-ambersoft text-amber",
+  niski: "bg-paper text-inksoft border border-line",
 };
 const pill = (active: boolean) => `px-3 py-1.5 rounded-full text-sm font-semibold border ${active ? "bg-ink text-paper border-ink" : "bg-white border-line"}`;
 const fmtDT = (iso: string) => new Date(iso).toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -36,6 +42,7 @@ export default function ServiceRequestsView({ session, members, canHandle }: { s
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [priority, setPriority] = useState<RequestPriority>("sredni");
   const [saving, setSaving] = useState(false);
   const [filter, setFilter] = useState<"active" | "all" | RequestStatus>("active");
   const [searchInput, setSearchInput] = useState("");
@@ -71,10 +78,11 @@ export default function ServiceRequestsView({ session, members, canHandle }: { s
     if (!text) return;
     setSaving(true);
     setError("");
-    const { error: err } = await supabase.from("service_requests").insert({ message: text });
+    const { error: err } = await supabase.from("service_requests").insert({ message: text, priority });
     setSaving(false);
     if (err) return setError(err.code === "42P01" ? "Brak tabeli zleceń — uruchom supabase/service-requests.sql w Supabase." : `Nie udało się dodać zadania: ${err.message}`);
     setMessage("");
+    setPriority("sredni");
     load();
   }
 
@@ -90,11 +98,14 @@ export default function ServiceRequestsView({ session, members, canHandle }: { s
   const search = searchInput.trim().toLowerCase();
   const visible = useMemo(
     () =>
-      rows.filter((r) => {
+      rows
+        .filter((r) => {
         if (filter === "active" ? !ACTIVE_REQUEST_STATUSES.includes(r.status) : filter !== "all" && r.status !== filter) return false;
         if (!search) return true;
         return r.message.toLowerCase().includes(search) || requestCode(r.id).toLowerCase().includes(search) || name(r.created_by_email).toLowerCase().includes(search);
-      }),
+        })
+        // aktywne: najpierw wysoki priorytet, potem najnowsze; pozostałe widoki po numerze malejąco
+        .sort((a, b) => (filter === "active" ? REQUEST_PRIORITY_RANK[a.priority] - REQUEST_PRIORITY_RANK[b.priority] || b.id - a.id : b.id - a.id)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [rows, filter, search, members]
   );
@@ -104,17 +115,23 @@ export default function ServiceRequestsView({ session, members, canHandle }: { s
   return (
     <div>
       <div className="border border-line bg-white p-4 mb-5">
-        <div className="text-xs font-semibold text-inksoft mb-2">NOWE ZADANIE DLA SERWISU</div>
+        <div className="text-xs font-semibold text-inksoft mb-2">NOWE ZAPOTRZEBOWANIE DLA SERWISU</div>
         <textarea
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           maxLength={2000}
-          rows={3}
-          placeholder="Opisz, co serwis ma zrobić (np. numer seryjny, czego dotyczy, na kiedy)…"
+          rows={2}
+          placeholder="Wpisz, czego potrzeba — np. „pad ps4 red” albo numer zamówienia"
           className="w-full border border-line bg-white px-3 py-2 rounded text-sm"
         />
-        <div className="flex items-center justify-between mt-2">
-          <span className="text-[11px] text-inksoft">Numer zlecenia, datę i Twoje imię dodajemy automatycznie. {message.length}/2000</span>
+        <div className="flex flex-wrap items-center justify-between gap-3 mt-2">
+          <label className="flex items-center gap-2 text-xs font-semibold text-inksoft">
+            Priorytet
+            <select value={priority} onChange={(e) => setPriority(e.target.value as RequestPriority)} className="border border-line bg-white px-2 py-1.5 rounded text-sm font-normal text-ink">
+              {REQUEST_PRIORITIES.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
+            </select>
+          </label>
+          <span className="text-[11px] text-inksoft flex-1 min-w-48">Numer zlecenia, datę i Twoje imię dodajemy automatycznie.</span>
           <button onClick={add} disabled={saving || !message.trim()} className="bg-ink text-paper px-4 py-2 rounded text-sm font-semibold disabled:opacity-50">{saving ? "Dodawanie…" : "Dodaj zadanie"}</button>
         </div>
       </div>
@@ -137,19 +154,21 @@ export default function ServiceRequestsView({ session, members, canHandle }: { s
               <th className="p-3">ID</th>
               <th className="p-3">Data</th>
               <th className="p-3">Zlecił(a)</th>
-              <th className="p-3">Zadanie</th>
+              <th className="p-3">Priorytet</th>
+              <th className="p-3">Zapotrzebowanie</th>
               <th className="p-3">Status</th>
               <th className="p-3">Przyjął(ęła)</th>
               {canHandle && <th className="p-3"></th>}
             </tr>
           </thead>
           <tbody>
-            {!loading && visible.length === 0 && !error && <tr><td colSpan={canHandle ? 7 : 6} className="p-6 text-center text-inksoft text-sm">{rows.length === 0 ? "Brak zleceń — dodaj pierwsze powyżej." : "Brak zleceń w tym widoku."}</td></tr>}
+            {!loading && visible.length === 0 && !error && <tr><td colSpan={canHandle ? 8 : 7} className="p-6 text-center text-inksoft text-sm">{rows.length === 0 ? "Brak zleceń — dodaj pierwsze powyżej." : "Brak zleceń w tym widoku."}</td></tr>}
             {visible.map((r) => (
               <tr key={r.id} className="border-b border-line last:border-b-0 align-top">
                 <td className="p-3 font-mono text-xs font-semibold whitespace-nowrap">{requestCode(r.id)}</td>
                 <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDT(r.created_at)}</td>
                 <td className="p-3 font-semibold whitespace-nowrap">{name(r.created_by_email)}</td>
+                <td className="p-3 whitespace-nowrap"><span className={`text-xs font-semibold px-2 py-1 rounded ${PRIORITY_STYLE[r.priority]}`}>{REQUEST_PRIORITY_LABEL[r.priority]}</span></td>
                 <td className="p-3 whitespace-pre-wrap break-words max-w-xl">{r.message}</td>
                 <td className="p-3 whitespace-nowrap">
                   {canHandle ? (
@@ -172,7 +191,7 @@ export default function ServiceRequestsView({ session, members, canHandle }: { s
           </tbody>
         </table>
       </div>
-      <p className="text-[11px] text-inksoft mt-3 max-w-3xl">Zlecenia dodaje każdy; przyjmuje je i zmienia status serwisant (Serwis, Kierownik serwisu, Manager, Admin). „Przyjęte” zapisuje, kto i kiedy zajął się zleceniem.</p>
+      <p className="text-[11px] text-inksoft mt-3 max-w-3xl">Zapotrzebowania dodaje każdy; przyjmuje je i zmienia status serwisant (Serwis, Kierownik serwisu, Manager, Admin). „Przyjęte” zapisuje, kto i kiedy zajął się zleceniem.</p>
     </div>
   );
 }

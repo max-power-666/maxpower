@@ -337,6 +337,7 @@ export default function SalesOrderCard({
   members,
   onClose,
   onShip,
+  readOnly = false,
 }: {
   marketplace: string;
   externalId: string;
@@ -344,6 +345,7 @@ export default function SalesOrderCard({
   members: MemberLite[];
   onClose: () => void;
   onShip?: (prefill: ShipPrefill) => void; // tylko role z dostępem do Wysyłki (patrz canShip w app/page.tsx)
+  readOnly?: boolean; // podgląd bez żadnych akcji: ukryte Edytuj, akceptacja, odświeżanie z Erli, koszt wysyłki do edycji (serwisanci w Zamówieniach)
 }) {
   const [worker, setWorker] = useState<WorkerData | null>(null);
   const [items, setItems] = useState<SalesItem[]>([]);
@@ -633,12 +635,12 @@ export default function SalesOrderCard({
               <span className="inline-block text-xs font-semibold px-2 py-1 rounded-full bg-tealsoft text-teal">
                 {salesStatusLabel(marketplace, worker.status)}
               </span>
-              {marketplace === "octopia" && oc?.status === "WaitingAcceptance" && (
+              {!readOnly && marketplace === "octopia" && oc?.status === "WaitingAcceptance" && (
                 <button onClick={acceptOrder} disabled={accepting} className="text-xs font-semibold text-teal hover:underline disabled:opacity-50">
                   {accepting ? "Akceptowanie…" : "Zaakceptuj zamówienie →"}
                 </button>
               )}
-              {marketplace === "backmarket" && bm?.state === 1 && (
+              {!readOnly && marketplace === "backmarket" && bm?.state === 1 && (
                 <button onClick={acceptOrder} disabled={accepting} className="text-xs font-semibold text-teal hover:underline disabled:opacity-50">
                   {accepting ? "Akceptowanie…" : "Zaakceptuj zamówienie →"}
                 </button>
@@ -668,7 +670,7 @@ export default function SalesOrderCard({
                   Otwórz listę zamówień w Octopia ↗
                 </a>
               )}
-              {marketplace === "erli" && (
+              {!readOnly && marketplace === "erli" && (
                 <button onClick={refreshErliOrder} disabled={refreshingErli} className="text-xs font-semibold text-teal hover:underline disabled:opacity-50">
                   {refreshingErli ? "Odświeżanie…" : "Odśwież status z Erli ↻"}
                 </button>
@@ -683,12 +685,14 @@ export default function SalesOrderCard({
 
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-xs font-semibold text-inksoft">DANE WPROWADZONE PRZEZ PRACOWNIKA</h3>
-              {!editing && items.length > 0 && <button onClick={startEdit} className="text-xs font-semibold text-teal hover:underline">Edytuj</button>}
+              {!readOnly && !editing && items.length > 0 && <button onClick={startEdit} className="text-xs font-semibold text-teal hover:underline">Edytuj</button>}
             </div>
             {isForeign && (
               <div className="border border-line bg-white mb-3">
                 {autoShippingCharge ? (
                   <Row label="Koszt wysyłki (z DHL)" value={fmtMoney(autoShippingCharge.price, autoShippingCharge.priceCurrency)} mono />
+                ) : readOnly ? (
+                  <Row label="Koszt wysyłki" value={worker?.shipping_cost != null ? fmtMoney(worker.shipping_cost, "PLN") : null} mono />
                 ) : (
                   <div className="flex items-center justify-between gap-4 px-3 py-2 text-sm">
                     <span className="text-inksoft">Koszt wysyłki</span>

@@ -89,9 +89,10 @@ const ROLE_ACCESS: Record<string, ViewKey[]> = {
   Manager: ["overview", "inventory", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "margin", "points", "nbp", "rcp", "returns", "shop_products", "shop_stock"], // wszystko (poza AI); Zespół tylko do odczytu, usuwa tylko Admin
   Magazyn: ["inventory", "backlog", "rcp", "returns"],
   Zamówienia: ["sales", "shipping", "invoices", "backlog", "rcp", "returns"],
-  Serwis: ["service", "backlog", "rcp", "returns"],
+  // Serwis i Kierownik serwisu (08.10.2026): dodatkowo "sales" — wgląd w Zamówienia BEZ edycji (readOnly) i Zapotrzebowanie, które serwis przyjmuje.
+  Serwis: ["service", "sales", "backlog", "rcp", "returns"],
   // Kierownik serwisu (05.10.2026): te same zakładki co Serwis; w samym Serwisie widzi naprawy wszystkich i może edytować wiersz w KAŻDYM statusie (patrz ServiceView).
-  "Kierownik serwisu": ["service", "backlog", "rcp", "returns"],
+  "Kierownik serwisu": ["service", "sales", "backlog", "rcp", "returns"],
   Testy: ["tests", "backlog", "rcp", "returns"],
   Bidder: ["tradein", "backlog", "rcp", "returns"],
   "Trade-in": ["orders", "backlog", "rcp", "returns"],
@@ -640,6 +641,8 @@ export default function Home() {
               session={session}
               members={members}
               isAdmin={role === "Admin"}
+              readOnly={!["Admin", "Manager", "Zamówienia"].includes(role ?? "")}
+              role={role ?? ""}
               canShip={effectiveAccess(role ?? "", viewAccess, []).includes("shipping")}
               onShip={(p) => {
                 setShipPrefill(p);
@@ -660,7 +663,7 @@ export default function Home() {
             />
           )}
 
-          {view === "service" && <ServiceHub session={session} members={members} isAdmin={role === "Admin"} isAdminOrManager={role === "Admin" || role === "Manager"} isServiceLead={role === "Kierownik serwisu"} role={role ?? ""} />}
+          {view === "service" && <ServiceHub session={session} members={members} isAdmin={role === "Admin"} isAdminOrManager={role === "Admin" || role === "Manager"} isServiceLead={role === "Kierownik serwisu"} />}
 
           {view === "tests" && <TestsView session={session} members={members} isAdmin={role === "Admin"} isAdminOrManager={role === "Admin" || role === "Manager"} />}
 

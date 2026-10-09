@@ -1,4 +1,4 @@
--- Magazyn ERP — Serwis -> Zapotrzebowanie (08.10.2026): zlecenia dodatkowych zadań dla serwisu.
+-- Magazyn ERP — Zamówienia -> Zapotrzebowanie (08.10.2026; początkowo w Serwisie): zlecenia dla serwisu — dowolna treść (np. "pad ps4 red" albo numer zamówienia) i priorytet.
 -- Uruchom w Supabase: Dashboard -> SQL Editor -> New query -> wklej CAŁY plik -> Run. Można uruchomić ponownie. Wymaga wcześniejszego schema.sql (members, is_admin, audit_delete); funkcję is_service_lead() zakłada sam.
 --
 -- Dowolny zalogowany dodaje zlecenie (treść + automatycznie autor i data, status "nowe"); status zlecenia zmieniają WYŁĄCZNIE serwisanci (Admin, Manager, Serwis, Kierownik serwisu) — pilnuje tego
@@ -18,6 +18,8 @@ create table if not exists service_requests (
   status_changed_at timestamptz,
   history jsonb not null default '[]'::jsonb    -- [{at, by_email, action: created|status, from, to}]
 );
+-- Priorytet (08.10.2026): wysoki / sredni / niski — wybierany przy dodawaniu zlecenia. Dodany osobno, żeby plik działał też na tabeli założonej wcześniej bez tej kolumny.
+alter table service_requests add column if not exists priority text not null default 'sredni' check (priority in ('wysoki', 'sredni', 'niski'));
 create index if not exists service_requests_status_idx on service_requests (status, created_at desc);
 
 -- is_service_lead() zdefiniowane też w service.sql — tu powtórzone (create or replace, ta sama treść), żeby ten plik działał nawet bez ponownego uruchomienia service.sql.
