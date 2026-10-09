@@ -21,6 +21,7 @@ import OverviewMarginChart from "./_components/OverviewMarginChart";
 import RcpView from "./_components/RcpView";
 import RcpWidget from "./_components/RcpWidget";
 import RemindersView from "./_components/RemindersView";
+import GoodsView from "./_components/GoodsView";
 import ReminderBanners from "./_components/ReminderBanners";
 import { tracksWorkTime } from "@/lib/rcp";
 import ReturnsView from "./_components/ReturnsView";
@@ -37,7 +38,7 @@ import { displayNameForEmail } from "@/lib/displayName";
 const ROLES = ["Admin", "Manager", "Magazyn", "Zamówienia", "Serwis", "Kierownik serwisu", "Testy", "Bidder", "Trade-in", "Kierownik trade-in", "Sklep"];
 
 type ViewKey =
-  | "overview" | "inventory" | "sales" | "team" | "service" | "tests" | "tradein" | "orders" | "backlog" | "shipping" | "invoices" | "margin" | "points" | "nbp" | "ai" | "rcp" | "returns" | "reminders"
+  | "overview" | "inventory" | "sales" | "team" | "service" | "tests" | "tradein" | "orders" | "backlog" | "shipping" | "invoices" | "margin" | "points" | "nbp" | "ai" | "rcp" | "returns" | "reminders" | "goods"
   // Recoo Sklep (backoffice sklepu, przełącznik w pasku bocznym):
   | "shop_products" | "shop_stock";
 
@@ -50,6 +51,7 @@ const SPACE_NAMES: Record<Space, string> = { erp: "Recoo ERP", shop: "Recoo Skle
 const TABS: { key: ViewKey; label: string; space?: Space }[] = [
   { key: "overview", label: "Przegląd" },
   { key: "inventory", label: "Magazyn" },
+  { key: "goods", label: "Towar" }, // rejestr zakupionego towaru z arkusza (VM/V23 i Trade-in), Admin i Manager (10.10.2026)
   { key: "sales", label: "Zamówienia" },
   { key: "team", label: "Zespół" },
   { key: "service", label: "Serwis" },
@@ -75,7 +77,7 @@ const TABS: { key: ViewKey; label: string; space?: Space }[] = [
 const NAV_GROUPS: { title: string | null; keys: ViewKey[] }[] = [
   { title: null, keys: ["overview"] },
   { title: "Sprzedaż", keys: ["sales", "shipping", "returns"] },
-  { title: "Magazyn i serwis", keys: ["inventory", "service", "tests"] },
+  { title: "Magazyn i serwis", keys: ["inventory", "goods", "service", "tests"] },
   { title: "Skup", keys: ["orders", "tradein"] },
   { title: "Finanse", keys: ["invoices", "margin", "nbp"] },
   { title: "Zespół", keys: ["rcp", "points", "team"] },
@@ -119,8 +121,8 @@ function navSections(space: Space, visible: ViewKey[]): { title: string | null; 
 // twardo zablokowane, tylko inny domyślny zestaw wg roli, jak każda inna zakładka.
 const ROLE_ACCESS: Record<string, ViewKey[]> = {
   // "ai" (asystent AI, 03.10.2026) — na tym etapie TYLKO Admin (także serwer: app/api/ai/ask); Manager go nie ma.
-  Admin: ["overview", "inventory", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "margin", "points", "nbp", "ai", "rcp", "returns", "reminders", "shop_products", "shop_stock"],
-  Manager: ["overview", "inventory", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "margin", "points", "nbp", "rcp", "returns", "shop_products", "shop_stock"], // wszystko (poza AI); Zespół tylko do odczytu, usuwa tylko Admin
+  Admin: ["overview", "inventory", "goods", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "margin", "points", "nbp", "ai", "rcp", "returns", "reminders", "shop_products", "shop_stock"],
+  Manager: ["overview", "inventory", "goods", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "margin", "points", "nbp", "rcp", "returns", "shop_products", "shop_stock"], // wszystko (poza AI); Zespół tylko do odczytu, usuwa tylko Admin
   Magazyn: ["inventory", "backlog", "rcp", "returns"],
   Zamówienia: ["sales", "shipping", "invoices", "backlog", "rcp", "returns"],
   // Serwis i Kierownik serwisu (08.10.2026): dodatkowo "sales" — wgląd w Zamówienia BEZ edycji (readOnly) i Zapotrzebowanie, które serwis przyjmuje.
@@ -749,6 +751,7 @@ export default function Home() {
           {view === "invoices" && <InvoicesView session={session} members={members} />}
 
           {view === "margin" && <MarginView session={session} members={members} />}
+          {view === "goods" && <GoodsView members={members} />}
           {view === "points" && <PointsView session={session} members={members} />}
 
           {view === "nbp" && <NbpView session={session} />}
