@@ -97,7 +97,18 @@ export default function SalesOrdersHub({
   canShip: boolean; // wyliczane z ROLE_ACCESS[role] w app/page.tsx (rola ma dostęp do Wysyłki)
   onShip: (prefill: ShipPrefill) => void;
 }) {
-  const [sub, setSub] = useState<"orders" | "requests">("orders"); // pigułki: Zamówienia / Zapotrzebowanie (08.10.2026)
+  const [sub, setSub] = useState<"orders" | "requests">(() => {
+    // baner "Nowe zapotrzebowania dla serwisu" (ReminderBanners) otwiera Zamówienia od razu na Zapotrzebowaniu
+    try {
+      if (sessionStorage.getItem("sales-sub") === "requests") {
+        sessionStorage.removeItem("sales-sub");
+        return "requests";
+      }
+    } catch {
+      /* brak sessionStorage */
+    }
+    return "orders";
+  }); // pigułki: Zamówienia / Zapotrzebowanie (08.10.2026)
   const [reloadKey, setReloadKey] = useState(0);
   const [lastSynced, setLastSynced] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);

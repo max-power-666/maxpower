@@ -56,7 +56,18 @@ async function fetchSegments(month: string, userId?: string): Promise<RcpSegment
 export default function RcpView({ session, role, members }: { session: Session; role: string; members: MemberLite[] }) {
   const isManager = role === "Admin" || role === "Manager";
   const isAdmin = role === "Admin";
-  const [sub, setSub] = useState<Sub>(isManager ? "now" : "mine");
+  const [sub, setSub] = useState<Sub>(() => {
+    // baner "Wnioski urlopowe do rozpatrzenia" (ReminderBanners) otwiera RCP od razu na Wnioskach
+    try {
+      if (isManager && sessionStorage.getItem("rcp-sub") === "requests") {
+        sessionStorage.removeItem("rcp-sub");
+        return "requests";
+      }
+    } catch {
+      /* brak sessionStorage */
+    }
+    return isManager ? "now" : "mine";
+  });
   const pending = usePendingCount(isManager);
   return (
     <div>

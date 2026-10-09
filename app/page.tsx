@@ -20,6 +20,8 @@ import OverviewSalesDashboard from "./_components/OverviewSalesDashboard";
 import OverviewMarginChart from "./_components/OverviewMarginChart";
 import RcpView from "./_components/RcpView";
 import RcpWidget from "./_components/RcpWidget";
+import RemindersView from "./_components/RemindersView";
+import ReminderBanners from "./_components/ReminderBanners";
 import { tracksWorkTime } from "@/lib/rcp";
 import ReturnsView from "./_components/ReturnsView";
 import ShopProductsView from "./_components/ShopProductsView";
@@ -35,7 +37,7 @@ import { displayNameForEmail } from "@/lib/displayName";
 const ROLES = ["Admin", "Manager", "Magazyn", "Zamówienia", "Serwis", "Kierownik serwisu", "Testy", "Bidder", "Trade-in", "Kierownik trade-in", "Sklep"];
 
 type ViewKey =
-  | "overview" | "inventory" | "sales" | "team" | "service" | "tests" | "tradein" | "orders" | "backlog" | "shipping" | "invoices" | "margin" | "points" | "nbp" | "ai" | "rcp" | "returns"
+  | "overview" | "inventory" | "sales" | "team" | "service" | "tests" | "tradein" | "orders" | "backlog" | "shipping" | "invoices" | "margin" | "points" | "nbp" | "ai" | "rcp" | "returns" | "reminders"
   // Recoo Sklep (backoffice sklepu, przełącznik w pasku bocznym):
   | "shop_products" | "shop_stock";
 
@@ -55,6 +57,7 @@ const TABS: { key: ViewKey; label: string; space?: Space }[] = [
   { key: "tradein", label: "Bidder" },
   { key: "orders", label: "Trade-in" },
   { key: "backlog", label: "Backlog" },
+  { key: "reminders", label: "Przypomnienia" }, // ważne komunikaty i zadania cykliczne + baner na górze strony; na razie tylko Admin (09.10.2026)
   { key: "shipping", label: "Wysyłka" },
   { key: "invoices", label: "Faktury" },
   { key: "margin", label: "Marża" },
@@ -85,7 +88,7 @@ const TABS: { key: ViewKey; label: string; space?: Space }[] = [
 // twardo zablokowane, tylko inny domyślny zestaw wg roli, jak każda inna zakładka.
 const ROLE_ACCESS: Record<string, ViewKey[]> = {
   // "ai" (asystent AI, 03.10.2026) — na tym etapie TYLKO Admin (także serwer: app/api/ai/ask); Manager go nie ma.
-  Admin: ["overview", "inventory", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "margin", "points", "nbp", "ai", "rcp", "returns", "shop_products", "shop_stock"],
+  Admin: ["overview", "inventory", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "margin", "points", "nbp", "ai", "rcp", "returns", "reminders", "shop_products", "shop_stock"],
   Manager: ["overview", "inventory", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "margin", "points", "nbp", "rcp", "returns", "shop_products", "shop_stock"], // wszystko (poza AI); Zespół tylko do odczytu, usuwa tylko Admin
   Magazyn: ["inventory", "backlog", "rcp", "returns"],
   Zamówienia: ["sales", "shipping", "invoices", "backlog", "rcp", "returns"],
@@ -570,6 +573,7 @@ export default function Home() {
       </aside>
 
       <main className="flex-1">
+        {role === "Admin" && <ReminderBanners session={session} onOpen={(v) => setView(v as ViewKey)} />}
         <div className="flex items-center justify-between px-8 py-5 border-b border-line">
           <h1 className="text-lg font-semibold">{TABS.find((t) => t.key === view)?.label}</h1>
           {view === "inventory" && (
@@ -682,6 +686,7 @@ export default function Home() {
 
           {view === "ai" && <AiView session={session} />}
 
+          {view === "reminders" && role === "Admin" && <RemindersView session={session} />}
           {view === "rcp" && <RcpView session={session} role={role} members={members} />}
 
           {view === "returns" && <ReturnsView />}
