@@ -256,6 +256,26 @@ export default function Home() {
   const [units, setUnits] = useState<Unit[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [view, setView] = useState<ViewKey>("overview");
+  // Zwinięte grupy menu (10.10.2026): zapamiętane w przeglądarce; zwinięta grupa chowa zakładki poza aktywną.
+  const [collapsedGroups, setCollapsedGroups] = useState<string[]>([]);
+  useEffect(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem("nav-collapsed") || "[]");
+      if (Array.isArray(raw)) setCollapsedGroups(raw.filter((x) => typeof x === "string"));
+    } catch {
+      /* localStorage niedostępne — grupy zostają rozwinięte */
+    }
+  }, []);
+  const toggleGroup = (title: string) =>
+    setCollapsedGroups((prev) => {
+      const next = prev.includes(title) ? prev.filter((x) => x !== title) : [...prev, title];
+      try {
+        localStorage.setItem("nav-collapsed", JSON.stringify(next));
+      } catch {
+        /* ignorujemy */
+      }
+      return next;
+    });
   const [shipPrefill, setShipPrefill] = useState<ShipPrefill | null>(null); // dane z karty zamówienia do formularza przesyłki
   const [invSub, setInvSub] = useState<"summary" | "raw" | "catalog">("summary");
   const [rawReloadKey, setRawReloadKey] = useState(0);
@@ -587,18 +607,27 @@ export default function Home() {
         />
         {tracksWorkTime(role) && <RcpWidget session={session} role={role ?? ""} onOpenRcp={() => effectiveAccess(role ?? "", viewAccess).includes("rcp") && setView("rcp")} />}
         <nav className="flex flex-col gap-1">
-          {navSections(spaceOf(view), effectiveAccess(role ?? "", viewAccess)).map((g, gi) => (
-            <div key={g.title ?? `g${gi}`} className={gi > 0 && g.title ? "mt-3" : ""}>
-              {g.title && <div className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-inksoft/70">{g.title}</div>}
-              <div className="flex flex-col gap-1">
-                {g.tabs.map((t) => (
-                  <button key={t.key} onClick={() => setView(t.key)} className={`text-left px-2 py-2 rounded text-sm font-medium ${view === t.key ? "bg-white border border-line" : "text-inksoft"}`}>
-                    {t.label}
+          {navSections(spaceOf(view), effectiveAccess(role ?? "", viewAccess)).map((g, gi) => {
+            const collapsed = !!g.title && collapsedGroups.includes(g.title);
+            const shown = collapsed ? g.tabs.filter((t) => t.key === view) : g.tabs; // w zwiniętej grupie zostaje widoczna aktywna zakładka
+            return (
+              <div key={g.title ?? `g${gi}`} className={gi > 0 && g.title ? "mt-3" : ""}>
+                {g.title && (
+                  <button onClick={() => toggleGroup(g.title!)} aria-expanded={!collapsed} className="w-full flex items-center justify-between px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-inksoft/70 hover:text-ink">
+                    <span>{g.title}</span>
+                    <span className="text-[9px]">{collapsed ? "▸" : "▾"}</span>
                   </button>
-                ))}
+                )}
+                <div className="flex flex-col gap-1">
+                  {shown.map((t) => (
+                    <button key={t.key} onClick={() => setView(t.key)} className={`text-left px-2 py-2 rounded text-sm font-medium ${view === t.key ? "bg-white border border-line" : "text-inksoft"}`}>
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </nav>
         <div className="mt-auto text-xs text-inksoft">
           <div className="font-semibold text-ink truncate" title={session.user.email ?? undefined}>{displayNameForEmail(session.user.email, members)}</div>
