@@ -50,10 +50,12 @@ const STATUS_STYLE: Record<string, string> = {
   "Uszkodzony": "bg-rustsoft text-rust",
 };
 
+const pct = (part: number, whole: number) => (whole > 0 ? `${((part / whole) * 100).toLocaleString("pl-PL", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%` : "—");
+
 export default function PartsView({ members, session }: { members: MemberLite[]; session: Session }) {
   const [rows, setRows] = useState<Part[]>([]);
   const [total, setTotal] = useState(0);
-  const [sum, setSum] = useState<{ pln: number; count: number; freePln: number; freeCount: number } | null>(null);
+  const [sum, setSum] = useState<{ pln: number; count: number; freePln: number; freeCount: number; yearCount: number; freeYearCount: number } | null>(null);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<FilterKey>("all");
@@ -117,10 +119,13 @@ export default function PartsView({ members, session }: { members: MemberLite[];
       let count = 0;
       let freePln = 0; // części DOSTĘPNE = bez przypisanego numeru seryjnego/IMEI urządzenia (08.10.2026)
       let freeCount = 0;
+      let yearCount = 0; // części przyjęte w bieżącym roku (received_at)
+      let freeYearCount = 0;
+      const yearStart = `${new Date().getFullYear()}-01-01`;
       for (let from = 0; ; from += 1000) {
-        const { data, error: err } = await applyFilters(supabase.from("service_parts").select("price_pln, device_ref") as any).order("id").range(from, from + 999);
+        const { data, error: err } = await applyFilters(supabase.from("service_parts").select("price_pln, device_ref, received_at") as any).order("id").range(from, from + 999);
         if (err) return;
-        for (const r of (data as { price_pln: number | null; device_ref: string | null }[]) || []) {
+        for (const r of (data as { price_pln: number | null; device_ref: string | null; received_at: string | null }[]) || []) {
           const free = !r.device_ref || !r.device_ref.trim();
           if (r.price_pln !== null) {
             pln += Number(r.price_pln);
@@ -128,10 +133,14 @@ export default function PartsView({ members, session }: { members: MemberLite[];
           }
           count++;
           if (free) freeCount++;
+          if (r.received_at && r.received_at.slice(0, 10) >= yearStart) {
+            yearCount++;
+            if (free) freeYearCount++;
+          }
         }
         if (!data || data.length < 1000) break;
       }
-      if (!cancelled) setSum({ pln, count, freePln, freeCount });
+      if (!cancelled) setSum({ pln, count, freePln, freeCount, yearCount, freeYearCount });
     })();
     return () => {
       cancelled = true;
@@ -229,6 +238,11 @@ export default function PartsView({ members, session }: { members: MemberLite[];
         <span className="text-xs font-semibold text-inksoft">PODSUMOWANIE WYNIKU — wszystkie strony</span>
         <span>Części: <span className="font-mono font-semibold">{sum ? sum.count.toLocaleString("pl-PL") : "…"}</span></span>
         <span title="Części bez przypisanego numeru seryjnego/IMEI urządzenia">Dostępne: <span className="font-mono font-semibold">{sum ? sum.freeCount.toLocaleString("pl-PL") : "…"}</span></span>
+        <span title={`Części przyjęte od 1 stycznia ${new Date().getFullYear()} (data przyjęcia) — w całym wyniku i wśród dostępnych (bez numeru seryjnego)`}>
+          Z tego roku: <span className="font-mono font-semibold">{sum ? `${pct(sum.yearCount, sum.count)} (${sum.yearCount.toLocaleString("pl-PL")})` : "…"}</span>
+          <span className="text-inksoft"> · wśród dostępnych: </span>
+          <span className="font-mono font-semibold">{sum ? `${pct(sum.freeYearCount, sum.freeCount)} (${sum.freeYearCount.toLocaleString("pl-PL")})` : "…"}</span>
+        </span>
         <span title="Suma cen netto części dostępnych (bez przypisanego numeru seryjnego/IMEI)">Wartość dostępnych (netto PLN): <span className="font-mono font-bold">{sum ? `${fmt(sum.freePln)} zł` : "…"}</span></span>
       </div>
       <p className="text-[11px] text-inksoft mt-3 max-w-4xl">
