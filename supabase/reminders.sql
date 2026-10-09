@@ -4,6 +4,7 @@
 -- Na razie TYLKO Admin (RLS: is_admin() na wszystko — odczyt i zapis). Przypomnienie jest "aktywne" (baner na górze), gdy done_at jest puste i due_date <= dziś (czas polski).
 -- Jednorazowe: "Zrobione" ustawia done_at. Cykliczne (codziennie / co tydzień / co miesiąc / co rok): "Zrobione" przesuwa due_date na NASTĘPNE wystąpienie po dziś
 -- (liczy aplikacja, lib/reminders.ts), więc baner wraca dopiero wtedy.
+-- lead_days (10.10.2026): baner pojawia się już `lead_days` dni przed terminem (due_date - lead_days <= dziś); 0 = dopiero w dniu terminu.
 
 create table if not exists reminders (
   id bigint generated always as identity primary key,
@@ -18,6 +19,7 @@ create table if not exists reminders (
   created_by_email text,
   created_at timestamptz not null default now()
 );
+alter table reminders add column if not exists lead_days int not null default 0 check (lead_days between 0 and 60);  -- ile dni PRZED terminem pokazać baner (10.10.2026)
 create index if not exists reminders_active_idx on reminders (done_at, due_date);
 
 alter table reminders enable row level security;

@@ -50,3 +50,10 @@ export function daysOverdue(due: string, today: string): number {
   return Math.round((Date.UTC(b.y, b.m - 1, b.d) - Date.UTC(a.y, a.m - 1, a.d)) / 86_400_000);
 }
 export const fmtDate = (d: string) => `${d.slice(8, 10)}.${d.slice(5, 7)}.${d.slice(0, 4)}`;
+
+// Czy baner ma już być widoczny: termin minus wyprzedzenie (lead_days) nie jest później niż dziś.
+export function isVisibleReminder(due: string, leadDays: number, today: string): boolean {
+  return daysOverdue(due, today) >= -Math.max(0, leadDays || 0);
+}
+// Domyślne wyprzedzenie w formularzu: 3 dni; dla "codziennie" 0 (inaczej baner nigdy by nie znikał).
+export const defaultLeadDays = (rec: Recurrence) => (rec === "daily" ? 0 : 3);

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { warsawYmd } from "@/lib/warsawDate";
-import { RECURRENCES, RECURRENCE_LABEL, daysOverdue, fmtDate, nextDueDate, type Recurrence } from "@/lib/reminders";
+import { RECURRENCES, RECURRENCE_LABEL, daysOverdue, defaultLeadDays, fmtDate, isVisibleReminder, nextDueDate, type Recurrence } from "@/lib/reminders";
 
 // Zakładka Przypomnienia (09.10.2026, na razie tylko Admin): ważne komunikaty i zadania cykliczne. Aktywne przypomnienie (termin dziś lub wcześniej, nie zrobione) wyświetla się jako baner
 // na górze KAŻDEJ zakładki (ReminderBanners), aż zostanie oznaczone jako zrobione. Cykliczne po "Zrobione" wracają dopiero przy następnym terminie.
@@ -20,8 +20,10 @@ type Reminder = {
   last_done_by_email: string | null;
   done_count: number;
   created_at: string;
+  lead_days?: number;
 };
-const COLS = "id, message, due_date, recurrence, anchor_day, done_at, last_done_at, last_done_by_email, done_count, created_at";
+const COLS = "id, message, due_date, recurrence, anchor_day, done_at, last_done_at, last_done_by_email, done_count, created_at, lead_days";
+const COLS_OLD = "id, message, due_date, recurrence, anchor_day, done_at, last_done_at, last_done_by_email, done_count, created_at";
 const fmtDT = (iso: string) => new Date(iso).toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 const changed = () => window.dispatchEvent(new Event("reminders-changed")); // odśwież banery na górze strony
 
@@ -33,10 +35,12 @@ export default function RemindersView({ session }: { session: Session }) {
   const [message, setMessage] = useState("");
   const [dueDate, setDueDate] = useState(today);
   const [recurrence, setRecurrence] = useState<Recurrence>("none");
+  const [leadDays, setLeadDays] = useState(3);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
-    const { data, error: err } = await supabase.from("reminders").select(COLS).order("due_date").order("id").limit(500);
+    let { data, error: err } = (await supabase.from("reminders").select(COLS).order("due_date").order("id").limit(500)) as { data: Reminder[] | null; error: { code?: string; message: string } | null };
+    if (err?.code === "42703") ({ data, error: err } = (await supabase.from("reminders").select(COLS_OLD).order("due_date").order("id").limit(500)) as { data: Reminder[] | null; error: { code?: string; message: string } | null }); // brak lead_days — uruchom reminders.sql
     if (err) setError(err.code === "42P01" || err.code === "PGRST205" ? "Brak tabeli przypomnień — uruchom supabase/reminders.sql w Supabase." : `Nie udało się wczytać przypomnień: ${err.message}`);
     else {
       setError("");
@@ -57,12 +61,13 @@ export default function RemindersView({ session }: { session: Session }) {
     if (!text || !dueDate) return;
     setSaving(true);
     setError("");
-    const { error: err } = await supabase.from("reminders").insert({ message: text, due_date: dueDate, recurrence, anchor_day: Number(dueDate.slice(8, 10)), created_by_email: session.user.email ?? null });
+    const { error: err } = await supabase.from("reminders").insert({ message: text, due_date: dueDate, recurrence, anchor_day: Number(dueDate.slice(8, 10)), lead_days: recurrence === "daily" ? 0 : leadDays, created_by_email: session.user.email ?? null });
     setSaving(false);
     if (err) return setError(`Nie udało się dodać: ${err.message}`);
     setMessage("");
     setDueDate(today);
     setRecurrence("none");
+    setLeadDays(3);
     await load();
     changed();
   }
@@ -88,8 +93,8 @@ export default function RemindersView({ session }: { session: Session }) {
     changed();
   }
 
-  const active = rows.filter((r) => !r.done_at && r.due_date <= today);
-  const planned = rows.filter((r) => !r.done_at && r.due_date > today);
+  const active = rows.filter((r) => !r.done_at && isVisibleReminder(r.due_date, r.lead_days ?? 0, today));
+  const planned = rows.filter((r) => !r.done_at && !isVisibleReminder(r.due_date, r.lead_days ?? 0, today));
   const done = rows.filter((r) => r.done_at).sort((a, b) => (b.done_at ?? "").localeCompare(a.done_at ?? "")).slice(0, 20);
 
   const Row = ({ r, state }: { r: Reminder; state: "active" | "planned" | "done" }) => {
@@ -104,9 +109,9 @@ export default function RemindersView({ session }: { session: Session }) {
             <>
               <div className="font-mono">{fmtDate(r.due_date)}</div>
               {state === "active" ? (
-                <div className={late > 0 ? "text-rust font-semibold" : "text-amber font-semibold"}>{late > 0 ? `zaległe od ${late} ${late === 1 ? "dnia" : "dni"}` : "dziś"}</div>
+                <div className={late > 0 ? "text-rust font-semibold" : "text-amber font-semibold"}>{late > 0 ? `zaległe od ${late} ${late === 1 ? "dnia" : "dni"}` : late === 0 ? "dziś" : `za ${-late} ${-late === 1 ? "dzień" : "dni"}`}</div>
               ) : (
-                <div className="text-inksoft">za {-late} {-late === 1 ? "dzień" : "dni"}</div>
+                <div className="text-inksoft">za {-late} {-late === 1 ? "dzień" : "dni"}{(r.lead_days ?? 0) > 0 ? ` · baner od ${fmtDate(new Date(Date.UTC(+r.due_date.slice(0, 4), +r.due_date.slice(5, 7) - 1, +r.due_date.slice(8, 10) - (r.lead_days ?? 0))).toISOString().slice(0, 10))}` : ""}</div>
               )}
             </>
           )}
@@ -149,14 +154,20 @@ export default function RemindersView({ session }: { session: Session }) {
         <div className="text-xs font-semibold text-inksoft mb-2">NOWE PRZYPOMNIENIE</div>
         <textarea value={message} onChange={(e) => setMessage(e.target.value)} maxLength={1000} rows={2} placeholder="Treść komunikatu — będzie widoczna na górze strony, dopóki nie oznaczysz jako zrobione" className="w-full border border-line bg-white px-3 py-2 rounded text-sm" />
         <div className="flex flex-wrap items-center gap-4 mt-2">
-          <label className="flex items-center gap-2 text-xs font-semibold text-inksoft">Od dnia
+          <label className="flex items-center gap-2 text-xs font-semibold text-inksoft">Termin
             <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="border border-line bg-white px-2 py-1.5 rounded text-sm font-normal text-ink" />
           </label>
           <label className="flex items-center gap-2 text-xs font-semibold text-inksoft">Powtarzaj
-            <select value={recurrence} onChange={(e) => setRecurrence(e.target.value as Recurrence)} className="border border-line bg-white px-2 py-1.5 rounded text-sm font-normal text-ink">
+            <select value={recurrence} onChange={(e) => { const rec = e.target.value as Recurrence; setRecurrence(rec); setLeadDays(defaultLeadDays(rec)); }} className="border border-line bg-white px-2 py-1.5 rounded text-sm font-normal text-ink">
               {RECURRENCES.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
             </select>
           </label>
+          {recurrence !== "daily" && (
+            <label className="flex items-center gap-2 text-xs font-semibold text-inksoft">Pokaż z wyprzedzeniem
+              <input type="number" min={0} max={60} value={leadDays} onChange={(e) => setLeadDays(Math.max(0, Math.min(60, Number(e.target.value) || 0)))} className="w-16 border border-line bg-white px-2 py-1.5 rounded text-sm font-normal text-ink" />
+              <span className="font-normal">dni przed terminem</span>
+            </label>
+          )}
           <button onClick={add} disabled={saving || !message.trim() || !dueDate} className="ml-auto bg-ink text-paper px-4 py-2 rounded text-sm font-semibold disabled:opacity-50">{saving ? "Dodawanie…" : "Dodaj przypomnienie"}</button>
         </div>
       </div>
@@ -165,7 +176,7 @@ export default function RemindersView({ session }: { session: Session }) {
       <Table title="AKTYWNE — widoczne na górze strony" items={active} state="active" empty="Brak aktywnych przypomnień." />
       <Table title="ZAPLANOWANE" items={planned} state="planned" empty="Brak zaplanowanych przypomnień." />
       <Table title="ZROBIONE (jednorazowe, ostatnie 20)" items={done} state="done" empty="Nic jeszcze nie zrobione." />
-      <p className="text-[11px] text-inksoft max-w-3xl">Aktywne przypomnienie (termin dziś lub wcześniej) pojawia się na górze każdej zakładki. Jednorazowe znika po „Zrobione”. Cykliczne po „Zrobione” wraca dopiero przy następnym terminie (zaległe cykle są pomijane). Na górze strony pokazują się też automatyczne komunikaty: wnioski urlopowe do rozpatrzenia, zadania z Backlogu przypisane do Ciebie i nowe zapotrzebowania dla serwisu — znikają same, gdy sprawa zostanie załatwiona. Zakładka jest na razie tylko dla Admina.</p>
+      <p className="text-[11px] text-inksoft max-w-3xl">Przypomnienie pojawia się na górze każdej zakładki od dnia „termin minus wyprzedzenie” (domyślnie 3 dni przed terminem; 0 = dopiero w dniu terminu) i zostaje tam do „Zrobione”. Jednorazowe znika po „Zrobione”. Cykliczne po „Zrobione” wraca dopiero przy następnym terminie (zaległe cykle są pomijane). Na górze strony pokazują się też automatyczne komunikaty: wnioski urlopowe do rozpatrzenia, zadania z Backlogu przypisane do Ciebie i nowe zapotrzebowania dla serwisu — znikają same, gdy sprawa zostanie załatwiona. Zakładka jest na razie tylko dla Admina.</p>
     </div>
   );
 }
