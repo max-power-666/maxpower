@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
+import { MARKETPLACES } from "@/lib/salesOrders";
 import { ACTIVE_REQUEST_STATUSES, REQUEST_PRIORITIES, REQUEST_PRIORITY_LABEL, REQUEST_PRIORITY_RANK, REQUEST_STATUSES, REQUEST_STATUS_LABEL, requestCode, type RequestPriority, type RequestStatus } from "@/lib/serviceRequests";
 
 // Zamówienia -> Zapotrzebowanie (08.10.2026): pracownicy zlecają zadania dla serwisu (dowolna treść albo numer zamówienia + priorytet; autor, data i numer ZAP-n automatycznie), serwisant przyjmuje zlecenie i ustawia status.
@@ -34,11 +35,16 @@ const PRIORITY_STYLE: Record<RequestPriority, string> = {
   sredni: "bg-ambersoft text-amber",
   niski: "bg-paper text-inksoft border border-line",
 };
+// Numery zamówień wpisane w treści (09.10.2026): każde "słowo" o długości >= 5 znaków może być numerem zamówienia (external_id w sales_orders); SKU dociągamy dla tych, które pasują.
+// Wielkość liter: zapytanie obejmuje też wersję małymi literami (UUID Allegro bywa wpisywany z dużych liter).
+const orderTokens = (message: string): string[] => Array.from(new Set(message.split(/[\s,;]+/).map((t) => t.replace(/^[#:.]+|[.:]+$/g, "")).filter((t) => t.length >= 5 && t.length <= 80)));
+type OrderSku = { marketplace: string; sku: string | null };
 const pill = (active: boolean) => `px-3 py-1.5 rounded-full text-sm font-semibold border ${active ? "bg-ink text-paper border-ink" : "bg-white border-line"}`;
 const fmtDT = (iso: string) => new Date(iso).toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 
 export default function ServiceRequestsView({ session, members, canHandle }: { session: Session; members: MemberLite[]; canHandle: boolean }) {
   const [rows, setRows] = useState<Req[]>([]);
+  const [orderSkus, setOrderSkus] = useState<Record<string, OrderSku>>({}); // numer zamówienia (małymi literami) -> SKU z zamówienia
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -52,7 +58,17 @@ export default function ServiceRequestsView({ session, members, canHandle }: { s
     if (err) setError(err.code === "42P01" ? "Brak tabeli zleceń — uruchom supabase/service-requests.sql w Supabase." : `Nie udało się wczytać zleceń: ${err.message}`);
     else {
       setError("");
-      setRows((data as Req[]) || []);
+      const list = (data as Req[]) || [];
+      setRows(list);
+      // SKU zamówień wymienionych w treści zleceń (paczkami po 100 numerów; brak dopasowania = zwykła treść, np. "pad ps4 red")
+      const tokens = Array.from(new Set(list.flatMap((r) => orderTokens(r.message).flatMap((t) => [t, t.toLowerCase()]))));
+      const found: Record<string, OrderSku> = {};
+      for (let i = 0; i < tokens.length; i += 100) {
+        const chunk = tokens.slice(i, i + 100).map((t) => `"${t.replace(/"/g, "")}"`).join(",");
+        const { data: ord } = await supabase.from("sales_orders").select("marketplace, external_id, sku").filter("external_id", "in", `(${chunk})`);
+        for (const o of (ord as { marketplace: string; external_id: string; sku: string | null }[]) || []) found[o.external_id.toLowerCase()] = { marketplace: o.marketplace, sku: o.sku };
+      }
+      setOrderSkus(found);
     }
     setLoading(false);
   }, []);
@@ -156,13 +172,14 @@ export default function ServiceRequestsView({ session, members, canHandle }: { s
               <th className="p-3">Zlecił(a)</th>
               <th className="p-3">Priorytet</th>
               <th className="p-3">Zapotrzebowanie</th>
+              <th className="p-3">SKU</th>
               <th className="p-3">Status</th>
               <th className="p-3">Przyjął(ęła)</th>
               {canHandle && <th className="p-3"></th>}
             </tr>
           </thead>
           <tbody>
-            {!loading && visible.length === 0 && !error && <tr><td colSpan={canHandle ? 8 : 7} className="p-6 text-center text-inksoft text-sm">{rows.length === 0 ? "Brak zleceń — dodaj pierwsze powyżej." : "Brak zleceń w tym widoku."}</td></tr>}
+            {!loading && visible.length === 0 && !error && <tr><td colSpan={canHandle ? 9 : 8} className="p-6 text-center text-inksoft text-sm">{rows.length === 0 ? "Brak zleceń — dodaj pierwsze powyżej." : "Brak zleceń w tym widoku."}</td></tr>}
             {visible.map((r) => (
               <tr key={r.id} className="border-b border-line last:border-b-0 align-top">
                 <td className="p-3 font-mono text-xs font-semibold whitespace-nowrap">{requestCode(r.id)}</td>
@@ -170,6 +187,15 @@ export default function ServiceRequestsView({ session, members, canHandle }: { s
                 <td className="p-3 font-semibold whitespace-nowrap">{name(r.created_by_email)}</td>
                 <td className="p-3 whitespace-nowrap"><span className={`text-xs font-semibold px-2 py-1 rounded ${PRIORITY_STYLE[r.priority]}`}>{REQUEST_PRIORITY_LABEL[r.priority]}</span></td>
                 <td className="p-3 whitespace-pre-wrap break-words max-w-xl">{r.message}</td>
+                <td className="p-3 font-mono text-xs">
+                  {(() => {
+                    const hits = orderTokens(r.message).map((t) => ({ t, o: orderSkus[t.toLowerCase()] })).filter((h) => h.o);
+                    if (hits.length === 0) return <span className="text-inksoft">—</span>;
+                    return hits.map(({ t, o }) => (
+                      <div key={t} title={`Zamówienie ${t} (${MARKETPLACES.find((m) => m.key === o.marketplace)?.label ?? o.marketplace})`}>{o.sku || <span className="text-inksoft">brak SKU</span>}</div>
+                    ));
+                  })()}
+                </td>
                 <td className="p-3 whitespace-nowrap">
                   {canHandle ? (
                     <select value={r.status} onChange={(e) => setStatus(r.id, e.target.value as RequestStatus)} className={`text-xs font-semibold px-2 py-1 rounded border border-line ${STATUS_STYLE[r.status]}`}>
@@ -191,7 +217,7 @@ export default function ServiceRequestsView({ session, members, canHandle }: { s
           </tbody>
         </table>
       </div>
-      <p className="text-[11px] text-inksoft mt-3 max-w-3xl">Zapotrzebowania dodaje każdy; przyjmuje je i zmienia status serwisant (Serwis, Kierownik serwisu, Manager, Admin). „Przyjęte” zapisuje, kto i kiedy zajął się zleceniem.</p>
+      <p className="text-[11px] text-inksoft mt-3 max-w-3xl">Gdy w treści jest numer zamówienia, kolumna SKU pokazuje SKU z tego zamówienia. Zapotrzebowania dodaje każdy; przyjmuje je i zmienia status serwisant (Serwis, Kierownik serwisu, Manager, Admin). „Przyjęte” zapisuje, kto i kiedy zajął się zleceniem.</p>
     </div>
   );
 }
