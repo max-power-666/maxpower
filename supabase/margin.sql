@@ -100,7 +100,10 @@ select
   inv.has_invoice as bm_has_invoice,
   oct.commission as octopia_commission,
   oct.currency as octopia_commission_currency,
-  p.vat as purchase_vat
+  p.vat as purchase_vat,
+  -- dostawa opłacona przez klienta (09.10.2026) — NA KOŃCU widoku, bo create or replace view nie pozwala wstawiać kolumn w środku
+  coalesce(oct.shipping_revenue, bm.shipping_revenue) as shipping_revenue,
+  coalesce(oct.currency, bm.currency) as shipping_revenue_currency
 from sales_order_items it
 join sales_orders o on o.marketplace = it.marketplace and o.external_id = it.external_id
 join order_agg oa on oa.marketplace = it.marketplace and oa.external_id = it.external_id
@@ -135,12 +138,24 @@ left join lateral (
 -- Pozycje rozbite z ilości > 1 mają klucze "id", "id-2"... — łączymy po podstawie klucza (orderLineId). Waluta z zamówienia (EUR).
 left join lateral (
   select (l -> 'offerPrice' -> 'commission' ->> 'amountWithoutVat')::numeric / greatest(coalesce(nullif(l ->> 'quantity', '')::numeric, 1), 1) as commission,
+         -- dostawa opłacona przez kupującego (offerPrice.shippingCost, kwota dla CAŁEJ pozycji; totalPrice.offerPrice = cena x ilość + dostawa, sprawdzone na wszystkich 89 pozycjach z płatną dostawą)
+         nullif(l -> 'offerPrice' ->> 'shippingCost', '')::numeric / greatest(coalesce(nullif(l ->> 'quantity', '')::numeric, 1), 1) as shipping_revenue,
          upper(oc.raw ->> 'currencyCode') as currency
   from octopia_orders oc, jsonb_array_elements(case when jsonb_typeof(oc.raw -> 'lines') = 'array' then oc.raw -> 'lines' else '[]'::jsonb end) l
   where it.marketplace = 'octopia' and oc.id = it.external_id
     and (l ->> 'orderLineId') = regexp_replace(it.item_key, '-[0-9]+$', '')
   limit 1
 ) oct on true
+-- Back Market (09.10.2026): dostawa opłacona przez klienta — orderlines[].shipping_price (kwota dla pozycji; order.price jej NIE zawiera, a na fakturze BM wiersz "sales" = cena + dostawa,
+-- prowizja liczona od sumy). Pozycje rozbite z ilości > 1 mają klucze "id", "id-2"... — łączymy po podstawie klucza (id pozycji), kwotę dzielimy przez ilość.
+left join lateral (
+  select nullif(l ->> 'shipping_price', '')::numeric / greatest(coalesce(nullif(l ->> 'quantity', '')::numeric, 1), 1) as shipping_revenue,
+         upper(b.currency) as currency
+  from bm_orders b, jsonb_array_elements(case when jsonb_typeof(b.orderlines) = 'array' then b.orderlines else '[]'::jsonb end) l
+  where it.marketplace = 'backmarket' and b.order_id::text = it.external_id
+    and (l ->> 'id') = regexp_replace(it.item_key, '-[0-9]+$', '')
+  limit 1
+) bm on true
 -- Back Market: opłaty z wgranych faktur tygodniowych, zsumowane na zamówienie (wartości ujemne = koszt)
 left join lateral (
   select

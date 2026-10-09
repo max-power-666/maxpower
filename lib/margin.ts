@@ -96,6 +96,8 @@ export type MarginDbRow = {
   purchase_vat?: string | null; // stawka VAT zakupu wpisana ręcznie (np. "V23"); puste = VAT-marża
   octopia_commission?: number | string | null; // prowizja Octopii na sztukę (z danych zamówienia), waluta zamówienia
   octopia_commission_currency?: string | null;
+  shipping_revenue?: number | string | null; // dostawa opłacona przez KLIENTA na sztukę (Octopia offerPrice.shippingCost, Back Market orderline.shipping_price), waluta zamówienia
+  shipping_revenue_currency?: string | null;
   bm_sales_fees: number | string | null;
   bm_payment_fees: number | string | null;
   bm_ccbm_fees: number | string | null;
@@ -114,8 +116,9 @@ export type MarginResult = {
   sku: string | null;
   productName: string | null;
   serial: string;
-  price: number | null;
+  price: number | null; // cena sprzedaży w walucie zamówienia = towar + dostawa opłacona przez klienta (jeśli była)
   currency: string;
+  shippingRevenue: number | null; // w tym dostawa opłacona przez klienta (waluta zamówienia); null = brak
   salePln: number | null;
   purchasePln: number | null;
   vatPln: number | null; // VAT od marży (VAT-marża) albo — dla towarów na V23 — VAT należny 23% od pełnej ceny sprzedaży
@@ -230,12 +233,17 @@ const dm = (iso: string) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}`;
 export function computeMargin(row: MarginDbRow, ctx: MarginContext): MarginResult {
   const flags: string[] = [];
   const details: MarginDetail[] = [];
-  const price = num(row.price);
+  // Dostawa opłacona przez klienta (09.10.2026): to nasz przychód, a prowizja marketplace'u jest od niej naliczana (Octopia: stawka od ceny + dostawy; Back Market: faktura "sales" = cena + dostawa),
+  // więc do sprzedaży liczymy TOWAR + DOSTAWĘ (decyzja właściciela: marża od total price; bez osobnego VAT dla dostawy — jedna formuła VAT-marża/V23 od całej kwoty).
+  const goodsPrice = num(row.price);
+  const shipRevRaw = num(row.shipping_revenue);
+  const shipRev = shipRevRaw !== null && shipRevRaw > 0 && goodsPrice !== null ? shipRevRaw : null;
+  const price = goodsPrice === null ? null : goodsPrice + (shipRev ?? 0);
   const date = (row.order_date || "").slice(0, 10);
   const orderTotal = num(row.order_total);
   const items = Math.max(1, num(row.order_items) ?? 1);
   // udział pozycji w kosztach zamówienia: wg ceny, a gdy brak cen — po równo
-  const share = price !== null && orderTotal !== null && orderTotal > 0 ? price / orderTotal : 1 / items;
+  const share = goodsPrice !== null && orderTotal !== null && orderTotal > 0 ? goodsPrice / orderTotal : 1 / items;
   const shareNote = items > 1 ? ` Zamówienie ma ${items} pozycje — koszt zamówienia dzielony wg ceny pozycji (udział ${f2(share * 100)}%).` : "";
   const cur = (row.currency || "PLN").toUpperCase();
   const rateOf = (c: string) => {
@@ -249,10 +257,11 @@ export function computeMargin(row: MarginDbRow, ctx: MarginContext): MarginResul
   {
     let note = "";
     if (price === null) note = "Brak ceny pozycji w zamówieniu.";
-    else if (cur === "PLN") note = `Cena z zamówienia: ${f2(price)} zł (brutto).`;
+    else if (cur === "PLN") note = `Cena z zamówienia: ${f2(price)} zł (brutto).${shipRev !== null ? ` W tym towar ${f2(goodsPrice!)} + dostawa opłacona przez klienta ${f2(shipRev)} zł.` : ""}`;
     else {
       const ri = rateOf(cur);
-      note = ri ? `${f2(price)} ${cur} × kurs NBP ${f4(ri.mid)} (z ${dm(ri.rateDate)}, dzień roboczy przed zamówieniem ${dm(date)}) — cena brutto.` : `${f2(price)} ${cur} — brak kursu NBP sprzed ${date}.`;
+      const parts = shipRev !== null ? ` (towar ${f2(goodsPrice!)} + dostawa opłacona przez klienta ${f2(shipRev)})` : "";
+      note = ri ? `${f2(price)} ${cur}${parts} × kurs NBP ${f4(ri.mid)} (z ${dm(ri.rateDate)}, dzień roboczy przed zamówieniem ${dm(date)}) — cena brutto.` : `${f2(price)} ${cur}${parts} — brak kursu NBP sprzed ${date}.`;
     }
     details.push({ key: "sale", label: "Cena sprzedaży", sign: "+", amountPln: salePln === null ? null : round2(salePln), note });
   }
@@ -471,6 +480,7 @@ export function computeMargin(row: MarginDbRow, ctx: MarginContext): MarginResul
     serial: row.serial_number,
     price,
     currency: row.currency,
+    shippingRevenue: shipRev,
     salePln: salePln === null ? null : round2(salePln),
     purchasePln: purchase,
     vatPln,

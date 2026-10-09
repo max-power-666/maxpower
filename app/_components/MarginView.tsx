@@ -231,6 +231,7 @@ export default function MarginView({ session, members }: { session: Session; mem
                 <td className="p-3 text-right font-mono whitespace-nowrap">
                   {fmtPLN(r.salePln)}
                   {r.currency !== "PLN" && r.price !== null && <div className="text-[10px] text-inksoft">{r.price.toLocaleString("pl-PL")} {r.currency}</div>}
+                  {r.shippingRevenue !== null && <div className="text-[10px] text-inksoft" title="Dostawa opłacona przez klienta wliczona w cenę sprzedaży (towar + dostawa)">w tym dostawa {r.shippingRevenue.toLocaleString("pl-PL")} {r.currency}</div>}
                 </td>
                 <td className="p-3 text-right font-mono">{fmtPLN(r.purchasePln)}</td>
                 <td className="p-3 text-right font-mono text-inksoft" title={r.vatMode === "V23" ? "Towar na V23: VAT należny 23% od pełnej ceny sprzedaży (zakup liczony netto)" : undefined}>{fmtPLN(r.vatPln)}{r.vatMode === "V23" && <span className="ml-1 text-[10px] font-semibold text-amber">V23</span>}</td>
