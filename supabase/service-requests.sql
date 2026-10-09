@@ -1,5 +1,5 @@
 -- Magazyn ERP — Serwis -> Zapotrzebowanie (08.10.2026): zlecenia dodatkowych zadań dla serwisu.
--- Uruchom w Supabase: Dashboard -> SQL Editor -> New query -> wklej CAŁY plik -> Run. Można uruchomić ponownie. Wymaga wcześniejszego schema.sql (members, is_admin, audit_delete) i service.sql (is_service_lead).
+-- Uruchom w Supabase: Dashboard -> SQL Editor -> New query -> wklej CAŁY plik -> Run. Można uruchomić ponownie. Wymaga wcześniejszego schema.sql (members, is_admin, audit_delete); funkcję is_service_lead() zakłada sam.
 --
 -- Dowolny zalogowany dodaje zlecenie (treść + automatycznie autor i data, status "nowe"); status zlecenia zmieniają WYŁĄCZNIE serwisanci (Admin, Manager, Serwis, Kierownik serwisu) — pilnuje tego
 -- trigger w bazie (działa też przy bezpośrednim wywołaniu API). Treść, autor i data są niezmienne dla zalogowanych; kto i kiedy PRZYJĄŁ zlecenie, ustawia trigger (zegar serwera).
@@ -19,6 +19,12 @@ create table if not exists service_requests (
   history jsonb not null default '[]'::jsonb    -- [{at, by_email, action: created|status, from, to}]
 );
 create index if not exists service_requests_status_idx on service_requests (status, created_at desc);
+
+-- is_service_lead() zdefiniowane też w service.sql — tu powtórzone (create or replace, ta sama treść), żeby ten plik działał nawet bez ponownego uruchomienia service.sql.
+create or replace function is_service_lead() returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from members where user_id = auth.uid() and role = 'Kierownik serwisu');
+$$;
 
 -- Czy zalogowany jest serwisantem (może przyjmować zlecenia i zmieniać ich status). SECURITY DEFINER jak is_admin() — czyta members bez uprawnień do niej.
 create or replace function is_service_staff() returns boolean
