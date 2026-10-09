@@ -24,7 +24,7 @@ type Order = {
   counter_offer_price: number | null;
 };
 
-const PAGE_SIZES = [10, 20, 50];
+const PAGE_SIZES = [10, 20, 50, 100];
 
 type SortField = "creation_date" | "modification_date";
 
@@ -45,6 +45,7 @@ function fmtDateTime(iso: string | null) {
 
 type MarketDayCount = { total: number; byMarket: Record<string, number> };
 
+const startOfTodayIso = (now: Date = new Date()) => new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
 const startOfYesterdayIso = (now: Date = new Date()) => new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1).toISOString();
 
 // Liczy zamówienia z dzisiejszej i wczorajszej doby (czas lokalny) wg daty utworzenia, z podziałem na rynek.
@@ -141,9 +142,9 @@ function TradeInDaySummary() {
 
 export default function TradeInOrdersView({ session, onOpenOrder }: { session: Session; onOpenOrder?: (id: string) => void }) {
   const [orders, setOrders] = useState<Order[]>([]);
-  const [limit, setLimit] = useState(20);
+  const [limit, setLimit] = useState(100);
   const [page, setPage] = useState(1);
-  const [statusFilter, setStatusFilter] = useState<"wszystkie" | "wyslane">("wszystkie");
+  const [statusFilter, setStatusFilter] = useState<"wszystkie" | "wyslane" | "dzisiaj">("wszystkie");
   const [sortField, setSortField] = useState<SortField>("creation_date");
   const [sortAsc, setSortAsc] = useState(false);
   const [totalCount, setTotalCount] = useState<number | null>(null);
@@ -183,6 +184,7 @@ export default function TradeInOrdersView({ session, onOpenOrder }: { session: S
           { count: "exact" }
         );
       if (statusFilter === "wyslane") query = query.eq("status", "SENT");
+      if (statusFilter === "dzisiaj") query = query.gte("creation_date", startOfTodayIso()); // dzisiejsza doba wg czasu przeglądarki, jak kafelek "Zamówienia dzisiaj"
       const [{ data, error: err, count }, meta] = await Promise.all([
         query.order(sortField, { ascending: sortAsc }).range(from, from + limit - 1),
         supabase.from("buyback_orders_sync_meta").select("last_synced_at").eq("id", 1).maybeSingle(),
@@ -258,6 +260,7 @@ export default function TradeInOrdersView({ session, onOpenOrder }: { session: S
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <button onClick={() => { setStatusFilter("wszystkie"); setPage(1); }} className={smallPill(statusFilter === "wszystkie")}>Wszystkie</button>
         <button onClick={() => { setStatusFilter("wyslane"); setPage(1); }} className={smallPill(statusFilter === "wyslane")}>Wysłane</button>
+        <button onClick={() => { setStatusFilter("dzisiaj"); setPage(1); }} className={smallPill(statusFilter === "dzisiaj")}>Dzisiejsze</button>
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
