@@ -574,8 +574,9 @@ export default function Home() {
 
       <main className="flex-1">
         {role === "Admin" && <ReminderBanners session={session} onOpen={(v) => setView(v as ViewKey)} />}
-        <div className="flex items-center justify-between px-8 py-5 border-b border-line">
-          <h1 className="text-lg font-semibold">{TABS.find((t) => t.key === view)?.label}</h1>
+        {/* Tytuł zakładki usunięty (10.10.2026) — zajmował miejsce; pasek zostaje tylko w Magazynie, bo trzyma przycisk "Odśwież". */}
+        {view === "inventory" && (
+        <div className="flex items-center justify-end px-8 py-3 border-b border-line">
           {view === "inventory" && (
             <div className="flex items-center gap-3">
               <button
@@ -591,6 +592,7 @@ export default function Home() {
             </div>
           )}
         </div>
+        )}
 
         <div className="p-8">
           {view === "overview" && (

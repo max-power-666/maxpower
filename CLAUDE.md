@@ -42,6 +42,8 @@ numerach seryjnych, wielokanałowa synchronizacja stanów, naprawy, auto-wycena)
 
 ## Zakładki i role
 
+**Tytuł zakładki nad treścią usunięty (10.10.2026, na prośbę właściciela — "zajmuje tylko miejsce"):** nazwa aktywnej zakładki widać już w menu bocznym, więc nagłówek `<h1>` z paska nad treścią zniknął na wszystkich stronach; pasek z przyciskiem "Odśwież" i datą synchronizacji został tylko w Magazynie (`app/page.tsx`).
+
 Role: **Admin, Manager, Magazyn, Zamówienia, Serwis, Kierownik serwisu (05.10.2026), Testy, Bidder, Trade-in, Kierownik trade-in (07.10.2026)** (+ Sklep). Rolę nadaje Admin w zakładce Zespół (tam też
 imię i nazwisko — `members.name`). Nowa osoba po pierwszym logowaniu dostaje pusty wiersz
 w `members` i ekran "poproś administratora o rolę" (`NoRoleScreen`); sama roli nie wybiera.
