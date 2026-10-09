@@ -12,7 +12,9 @@ import { daysOverdue, fmtDate, isVisibleReminder, nextDueDate, RECURRENCE_LABEL,
 type Active = { id: number; message: string; due_date: string; recurrence: Recurrence; anchor_day: number | null; done_count: number; lead_days?: number };
 type Auto = { key: string; icon: string; text: string; view: string; sub?: { storage: string; value: string } };
 
-export default function ReminderBanners({ session, onOpen }: { session: Session; onOpen: (view: string) => void }) {
+export default function ReminderBanners({ session, role, onOpen }: { session: Session; role: string; onOpen: (view: string) => void }) {
+  const isAdmin = role === "Admin";
+  const isService = role === "Serwis" || role === "Kierownik serwisu"; // nowe zapotrzebowania widzi tylko serwis (10.10.2026)
   const [active, setActive] = useState<Active[]>([]);
   const [auto, setAuto] = useState<Auto[]>([]);
   const today = warsawYmd(Date.now());
@@ -21,11 +23,12 @@ export default function ReminderBanners({ session, onOpen }: { session: Session;
   const load = useCallback(async () => {
     const day = warsawYmd(Date.now());
     const horizon = new Date(Date.now() + 61 * 86_400_000); // najdalszy możliwy termin z wyprzedzeniem (max 60 dni)
+    const none = { data: [], count: 0, error: null };
     const [rem, leave, backlog, reqs] = await Promise.all([
-      supabase.from("reminders").select("id, message, due_date, recurrence, anchor_day, done_count, lead_days").is("done_at", null).lte("due_date", warsawYmd(horizon.getTime())).order("due_date").limit(200),
-      supabase.from("rcp_absences").select("id", { count: "exact", head: true }).eq("status", "oczekuje"),
-      email ? supabase.from("backlog_items").select("id, priority").ilike("assignee_email", email.replace(/[\\%_]/g, "\\$&")).in("status", ["todo", "in_progress", "review"]).limit(500) : Promise.resolve({ data: [], error: null }),
-      supabase.from("service_requests").select("id", { count: "exact", head: true }).eq("status", "nowe"),
+      !isAdmin ? Promise.resolve(none) : supabase.from("reminders").select("id, message, due_date, recurrence, anchor_day, done_count, lead_days").is("done_at", null).lte("due_date", warsawYmd(horizon.getTime())).order("due_date").limit(200),
+      !isAdmin ? Promise.resolve(none) : supabase.from("rcp_absences").select("id", { count: "exact", head: true }).eq("status", "oczekuje"),
+      isAdmin && email ? supabase.from("backlog_items").select("id, priority").ilike("assignee_email", email.replace(/[\\%_]/g, "\\$&")).in("status", ["todo", "in_progress", "review"]).limit(500) : Promise.resolve({ data: [], error: null }),
+      !isService ? Promise.resolve(none) : supabase.from("service_requests").select("id", { count: "exact", head: true }).eq("status", "nowe"),
     ]);
     let remRows = rem.error ? [] : ((rem.data as Active[]) || []);
     if (rem.error?.code === "42703") {
@@ -45,7 +48,7 @@ export default function ReminderBanners({ session, onOpen }: { session: Session;
     const reqN = reqs.error ? 0 : reqs.count ?? 0;
     if (reqN > 0) list.push({ key: "requests", icon: "🔧", text: `Nowe zapotrzebowania dla serwisu: ${reqN}`, view: "sales", sub: { storage: "sales-sub", value: "requests" } });
     setAuto(list);
-  }, [email]);
+  }, [email, isAdmin, isService]);
 
   useEffect(() => {
     load();

@@ -573,7 +573,7 @@ export default function Home() {
       </aside>
 
       <main className="flex-1">
-        {role === "Admin" && <ReminderBanners session={session} onOpen={(v) => setView(v as ViewKey)} />}
+        {(role === "Admin" || role === "Serwis" || role === "Kierownik serwisu") && <ReminderBanners session={session} role={role} onOpen={(v) => setView(v as ViewKey)} />}
         {/* Tytuł zakładki usunięty (10.10.2026) — zajmował miejsce; pasek zostaje tylko w Magazynie, bo trzyma przycisk "Odśwież". */}
         {view === "inventory" && (
         <div className="flex items-center justify-end px-8 py-3 border-b border-line">
