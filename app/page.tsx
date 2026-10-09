@@ -613,8 +613,8 @@ export default function Home() {
             return (
               <div key={g.title ?? `g${gi}`} className={gi > 0 && g.title ? "mt-3" : ""}>
                 {g.title && (
-                  <button onClick={() => toggleGroup(g.title!)} aria-expanded={!collapsed} className="w-full flex items-center justify-between px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-inksoft/70 hover:text-ink">
-                    <span>{g.title}</span>
+                  <button onClick={() => toggleGroup(g.title!)} aria-expanded={!collapsed} className="w-full flex items-center justify-between gap-2 px-2 pb-1 text-left text-[10px] font-semibold uppercase tracking-wide text-inksoft/70 hover:text-ink">
+                    <span className="whitespace-nowrap text-left">{g.title}</span>
                     <span className="text-[9px]">{collapsed ? "▸" : "▾"}</span>
                   </button>
                 )}
