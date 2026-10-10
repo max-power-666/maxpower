@@ -136,29 +136,19 @@ export default function ConsoleCatalogView({ isAdmin = false, canSeePrices = fal
       <div className="bg-white border border-line overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-xs text-inksoft border-b border-line">
-              <th colSpan={5} className="p-2"></th>
-              <th colSpan={3} className="p-2 text-center border-l border-line">SKU (z kontrolerami)</th>
-              <th colSpan={3} className="p-2 text-center border-l border-line">SKU bez info o kontrolerach</th>
-            </tr>
             <tr className="text-left text-xs text-inksoft border-b border-line">
               <th className="p-3">Producent</th>
               <th className="p-3">Nazwa</th>
               <th className="p-3">Akcesoria</th>
               <th className="p-3">Kolor</th>
               <th className="p-3">Pamięć</th>
-              <th className="p-3 border-l border-line">Zadowalający</th>
-              <th className="p-3">Dobry</th>
-              <th className="p-3">Bardzo dobry</th>
-              <th className="p-3 border-l border-line">Zadowalający</th>
-              <th className="p-3">Dobry</th>
-              <th className="p-3">Bardzo dobry</th>
+              <th className="p-3 border-l border-line">SKU <span className="font-normal">(klasa · z kontrolerami · bez info o kontrolerach)</span></th>
               {isAdmin && <th className="p-3"></th>}
             </tr>
           </thead>
           <tbody>
             {!loading && shown.length === 0 && !error && (
-              <tr><td colSpan={isAdmin ? 12 : 11} className="p-6 text-center text-inksoft text-sm">{rows.length === 0 ? "Katalog jest pusty." : "Brak wyników."}</td></tr>
+              <tr><td colSpan={isAdmin ? 7 : 6} className="p-6 text-center text-inksoft text-sm">{rows.length === 0 ? "Katalog jest pusty." : "Brak wyników."}</td></tr>
             )}
             {shown.map((r) => (
               <tr key={r.id} className="border-b border-line last:border-0 align-top">
@@ -167,12 +157,25 @@ export default function ConsoleCatalogView({ isAdmin = false, canSeePrices = fal
                 <td className="p-3 text-xs whitespace-nowrap">{cell(r, "accessories", "w-24 text-xs")}</td>
                 <td className="p-3 text-xs whitespace-nowrap">{cell(r, "color", "w-20 text-xs")}</td>
                 <td className="p-3 text-xs whitespace-nowrap">{cell(r, "storage", "w-20 text-xs")}</td>
-                <td className="p-3 border-l border-line">{cell(r, "sku_satisfactory", "w-40 font-mono text-xs")}</td>
-                <td className="p-3">{cell(r, "sku_good", "w-40 font-mono text-xs")}</td>
-                <td className="p-3">{cell(r, "sku_very_good", "w-40 font-mono text-xs")}</td>
-                <td className="p-3 border-l border-line"><Sku v={skuWithoutControllers(r.sku_satisfactory)} /></td>
-                <td className="p-3"><Sku v={skuWithoutControllers(r.sku_good)} /></td>
-                <td className="p-3"><Sku v={skuWithoutControllers(r.sku_very_good)} /></td>
+                <td className="p-3 border-l border-line">
+                  {/* wszystkie SKU modelu w jednej kolumnie: klasa A (bardzo dobry), B (dobry), C (zadowalający) */}
+                  <div className="space-y-1">
+                    {(
+                      [
+                        ["A", "sku_very_good"],
+                        ["B", "sku_good"],
+                        ["C", "sku_satisfactory"],
+                      ] as const
+                    ).map(([cls, field]) => (
+                      <div key={field} className="flex items-center gap-2">
+                        <span className="w-4 shrink-0 text-xs font-semibold text-inksoft" title={cls === "A" ? "bardzo dobry" : cls === "B" ? "dobry" : "zadowalający"}>{cls}</span>
+                        {cell(r, field, "w-44 font-mono text-xs")}
+                        <span className="text-inksoft">·</span>
+                        <span className="font-mono text-xs text-inksoft whitespace-nowrap">{skuWithoutControllers(r[field]) ?? "—"}</span>
+                      </div>
+                    ))}
+                  </div>
+                </td>
                 {isAdmin && (
                   <td className="p-3 whitespace-nowrap text-xs">
                     <button onClick={() => insertRow(r)} title="Powiel wiersz (np. inny kolor lub liczba padów)" className="text-teal font-semibold hover:underline mr-3">Duplikuj</button>
@@ -185,7 +188,7 @@ export default function ConsoleCatalogView({ isAdmin = false, canSeePrices = fal
         </table>
       </div>
       <p className="text-[11px] text-inksoft mt-3 max-w-4xl">
-        Stany: zadowalający = klasa C, dobry = B, bardzo dobry = A (ostatni człon SKU). SKU bez info o kontrolerach to SKU bez końcówki -0M / -1M / -2M — tak samo wyglądają SKU sztuk w Magazynie. Pusty wiersz oznacza model bez przypisanych SKU.{isAdmin && " Admin edytuje komórki wprost (Enter lub wyjście z pola zapisuje, Esc anuluje), dodaje wiersze przyciskiem „+ Dodaj wiersz” albo „Duplikuj” (kopia wiersza z nową nazwą do poprawienia). Kolumny „bez info o kontrolerach” liczą się same z SKU obok."}
+        Wszystkie SKU modelu są w jednej kolumnie: klasa A = bardzo dobry, B = dobry, C = zadowalający (ostatni człon SKU); po kropce SKU bez info o kontrolerach — bez końcówki -0M / -1M / -2M, tak samo wyglądają SKU sztuk w Magazynie. Pusty wiersz oznacza model bez przypisanych SKU.{isAdmin && " Admin edytuje komórki wprost (Enter lub wyjście z pola zapisuje, Esc anuluje), dodaje wiersze przyciskiem „+ Dodaj wiersz” albo „Duplikuj” (kopia wiersza z nową nazwą do poprawienia). SKU bez info o kontrolerach (po kropce) liczy się samo z SKU obok."}
       </p>
       </>
       )}
