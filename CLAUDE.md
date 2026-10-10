@@ -127,6 +127,7 @@ same liczby co w Magazyn → Podsumowanie), "Gotowe do sprzedaży"/"W naprawie" 
   `lib/salesOrders.ts` dla kafelków Zamówień dzisiaj/wczoraj, tylko tu dowolna liczba dni) — serwer
   (`app/api/overview/sales-stats`) oddaje surowe, już przeliczone na PLN wiersze z ~35-dniowym zapasem, a
   bucketing liczy klient, żeby "dzisiaj" zawsze zgadzało się z zegarem patrzącej osoby, nie z serwerem Vercela.
+- **Średnia dzienna zamówień (10.10.2026, na prośbę właściciela):** w kafelku "Ilość zamówień z 30 dni" po prawej stronie stoi "średnio X,X / dzień" = liczba z tego kafelka ÷ 30 (te same 30 pełnych dni przed dzisiaj, bez dzisiaj; jedno miejsce po przecinku). Liczone w przeglądarce, bez zmian w API i bazie.
 - **Zamówienia filtrowane tym samym `isCountedOrder`/`NOT_COUNTED`** co kafelki Zamówienia dzisiaj/wczoraj w
   `SalesOrdersHub.tsx` (`lib/salesOrders.ts`) — nie osobna, druga definicja "co się liczy".
 - **Różne waluty (EUR/DKK/PLN — sprawdzone na żywych danych 01.10.2026: Back Market/refurbed/Octopia/Amazon

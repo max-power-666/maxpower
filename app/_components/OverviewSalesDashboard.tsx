@@ -74,7 +74,13 @@ export default function OverviewSalesDashboard({ session }: { session: Session }
         </div>
         <div className="bg-white p-5">
           <div className="text-xs text-inksoft mb-2">ILOŚĆ ZAMÓWIEŃ Z 30 DNI</div>
-          <div className="text-2xl font-bold font-mono">{range30.count}</div>
+          <div className="flex items-baseline justify-between gap-3">
+            <div className="text-2xl font-bold font-mono">{range30.count}</div>
+            {/* średnia dzienna z tych samych 30 pełnych dni (bez dzisiaj), co liczba obok */}
+            <div className="text-xs text-inksoft whitespace-nowrap" title="Średnia dzienna z ostatnich 30 pełnych dni (bez dzisiaj)">
+              średnio <span className="font-semibold text-ink">{(range30.count / 30).toLocaleString("pl-PL", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</span> / dzień
+            </div>
+          </div>
         </div>
         <div className="bg-white p-5">
           <div className="text-xs text-inksoft mb-2">WARTOŚĆ ZAMÓWIEŃ Z 30 DNI</div>
