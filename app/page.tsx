@@ -708,7 +708,7 @@ export default function Home() {
 
               {invSub === "raw" && <InventoryRawView reloadKey={rawReloadKey} members={members} />}
 
-              {invSub === "catalog" && <ConsoleCatalogView isAdmin={role === "Admin"} />}
+              {invSub === "catalog" && <ConsoleCatalogView isAdmin={role === "Admin"} canSeePrices={role === "Admin" || role === "Manager"} />}
             </div>
           )}
 

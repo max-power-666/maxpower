@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import InlineEditCell from "./InlineEditCell";
+import ConsoleSkuPrices from "./ConsoleSkuPrices";
 
 // Magazyn -> Katalog konsol (06.10.2026, na prośbę właściciela): katalog modeli konsol z SKU wg stanu (zadowalający / dobry / bardzo dobry).
 // Dane z arkusza właściciela (supabase/console-catalog.sql). Czytają wszyscy zalogowani; EDYTUJE tylko Admin (komórki, dodawanie, duplikowanie i usuwanie wierszy — RLS pilnuje też w bazie). SKU w katalogu kończy się liczbą kontrolerów (-0M/-1M/-2M);
@@ -26,12 +27,13 @@ export const skuWithoutControllers = (sku: string | null | undefined) => (sku ? 
 const pill = (active: boolean) => `px-3 py-1.5 rounded-full text-sm font-semibold border ${active ? "bg-ink text-paper border-ink" : "bg-white border-line"}`;
 const Sku = ({ v }: { v: string | null }) => (v ? <span className="font-mono text-xs whitespace-nowrap">{v}</span> : <span className="text-inksoft">—</span>);
 
-export default function ConsoleCatalogView({ isAdmin = false }: { isAdmin?: boolean }) {
+export default function ConsoleCatalogView({ isAdmin = false, canSeePrices = false }: { isAdmin?: boolean; canSeePrices?: boolean }) {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [maker, setMaker] = useState("all");
+  const [mode, setMode] = useState<"models" | "prices">("models"); // "SKU i ceny" tylko dla Admina i Managera (ceny skupu z Biddera)
 
   async function load() {
     const { data, error: err } = await supabase.from("console_catalog").select("*").order("position").order("id").limit(1000);
@@ -104,6 +106,12 @@ export default function ConsoleCatalogView({ isAdmin = false }: { isAdmin?: bool
 
   return (
     <div>
+      {canSeePrices && (
+        <div className="flex gap-2 mb-3">
+          <button onClick={() => setMode("models")} className={pill(mode === "models")}>Modele</button>
+          <button onClick={() => setMode("prices")} className={pill(mode === "prices")}>SKU i ceny</button>
+        </div>
+      )}
       <div className="flex items-center gap-3 flex-wrap mb-3">
         <input
           value={search}
@@ -115,12 +123,16 @@ export default function ConsoleCatalogView({ isAdmin = false }: { isAdmin?: bool
         {makers.map((m) => (
           <button key={m} onClick={() => setMaker(m)} className={pill(maker === m)}>{m}</button>
         ))}
-        {isAdmin && <button onClick={() => insertRow()} className="bg-ink text-paper px-4 py-2 rounded text-sm font-semibold">+ Dodaj wiersz</button>}
+        {isAdmin && mode === "models" && <button onClick={() => insertRow()} className="bg-ink text-paper px-4 py-2 rounded text-sm font-semibold">+ Dodaj wiersz</button>}
         <span className="text-xs text-inksoft ml-auto">{shown.length} z {rows.length} pozycji</span>
       </div>
 
       {error && <p className="text-rust text-xs mb-3">{error}</p>}
 
+      {mode === "prices" && canSeePrices ? (
+        <ConsoleSkuPrices rows={shown} />
+      ) : (
+      <>
       <div className="bg-white border border-line overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -175,6 +187,8 @@ export default function ConsoleCatalogView({ isAdmin = false }: { isAdmin?: bool
       <p className="text-[11px] text-inksoft mt-3 max-w-4xl">
         Stany: zadowalający = klasa C, dobry = B, bardzo dobry = A (ostatni człon SKU). SKU bez info o kontrolerach to SKU bez końcówki -0M / -1M / -2M — tak samo wyglądają SKU sztuk w Magazynie. Pusty wiersz oznacza model bez przypisanych SKU.{isAdmin && " Admin edytuje komórki wprost (Enter lub wyjście z pola zapisuje, Esc anuluje), dodaje wiersze przyciskiem „+ Dodaj wiersz” albo „Duplikuj” (kopia wiersza z nową nazwą do poprawienia). Kolumny „bez info o kontrolerach” liczą się same z SKU obok."}
       </p>
+      </>
+      )}
     </div>
   );
 }
