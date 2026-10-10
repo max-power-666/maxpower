@@ -1,62 +1,32 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabaseClient";
-import { BIDDER_FEE_PCT, BIDDER_FIXED_FEE_EUR } from "@/lib/bidderPln";
-import { CONSOLE_MARKUP_DEFAULT, buildConsolePriceRows, type BidderSkuLite, type CatalogRowLite } from "@/lib/consolePrices";
+import { useState } from "react";
+import { buildConsolePriceRows, type BidderSkuLite, type CatalogRowLite } from "@/lib/consolePrices";
 
 // Magazyn -> Katalog konsol -> "SKU i ceny" (10.10.2026, na prośbę właściciela; odpowiednik pliku ceny-konsol-z-biddera.xlsx): każdy SKU z katalogu w jednej kolumnie,
 // obok cena skupu wyliczona z ceny max w Bidderze i sugerowana cena sprzedaży (narzut domyślnie 50%). Liczone NA ŻYWO z buyback_skus i najświeższego kursu EUR z NBP,
-// więc zmiana ceny max w Bidderze od razu zmienia ceny tutaj. Tylko do odczytu; narzut można zmienić (zapamiętywany lokalnie w przeglądarce, nic nie zapisuje w bazie).
+// więc zmiana ceny max w Bidderze od razu zmienia ceny tutaj. Dane (Bidder, kurs, narzut) wczytuje i trzyma widok katalogu (ConsoleCatalogView) — wspólne dla pigułek
+// Modele i SKU i ceny. Tylko do odczytu.
 
-const MARKUP_KEY = "console-markup-pct";
 const fmtPln = (n: number | null) => (n === null ? "—" : `${n.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} zł`);
 const fmtEur = (n: number | null) => (n === null ? "—" : `${n.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`);
-const fmtDate = (d: string) => `${d.slice(8, 10)}.${d.slice(5, 7)}.${d.slice(0, 4)}`;
 const pill = (active: boolean) => `px-3 py-1.5 rounded-full text-sm font-semibold border ${active ? "bg-ink text-paper border-ink" : "bg-white border-line"}`;
 
-export default function ConsoleSkuPrices({ rows }: { rows: CatalogRowLite[] }) {
-  const [bidder, setBidder] = useState<Map<string, BidderSkuLite> | null>(null);
-  const [rate, setRate] = useState<{ mid: number; date: string } | null>(null);
-  const [error, setError] = useState("");
-  const [markupPct, setMarkupPct] = useState(String(CONSOLE_MARKUP_DEFAULT * 100));
+export default function ConsoleSkuPrices({
+  rows,
+  bidder,
+  eurRate,
+  markup,
+}: {
+  rows: CatalogRowLite[];
+  bidder: Map<string, BidderSkuLite> | null;
+  eurRate: number | null;
+  markup: number;
+}) {
   const [onlyPriced, setOnlyPriced] = useState(false);
-
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(MARKUP_KEY);
-      if (saved !== null && saved !== "" && Number.isFinite(Number(saved))) setMarkupPct(saved);
-    } catch {
-      /* localStorage niedostępne — zostaje domyślny narzut */
-    }
-  }, []);
-
-  useEffect(() => {
-    (async () => {
-      const [{ data: skus, error: err1 }, { data: nbp }] = await Promise.all([
-        supabase.from("buyback_skus").select("sku, max_price, ignored").limit(5000),
-        supabase.from("nbp_rates").select("mid, rate_date").eq("currency", "EUR").order("rate_date", { ascending: false }).limit(1).maybeSingle(),
-      ]);
-      if (err1) return setError(`Nie udało się wczytać cen z Biddera: ${err1.message}`);
-      setBidder(new Map(((skus as BidderSkuLite[]) || []).map((s) => [s.sku, s])));
-      if (nbp) setRate({ mid: Number(nbp.mid), date: nbp.rate_date as string });
-    })();
-  }, []);
-
-  const markup = Number(markupPct.replace(",", ".")) / 100;
-  const markupOk = Number.isFinite(markup) && markup >= 0;
-  const all = useMemo(() => (bidder ? buildConsolePriceRows(rows, bidder, rate?.mid ?? null, markupOk ? markup : CONSOLE_MARKUP_DEFAULT) : []), [rows, bidder, rate, markup, markupOk]);
+  const all = bidder ? buildConsolePriceRows(rows, bidder, eurRate, markup) : [];
   const shown = onlyPriced ? all.filter((r) => r.buyPln !== null) : all;
   const pricedCount = all.filter((r) => r.buyPln !== null).length;
-
-  function changeMarkup(v: string) {
-    setMarkupPct(v);
-    try {
-      localStorage.setItem(MARKUP_KEY, v);
-    } catch {
-      /* ignorujemy */
-    }
-  }
 
   // Eksport do CSV (średniki + BOM, jak w RCP) — dla tego, co jest teraz na ekranie.
   function exportCsv() {
@@ -73,22 +43,11 @@ export default function ConsoleSkuPrices({ rows }: { rows: CatalogRowLite[] }) {
 
   return (
     <div>
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border border-line bg-white px-4 py-3 mb-3 text-sm">
-        <span className="text-xs font-semibold text-inksoft">ZAŁOŻENIA</span>
-        <span>Kurs EUR (NBP{rate ? `, ${fmtDate(rate.date)}` : ""}): <span className="font-semibold">{rate ? rate.mid.toFixed(4) : "brak"}</span></span>
-        <span>Prowizja BM: <span className="font-semibold">{Math.round(BIDDER_FEE_PCT * 100)}%</span></span>
-        <span>Opłata stała: <span className="font-semibold">{BIDDER_FIXED_FEE_EUR.toFixed(2).replace(".", ",")} €</span></span>
-        <label className="flex items-center gap-2">Narzut:
-          <input value={markupPct} onChange={(e) => changeMarkup(e.target.value)} inputMode="decimal" className={`w-16 border px-2 py-1 rounded text-sm ${markupOk ? "border-line" : "border-rust"}`} />
-          %
-        </label>
+      <div className="flex flex-wrap items-center gap-3 mb-3">
         <button onClick={() => setOnlyPriced((v) => !v)} className={pill(onlyPriced)}>Tylko z ceną</button>
         <button onClick={exportCsv} className="px-3 py-1.5 rounded-full text-sm font-semibold border border-line bg-white">Pobierz CSV</button>
         <span className="text-xs text-inksoft ml-auto">{shown.length} SKU · z ceną {pricedCount}</span>
       </div>
-
-      {error && <p className="text-rust text-xs mb-3">{error}</p>}
-      {!rate && bidder && <p className="text-rust text-xs mb-3">Brak kursu EUR w tabeli NBP — ceny skupu nie mogą być policzone (odśwież kursy w zakładce NBP).</p>}
 
       <div className="bg-white border border-line overflow-x-auto">
         <table className="w-full text-sm">
@@ -105,7 +64,7 @@ export default function ConsoleSkuPrices({ rows }: { rows: CatalogRowLite[] }) {
             </tr>
           </thead>
           <tbody>
-            {!bidder && !error && <tr><td colSpan={8} className="p-6 text-center text-inksoft text-sm">Wczytywanie cen z Biddera…</td></tr>}
+            {!bidder && <tr><td colSpan={8} className="p-6 text-center text-inksoft text-sm">Wczytywanie cen z Biddera…</td></tr>}
             {bidder && shown.length === 0 && <tr><td colSpan={8} className="p-6 text-center text-inksoft text-sm">Brak SKU do pokazania.</td></tr>}
             {shown.map((r) => (
               <tr key={r.key} className="border-b border-line last:border-0 align-top">
@@ -124,7 +83,7 @@ export default function ConsoleSkuPrices({ rows }: { rows: CatalogRowLite[] }) {
       </div>
       <p className="text-[11px] text-inksoft mt-3 max-w-4xl">
         Cena skupu = (cena max w Bidderze × (1 + prowizja) + opłata stała) × kurs EUR — ten sam wzór co kolumna „Cena PLN” w Bidderze. Sugerowana cena = cena skupu × (1 + narzut). SKU katalogu łączymy z SKU Biddera bez koloru (PS5S-1TB-WE-A-1M → PS5S-1TB-A-1M);
-        zakładamy, że klasy A/B/C w Bidderze to te same klasy co w katalogu. To cena MAX, czyli górna granica — Bidder często kupuje taniej. Cena max 0 € albo 10 € oznacza „nie skupujemy”, więc ceny nie liczymy. Narzut zmieniasz tylko lokalnie (w tej przeglądarce).
+        zakładamy, że klasy A/B/C w Bidderze to te same klasy co w katalogu. To cena MAX, czyli górna granica — Bidder często kupuje taniej. Cena max 0 € albo 10 € oznacza „nie skupujemy”, więc ceny nie liczymy.
       </p>
     </div>
   );
