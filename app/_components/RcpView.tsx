@@ -435,6 +435,9 @@ function DayDrawer({ session, cell, segs, members, isAdmin, onClose, onChanged }
     setForm(s ? { kind: s.kind, start: toLocalInput(s.started_at), end: toLocalInput(s.ended_at), reason: "" } : { kind: "praca", start: base, end: `${cell.day}T16:00`, reason: "" });
   }
   async function save() {
+    // Zapisz jest zawsze klikalny, a brak uzasadnienia/początku dostaje czytelny komunikat (wcześniej przycisk był nieaktywny bez żadnego wyjaśnienia).
+    if (!form.start) return setError("Podaj początek wpisu.");
+    if (form.reason.trim().length < 3) return setError("Wpisz uzasadnienie korekty (min. 3 znaki) — trafia do historii wpisu.");
     setBusy(true);
     setError("");
     try {
@@ -471,7 +474,7 @@ function DayDrawer({ session, cell, segs, members, isAdmin, onClose, onChanged }
           </div>
           <button onClick={onClose} className="text-inksoft text-lg">✕</button>
         </div>
-        {error && <p className="text-rust text-xs mb-3">{error}</p>}
+        {error && editing === null && <p className="text-rust text-xs mb-3">{error}</p>}
         <div className="border border-line bg-white mb-4">
           {todays.length === 0 && <div className="p-3 text-sm text-inksoft">Brak wpisów tego dnia.</div>}
           {todays.map((s) => (
@@ -513,10 +516,11 @@ function DayDrawer({ session, cell, segs, members, isAdmin, onClose, onChanged }
               <label className="text-xs font-semibold text-inksoft">Koniec<input type="datetime-local" value={form.end} onChange={(e) => setForm({ ...form, end: e.target.value })} className={inp + " mt-1 font-normal"} /></label>
             </div>
             <label className="text-xs font-semibold text-inksoft block">Uzasadnienie (wymagane — trafia do historii wpisu)
-              <input value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} placeholder="np. zapomniał kliknąć Zakończ, wyszedł o 16:00" className={inp + " mt-1 font-normal"} />
+              <input value={form.reason} onChange={(e) => { setForm({ ...form, reason: e.target.value }); setError(""); }} placeholder="np. zapomniał kliknąć Zakończ, wyszedł o 16:00" className={inp + " mt-1 font-normal"} />
             </label>
+            {error && <p className="text-rust text-xs font-semibold">{error}</p>}
             <div className="flex gap-2">
-              <button onClick={save} disabled={busy || form.reason.trim().length < 3 || !form.start} className="bg-ink text-paper px-4 py-2 rounded text-sm font-semibold disabled:opacity-50">{busy ? "Zapisywanie…" : "Zapisz"}</button>
+              <button onClick={save} disabled={busy} className="bg-ink text-paper px-4 py-2 rounded text-sm font-semibold disabled:opacity-50">{busy ? "Zapisywanie…" : "Zapisz"}</button>
               <button onClick={() => setEditing(null)} className="px-4 py-2 border border-line rounded text-sm font-semibold">Anuluj</button>
             </div>
           </div>
