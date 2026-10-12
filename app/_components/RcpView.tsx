@@ -234,7 +234,11 @@ function NowBoard({ members }: { members: MemberLite[] }) {
     const cur = open.find((s) => s.user_id === m.user_id) ?? null;
     const mine = todaySegs.filter((s) => s.user_id === m.user_id);
     const day = summarizeDays(mine, now).get(warsawDay(now));
-    return { m, cur, workMs: day?.workMs ?? 0, breakMs: day?.breakMs ?? 0, last: mine.length ? mine[mine.length - 1] : null };
+    // Od / Do (12.10.2026): godzina ROZPOCZĘCIA pracy (pierwszy start dziś) i ZAKOŃCZENIA (koniec ostatniego odcinka; puste, gdy praca trwa). Odcinek otwarty z poprzedniej doby
+    // (praca przez północ) nie jest w dzisiejszych wpisach — wtedy "Od" bierzemy z jego początku.
+    const startMs = day?.firstStartMs ?? (cur ? Date.parse(cur.started_at) : null);
+    const endMs = cur ? null : day?.lastEndMs ?? null;
+    return { m, cur, workMs: day?.workMs ?? 0, breakMs: day?.breakMs ?? 0, startMs, endMs, last: mine.length ? mine[mine.length - 1] : null };
   });
   const rank = (r: (typeof rows)[number]) => (r.cur?.kind === "praca" || r.cur?.kind === "administracja" ? 0 : r.cur ? 1 : r.last ? 2 : 3);
   rows.sort((a, b) => rank(a) - rank(b) || displayNameForEmail(a.m.email, members).localeCompare(displayNameForEmail(b.m.email, members), "pl"));
@@ -262,25 +266,27 @@ function NowBoard({ members }: { members: MemberLite[] }) {
             <tr className="text-left text-xs text-inksoft border-b border-line">
               <th className="p-3">Pracownik</th>
               <th className="p-3">Status</th>
-              <th className="p-3">Od</th>
+              <th className="p-3" title="Godzina rozpoczęcia pracy dziś (pierwszy start)">Od</th>
+              <th className="p-3" title="Godzina zakończenia pracy dziś (puste, gdy praca trwa)">Do</th>
               <th className="p-3 text-right" title="Czas przerwy dziś / płatna przerwa 0:30">Przerwa dziś</th>
               <th className="p-3 text-right">Dziś przepracowano</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map(({ m, cur, workMs, breakMs, last }) => (
+            {rows.map(({ m, cur, workMs, breakMs, startMs, endMs, last }) => (
               <tr key={m.user_id} className="border-b border-line last:border-0">
                 <td className="p-3 font-semibold">{displayNameForEmail(m.email, members)}</td>
                 <td className="p-3">
                   {cur ? (
-                    <span className={`text-xs font-semibold px-2 py-1 rounded ${KIND_STYLE[cur.kind]}`}>{cur.kind === "praca" ? "W pracy" : RCP_KIND_LABEL[cur.kind]}</span>
+                    <span title={`${cur.kind === "praca" ? "W pracy" : RCP_KIND_LABEL[cur.kind]} od ${fmtClock(Date.parse(cur.started_at))}`} className={`text-xs font-semibold px-2 py-1 rounded ${KIND_STYLE[cur.kind]}`}>{cur.kind === "praca" ? "W pracy" : RCP_KIND_LABEL[cur.kind]}</span>
                   ) : last ? (
                     <span className="text-xs text-inksoft">Zakończył(a) o {fmtClock(last.ended_at ? Date.parse(last.ended_at) : null)}</span>
                   ) : (
                     <span className="text-xs text-inksoft">Nie rozpoczął(a)</span>
                   )}
                 </td>
-                <td className="p-3 font-mono text-xs">{cur ? fmtClock(Date.parse(cur.started_at)) : "—"}</td>
+                <td className="p-3 font-mono text-xs">{fmtClock(startMs)}</td>
+                <td className="p-3 font-mono text-xs">{fmtClock(endMs)}</td>
                 <td className="p-3 text-right font-mono" title={breakMs > PAID_BREAK_MS ? `${fmtHm(breakMs - PAID_BREAK_MS)} poza płatną przerwą` : undefined}>
                   {breakMs ? (
                     <span className={breakMs > PAID_BREAK_MS ? "text-amber font-semibold" : "text-inksoft"}>{fmtHm(breakMs)} / {fmtHm(PAID_BREAK_MS)}</span>
@@ -291,11 +297,11 @@ function NowBoard({ members }: { members: MemberLite[] }) {
                 <td className="p-3 text-right font-mono font-semibold">{workMs ? fmtHm(workMs) : "—"}</td>
               </tr>
             ))}
-            {rows.length === 0 && !error && <tr><td colSpan={5} className="p-6 text-center text-inksoft text-sm">Brak pracowników.</td></tr>}
+            {rows.length === 0 && !error && <tr><td colSpan={6} className="p-6 text-center text-inksoft text-sm">Brak pracowników.</td></tr>}
           </tbody>
         </table>
       </div>
-      <p className="text-[11px] text-inksoft mt-3">Odświeża się co 30 s. Osoby z rolą "Admin" i "Manager" też rejestrują czas (widżet na lewym pasku).</p>
+      <p className="text-[11px] text-inksoft mt-3">„Od” = godzina rozpoczęcia pracy dziś, „Do” = zakończenia (puste, gdy praca trwa); od kiedy trwa bieżący status (np. przerwa) widać po najechaniu na status. Odświeża się co 30 s. Osoby z rolą "Admin" i "Manager" też rejestrują czas (widżet na lewym pasku).</p>
     </div>
   );
 }
