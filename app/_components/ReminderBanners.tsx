@@ -14,6 +14,8 @@ type Auto = { key: string; icon: string; text: string; view: string; sub?: { sto
 
 export default function ReminderBanners({ session, role, onOpen }: { session: Session; role: string; onOpen: (view: string) => void }) {
   const isAdmin = role === "Admin";
+  const isManager = role === "Manager"; // Manager widzi tylko wnioski urlopowe do rozpatrzenia (12.10.2026) — przypomnienia i Backlog zostają dla Admina
+  const canDecideLeave = isAdmin || isManager;
   const isService = role === "Serwis" || role === "Kierownik serwisu"; // nowe zapotrzebowania widzi tylko serwis (10.10.2026)
   const [active, setActive] = useState<Active[]>([]);
   const [auto, setAuto] = useState<Auto[]>([]);
@@ -26,7 +28,11 @@ export default function ReminderBanners({ session, role, onOpen }: { session: Se
     const none = { data: [], count: 0, error: null };
     const [rem, leave, backlog, reqs] = await Promise.all([
       !isAdmin ? Promise.resolve(none) : supabase.from("reminders").select("id, message, due_date, recurrence, anchor_day, done_count, lead_days").is("done_at", null).lte("due_date", warsawYmd(horizon.getTime())).order("due_date").limit(200),
-      !isAdmin ? Promise.resolve(none) : supabase.from("rcp_absences").select("id", { count: "exact", head: true }).eq("status", "oczekuje"),
+      !canDecideLeave ? Promise.resolve(none) : (() => {
+        let q = supabase.from("rcp_absences").select("id", { count: "exact", head: true }).eq("status", "oczekuje");
+        if (!isAdmin) q = q.neq("user_id", session.user.id); // Manager nie rozpatruje własnego wniosku (robi to Admin) — jego wniosku nie liczymy
+        return q;
+      })(),
       !isAdmin ? Promise.resolve(none) : supabase.from("backlog_items").select("id", { count: "exact", head: true }).neq("status", "done"),
       !isService ? Promise.resolve(none) : supabase.from("service_requests").select("id", { count: "exact", head: true }).eq("status", "nowe"),
     ]);
@@ -45,7 +51,7 @@ export default function ReminderBanners({ session, role, onOpen }: { session: Se
     const reqN = reqs.error ? 0 : reqs.count ?? 0;
     if (reqN > 0) list.push({ key: "requests", icon: "🔧", text: `Nowe zapotrzebowania dla serwisu: ${reqN}`, view: "sales", sub: { storage: "sales-sub", value: "requests" } });
     setAuto(list);
-  }, [isAdmin, isService]);
+  }, [isAdmin, canDecideLeave, isService, session.user.id]);
 
   useEffect(() => {
     load();
