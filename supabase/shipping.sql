@@ -137,11 +137,13 @@ create table if not exists shipping_rules (
   template_id bigint references shipping_templates(id) on delete set null,
   carrier text check (carrier in ('parcel', 'express', 'ups')),
   product_code text,                                   -- kod produktu przewoźnika (DHL Parcel: EK/PI/CP; UPS: 07/11/54/65; Express: ECONOMY = Economy Select)
+  signature boolean not null default false,            -- usługa UPS "podpis przy doręczeniu" (dodana 12.10.2026)
   created_by_email text,
   created_at timestamptz not null default now(),
   check ((sku_op is null) = (sku_value is null))
   -- brak CHECK "musi coś ustawiać": po usunięciu szablonu template_id wraca do NULL (on delete set null) i taki check blokowałby usunięcie szablonu; pilnuje tego formularz
 );
+alter table shipping_rules add column if not exists signature boolean not null default false;   -- dla baz, w których tabela powstała przed dodaniem podpisu
 create index if not exists shipping_rules_position_idx on shipping_rules (position, id);
 
 alter table shipping_rules enable row level security;

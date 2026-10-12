@@ -34,8 +34,9 @@ type Draft = {
   templateId: string;
   carrier: "" | ShippingCarrier;
   product: string;
+  signature: boolean;
 };
-const EMPTY: Draft = { name: "", skuOp: "starts_with", skuValue: "", country: "", method: "", templateId: "", carrier: "", product: "" };
+const EMPTY: Draft = { name: "", skuOp: "starts_with", skuValue: "", country: "", method: "", templateId: "", carrier: "", product: "", signature: false };
 
 export default function ShippingRulesView({
   session,
@@ -68,7 +69,7 @@ export default function ShippingRulesView({
     setEditingId(r?.id ?? null);
     setDraft(
       r
-        ? { name: r.name ?? "", skuOp: r.sku_op ?? "starts_with", skuValue: r.sku_value ?? "", country: r.country_code ?? "", method: r.shipping_method ?? "", templateId: r.template_id ? String(r.template_id) : "", carrier: r.carrier ?? "", product: r.product_code ?? "" }
+        ? { name: r.name ?? "", skuOp: r.sku_op ?? "starts_with", skuValue: r.sku_value ?? "", country: r.country_code ?? "", method: r.shipping_method ?? "", templateId: r.template_id ? String(r.template_id) : "", carrier: r.carrier ?? "", product: r.product_code ?? "", signature: !!r.signature }
         : EMPTY
     );
   }
@@ -76,7 +77,7 @@ export default function ShippingRulesView({
   async function save() {
     setError("");
     const skuValue = draft.skuValue.trim();
-    if (!draft.templateId && !draft.carrier) return setError("Wybierz, co reguła ma ustawić: szablon paczki i/lub przewoźnika.");
+    if (!draft.templateId && !draft.carrier && !draft.signature) return setError("Wybierz, co reguła ma ustawić: szablon paczki, przewoźnika i/lub podpis przy doręczeniu.");
     setBusy(true);
     const row = {
       name: draft.name.trim() || null,
@@ -87,6 +88,7 @@ export default function ShippingRulesView({
       template_id: draft.templateId ? Number(draft.templateId) : null,
       carrier: draft.carrier || null,
       product_code: draft.carrier && draft.product ? draft.product : null,
+      signature: draft.signature,
     };
     const { error: err } = editingId
       ? await supabase.from("shipping_rules").update(row).eq("id", editingId)
@@ -205,6 +207,11 @@ export default function ShippingRulesView({
               </select>
             </div>
           </div>
+          <label className="flex items-center gap-2 text-sm font-semibold mb-4">
+            <input type="checkbox" checked={draft.signature} onChange={(e) => set({ signature: e.target.checked })} />
+            Podpis przy doręczeniu (UPS)
+            <span className="text-xs font-normal text-inksoft">— włącza usługę dodatkową, gdy wysyłka idzie przez UPS (nie łączy się z pobraniem; zagranicą UPS dolicza opłatę)</span>
+          </label>
           <div className="flex gap-2">
             <button onClick={save} disabled={busy} className="bg-ink text-paper px-4 py-2 rounded text-sm font-semibold disabled:opacity-50">{busy ? "Zapisywanie…" : editingId ? "Zapisz zmiany" : "Dodaj regułę"}</button>
             <button onClick={() => { setFormOpen(false); setEditingId(null); setError(""); }} className="px-4 py-2 border border-line rounded text-sm font-semibold">Anuluj</button>
@@ -275,6 +282,7 @@ export default function ShippingRulesView({
             <div>
               Szablon: <span className="font-semibold">{testResult.templateId !== null ? templateName(testResult.templateId) ?? "(usunięty)" : "— bez zmiany —"}</span>
               {" · "}Przewoźnik: <span className="font-semibold">{testResult.carrier ? [CARRIER_NAME[testResult.carrier], productName(testResult.carrier, testResult.productCode)].filter(Boolean).join(" · ") : "— bez zmiany —"}</span>
+              {" · "}Podpis przy doręczeniu: <span className="font-semibold">{testResult.signature ? "tak (UPS)" : "—"}</span>
             </div>
             <div className="text-xs text-inksoft mt-1">
               Pasujące reguły: {testResult.matched.length ? testResult.matched.map((m) => `#${sorted.findIndex((x) => x.id === m.id) + 1}`).join(", ") : "brak"}

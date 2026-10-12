@@ -16,6 +16,7 @@ export type ShippingRule = {
   template_id: number | null;
   carrier: ShippingCarrier | null;
   product_code: string | null;
+  signature: boolean; // dodatkowa usługa UPS "podpis przy doręczeniu" (12.10.2026)
 };
 
 export const SKU_OP_LABEL: Record<SkuOp, string> = { starts_with: "zaczyna się od", contains: "zawiera", equals: "jest równe" };
@@ -69,19 +70,26 @@ export type RuleResult = {
   carrier: ShippingCarrier | null;
   productCode: string | null;
   carrierRule: ShippingRule | null;
+  signature: boolean; // true, gdy KTÓRAKOLWIEK pasująca reguła włącza podpis przy doręczeniu (UPS)
+  signatureRule: ShippingRule | null;
   matched: ShippingRule[];
 };
 
-// Reguły po kolei (position, id): szablon bierze się z pierwszej pasującej reguły, która go ustawia; przewoźnik razem z produktem — z pierwszej pasującej reguły z przewoźnikiem.
+// Reguły po kolei (position, id): szablon bierze się z pierwszej pasującej reguły, która go ustawia; przewoźnik razem z produktem — z pierwszej pasującej reguły z przewoźnikiem;
+// podpis przy doręczeniu jest włączony, gdy włącza go choć jedna pasująca reguła (usługa dodatkowa — nie "wyłączamy" jej kolejną regułą).
 export function evaluateRules(rules: ShippingRule[], ctx: RuleContext): RuleResult {
   const sorted = [...rules].sort((a, b) => a.position - b.position || a.id - b.id);
-  const out: RuleResult = { templateId: null, templateRule: null, carrier: null, productCode: null, carrierRule: null, matched: [] };
+  const out: RuleResult = { templateId: null, templateRule: null, carrier: null, productCode: null, carrierRule: null, signature: false, signatureRule: null, matched: [] };
   for (const r of sorted) {
     if (!ruleMatches(r, ctx)) continue;
     out.matched.push(r);
     if (out.templateId === null && r.template_id !== null) {
       out.templateId = r.template_id;
       out.templateRule = r;
+    }
+    if (!out.signature && r.signature) {
+      out.signature = true;
+      out.signatureRule = r;
     }
     if (out.carrier === null && r.carrier) {
       out.carrier = r.carrier;
@@ -101,5 +109,6 @@ export function describeRule(r: ShippingRule, templateName: (id: number) => stri
   const act: string[] = [];
   if (r.template_id !== null) act.push(`szablon ${templateName(r.template_id) ?? "(usunięty)"}`);
   if (r.carrier) act.push([CARRIER_NAME[r.carrier], productName(r.carrier, r.product_code)].filter(Boolean).join(" · "));
+  if (r.signature) act.push("podpis przy doręczeniu (UPS)");
   return `${cond.length ? `Jeśli ${cond.join(" i ")}` : "Zawsze"} → ${act.length ? act.join("; ") : "(nic nie ustawia — usunięto jej szablon; edytuj albo usuń regułę)"}`;
 }

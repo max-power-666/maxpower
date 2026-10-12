@@ -265,6 +265,14 @@ export default function ShippingView({
         notes.push(`${label}${res.carrierRule?.name ? ` (reguła: ${res.carrierRule.name})` : ""}`);
       }
     }
+    // Podpis przy doręczeniu (usługa UPS): nie łączy się z pobraniem, a przy pozostałych przewoźnikach nie ma zastosowania (pole pojawia się po wybraniu UPS).
+    if (res.signature) {
+      if (ctx.hasCod) notes.push("podpis przy doręczeniu z reguły pominięty — nie łączy się z pobraniem (COD)");
+      else {
+        setSignatureOn(true);
+        notes.push(`podpis przy doręczeniu (UPS)${res.signatureRule?.name ? ` (reguła: ${res.signatureRule.name})` : ""}`);
+      }
+    }
     setRuleNote(notes.length ? `Reguły wysyłki ustawiły: ${notes.join("; ")}. Możesz to zmienić.` : "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingRules, rulesLoaded, templatesLoaded, rules, templates]);
