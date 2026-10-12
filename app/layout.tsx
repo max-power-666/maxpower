@@ -10,7 +10,7 @@ export const metadata: Metadata = {
 // motywem na ułamek sekundy przy każdym twardym odświeżeniu, zanim React zdążyłby odczytać localStorage/zegar.
 // Bez jawnego wyboru w localStorage motyw idzie automatycznie wg pory dnia (21:00–5:00 = ciemny) — logika
 // godzin 1:1 z autoTheme() w lib/theme.ts, celowo zduplikowana (ten skrypt musi być samodzielny, bez importów).
-const THEME_INIT_SCRIPT = `try{var t=localStorage.getItem("erp-theme");if(t!=="new"&&t!=="dark"){var h=new Date().getHours();t=(h>=21||h<5)?"dark":"new"}document.documentElement.setAttribute("data-theme",t)}catch(e){}`;
+const THEME_INIT_SCRIPT = `try{var t=null,now=Date.now();var raw=localStorage.getItem("erp-theme-override");if(raw){var o=JSON.parse(raw);if(o&&(o.t==="new"||o.t==="dark")&&typeof o.until==="number"&&o.until>now)t=o.t}if(!t){var h=new Date().getHours();t=(h>=21||h<5)?"dark":"new"}document.documentElement.setAttribute("data-theme",t)}catch(e){}`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

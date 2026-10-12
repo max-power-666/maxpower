@@ -1,44 +1,50 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { applyTheme, autoTheme, loadStoredTheme, saveTheme, type Theme } from "@/lib/theme";
+import { useEffect, useState } from "react";
+import { applyTheme, effectiveTheme, saveOverride, type Theme } from "@/lib/theme";
 
 // Switch Nowy (jasny, słońce) / Tryb nocny (ciemny, księżyc) — sama kolorystyka, układ ekranów bez zmian.
-// Bez jawnego wyboru (nikt jeszcze nie kliknął) motyw idzie automatycznie wg zegara: ciemny 21:00–5:00, jasny
-// poza tym — sprawdzane co minutę, więc przełącza się samo na żywo, gdyby ktoś zostawił kartę otwartą na noc.
-// Ręczne kliknięcie zapisuje jawny wybór w localStorage — od tej chwili ma pierwszeństwo przed zegarem, aż do
-// kolejnego ręcznego przełączenia. Pokazywany na ekranie logowania i w stopce paska bocznego (patrz page.tsx).
+// Bez ręcznego wyboru motyw idzie automatycznie wg zegara: ciemny 21:00–5:00, jasny poza tym. Ręczne kliknięcie
+// obowiązuje tylko do najbliższej zmiany pory (patrz lib/theme.ts), potem automat wraca sam. Stan sprawdzamy co
+// minutę oraz przy powrocie do karty (uśpiony komputer/karta w tle nie odpala timerów na czas). Pokazywany na
+// ekranie logowania i w stopce paska bocznego (patrz page.tsx).
 export default function ThemeSwitcher() {
   const [theme, setTheme] = useState<Theme>("new");
-  const explicit = useRef<Theme | null>(null);
+  const [manualUntil, setManualUntil] = useState<number | null>(null);
 
   useEffect(() => {
-    explicit.current = loadStoredTheme();
-    const effective = explicit.current ?? autoTheme();
-    setTheme(effective);
-    applyTheme(effective);
-
-    const id = setInterval(() => {
-      if (explicit.current) return; // jawny wybór — zegar już nic nie zmienia
-      const next = autoTheme();
-      setTheme((prev) => {
-        if (prev === next) return prev;
-        applyTheme(next);
-        return next;
-      });
-    }, 60_000);
-    return () => clearInterval(id);
+    function sync() {
+      const e = effectiveTheme();
+      setTheme(e.theme);
+      setManualUntil(e.until);
+      applyTheme(e.theme);
+    }
+    sync();
+    const id = setInterval(sync, 60_000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") sync();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", sync);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", sync);
+    };
   }, []);
 
   function toggle() {
     const next: Theme = theme === "dark" ? "new" : "dark";
-    explicit.current = next;
+    const until = saveOverride(next);
     setTheme(next);
-    saveTheme(next);
+    setManualUntil(until);
     applyTheme(next);
   }
 
   const isDark = theme === "dark";
+  const status = manualUntil
+    ? `wybór ręczny do ${new Date(manualUntil).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" })}, potem automat`
+    : "automatycznie wg pory dnia (21:00–5:00 ciemny)";
 
   return (
     <button
@@ -46,7 +52,7 @@ export default function ThemeSwitcher() {
       role="switch"
       aria-checked={isDark}
       aria-label={isDark ? "Przełącz na motyw jasny" : "Przełącz na tryb nocny"}
-      title={isDark ? "Tryb nocny" : "Nowy (jasny)"}
+      title={`${isDark ? "Tryb nocny" : "Nowy (jasny)"} — ${status}`}
       className="inline-flex items-center gap-1.5 px-1.5 py-1 rounded-full border border-line bg-white"
     >
       <SunIcon active={!isDark} />

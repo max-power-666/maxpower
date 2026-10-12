@@ -4,8 +4,8 @@
 
 /* Motyw kolorystyczny — patrz lib/theme.ts (ThemeSwitcher przełącza atrybut data-theme na <html>). Dwa warianty,
    ten sam układ ekranów: domyślny/"new" = Nowy (jasny, inspirowany panelem refurbed — biel + fiolet/indygo),
-   "dark" = Tryb nocny (przygaszony, bez czystej czerni/bieli, żeby nie męczyć oczu). Automatyczny wybór wg pory
-   dnia (21:00–5:00 = ciemny), dopóki ktoś nie przełączy switcha ręcznie — patrz autoTheme() w lib/theme.ts.
+   "dark" = Tryb nocny (neutralna, prawie czarna paleta jak w aplikacji Claude). Automatyczny wybór wg pory dnia
+   (21:00–5:00 = ciemny); ręczny wybór switchem obowiązuje tylko do najbliższej zmiany pory — patrz lib/theme.ts.
    --color-card to POWIERZCHNIA KART/TABEL (w kodzie używana jako bg-white — patrz tailwind.config.ts, dlaczego
    "white" jest tu nadpisane), nie dosłowna biel. */
 :root {
@@ -24,18 +24,21 @@
 }
 
 :root[data-theme="dark"] {
-  --color-paper: #1C1E1B;
-  --color-panel: #20221D;
-  --color-card: #262922;
-  --color-ink: #E7E9E1;
-  --color-inksoft: #A3AB98;
-  --color-line: #3A3E34;
-  --color-amber: #D99A4E;
-  --color-ambersoft: #3C2F1C;
-  --color-teal: #59A99A;
-  --color-tealsoft: #1E332E;
-  --color-rust: #D97462;
-  --color-rustsoft: #3A2420;
+  /* Neutralna, prawie czarna paleta wzorowana na aplikacji Claude (próbki z zrzutu ekranu, 12.10.2026): pasek
+     boczny (panel) ciemniejszy od obszaru głównego (paper), karty/pola jako lekko podniesiona powierzchnia. */
+  --color-paper: #151515;
+  --color-panel: #111111;
+  --color-card: #1B1B1B;
+  --color-ink: #ECECEA;
+  --color-inksoft: #A6A6A3;
+  --color-line: #2C2C2C;
+  --color-amber: #DBA056;
+  --color-ambersoft: #33291B;
+  --color-teal: #5BB3A3;
+  --color-tealsoft: #1C2C29;
+  --color-rust: #D9806C;
+  --color-rustsoft: #34221E;
+  color-scheme: dark; /* natywne kontrolki (scrollbary, listy, pola dat) też ciemne */
 }
 
 body {

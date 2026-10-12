@@ -1442,17 +1442,28 @@ prośbę) — **sama kolorystyka, układ ekranów bez zmian** (świadoma decyzja
 panelu refurbed to osobny, dużo większy projekt, nie zrobiony). Trzecia opcja "Obecny" (dotychczasowe, ziemiste
 kolory) została **usunięta tego samego dnia** na wyraźną prośbę — "Nowy" jest teraz motywem domyślnym/bazowym.
 `ThemeSwitcher.tsx`/`lib/theme.ts` pokazuje się na ekranie logowania (pod przyciskiem) i w stopce paska bocznego
-(pod "Wyloguj") — w obu miejscach, bo wybór w `localStorage` (`erp-theme`, nie w bazie — jak `magazyn-view`)
+(pod "Wyloguj") — w obu miejscach, bo wybór w `localStorage` (`erp-theme-override`, nie w bazie — jak `magazyn-view`)
 przetrwa między niezalogowanym a zalogowanym stanem. Warianty: **Nowy** (jasny, inspirowany insight-panelem
 refurbed — biel/jasny fiolet, `teal`→indygo `#4F46E5` jako główny akcent), **Tryb nocny** (przygaszony, świadomie
-BEZ czystej czerni/bieli — stonowane grafitowo-zielone odcienie, nie kontrastowe skrajności, żeby nie męczyć oczu).
+neutralna, prawie czarna paleta jak w aplikacji Claude, bez czystej czerni/bieli, żeby nie męczyć oczu; szczegóły niżej).
 
-**Automatyczny wybór wg pory dnia** (30.09.2026, na wyraźną prośbę): dopóki nikt nie kliknął switcha ręcznie, motyw
-sam jest ciemny w godzinach **21:00–5:00** (czas lokalny przeglądarki), poza tym jasny — `autoTheme()` w
-`lib/theme.ts`. `ThemeSwitcher` sprawdza zegar co 60 s (`setInterval`) i podmienia atrybut na żywo, gdyby ktoś
-zostawił kartę otwartą na noc — nie tylko przy odświeżeniu. **Ręczne kliknięcie switcha zapisuje jawny wybór w
-`localStorage`** i od tej chwili ma pierwszeństwo przed zegarem na stałe (aż do kolejnego ręcznego przełączenia) —
-nie ma osobnego trzeciego stanu "auto" widocznego w UI, "auto" to po prostu "nikt jeszcze nie kliknął".
+**Automatyczny wybór wg pory dnia** (30.09.2026, na wyraźną prośbę): motyw sam jest ciemny w godzinach **21:00–5:00**
+(czas lokalny przeglądarki), poza tym jasny — `autoTheme()` w `lib/theme.ts`. `ThemeSwitcher` sprawdza zegar co 60 s,
+przy powrocie do karty (`visibilitychange`/`focus` — uśpiony komputer nie odpala timerów) i przełącza atrybut na żywo.
+**Ręczny wybór wygasa (12.10.2026, zgłoszone: "nie działa automatyczne przełączanie na tryb nocny"):** pierwotnie
+kliknięcie switcha zapisywało jawny wybór w `localStorage` NA STAŁE, więc raz kliknięty switch wyłączał automat
+już na zawsze (a w UI nie było trzeciego stanu "auto", więc wyglądało to na usterkę). Teraz wybór jest zapisany jako
+`{"t":"dark|new","until":<ms>}` pod kluczem `erp-theme-override` i obowiązuje **tylko do najbliższej zmiany pory**
+(5:00 albo 21:00 czasu lokalnego, `nextThemeBoundary`), potem automat wraca sam; wybór zgodny z tym, co i tak da
+automat, nie jest w ogóle zapamiętywany. Dymek switcha mówi, który tryb jest aktywny ("automatycznie…" albo "wybór
+ręczny do 05:00, potem automat"). Stary klucz `erp-theme` jest ignorowany i czyszczony (więc u osób, które kiedyś
+kliknęły, automat działa od razu). **Logika jest w dwóch miejscach:** `lib/theme.ts` i inline `THEME_INIT_SCRIPT` w
+`app/layout.tsx` (skrypt musi być samodzielny, bez importów) — zmieniając jedno, zmień drugie.
+**Paleta Trybu nocnego (12.10.2026, na prośbę właściciela — "jak w aplikacji Claude"):** neutralna, prawie czarna
+(zamiast wcześniejszej grafitowo-zielonej), próbki kolorów z zrzutu ekranu aplikacji Claude: `paper` `#151515`
+(obszar główny), `panel` `#111111` (pasek boczny — ciemniejszy od głównego), `card` `#1B1B1B` (karty/tabele/pola),
+`line` `#2C2C2C`, `ink` `#ECECEA`, `inksoft` `#A6A6A3`; akcenty (`amber`, `teal`, `rust`) przygaszone i zostawione
+czytelne na tym tle. Dodane `color-scheme: dark` (natywne scrollbary, listy rozwijane i pola dat też ciemne).
 
 **Mechanizm:** wszystkie nazwane kolory z `tailwind.config.ts` (`paper`, `panel`, `ink`, `inksoft`, `line`, `amber`,
 `ambersoft`, `teal`, `tealsoft`, `rust`, `rustsoft`) wskazują na zmienne CSS (`app/globals.css`), zdefiniowane raz
