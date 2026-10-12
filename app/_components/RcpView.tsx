@@ -9,7 +9,7 @@ import { MyLeave, Requests, usePendingCount } from "./RcpAbsences";
 import { absenceKind, absenceOnDay, type Absence } from "@/lib/rcpAbsence";
 import { isHoliday } from "@/lib/holidays";
 import {
-  RCP_KIND_LABEL, tracksWorkTime, dayStartMs, ewidencjaCsv, fmtClock, fmtHm, summarizeDays, totalWorkMs, warsawDay,
+  RCP_KIND_LABEL, tracksWorkTime, dayStartMs, ewidencjaCsv, fmtClock, fmtHm, summarizeDays, totalWorkMs, totalPaidBreakMs, warsawDay, PAID_BREAK_MS,
   type RcpKind, type RcpSegment,
 } from "@/lib/rcp";
 
@@ -140,7 +140,7 @@ function MyTime({ session, members }: { session: Session; members: MemberLite[] 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-line border border-line mb-6">
         {[
           ["DZIŚ — PRACA", fmtHm(t?.workMs ?? 0)],
-          ["DZIŚ — PRZERWY", fmtHm(t?.breakMs ?? 0)],
+          ["DZIŚ — PRZERWA (płatna do 0:30)", fmtHm(t?.breakMs ?? 0)],
           [`${monthLabel(month).toUpperCase()} — PRACA`, fmtHm(totalWorkMs(days))],
           ["DNI PRACY W MIESIĄCU", String(worked)],
         ].map(([l, v]) => (
@@ -171,7 +171,8 @@ function MyTime({ session, members }: { session: Session; members: MemberLite[] 
               <th className="p-3">Koniec</th>
               <th className="p-3 text-right">Praca</th>
               {hasAdmin && <th className="p-3 text-right" title="Wliczone w Pracę">w tym admin.</th>}
-              <th className="p-3 text-right">Przerwy</th>
+              <th className="p-3 text-right" title="Łączny czas przerw; pierwsze 30 min w dobie jest płatne">Przerwa</th>
+              <th className="p-3 text-right" title="Praca + płatna część przerwy (do 30 min)">Płatny czas</th>
               <th className="p-3 text-right">Wyjścia prywatne</th>
             </tr>
           </thead>
@@ -185,16 +186,17 @@ function MyTime({ session, members }: { session: Session; members: MemberLite[] 
                   <td className="p-3 font-mono">{s.open ? <span className="text-teal font-semibold">trwa</span> : fmtClock(s.lastEndMs)}</td>
                   <td className="p-3 text-right font-mono font-semibold">{fmtHm(s.workMs)}</td>
                   {hasAdmin && <td className="p-3 text-right font-mono text-inksoft">{s.adminMs ? fmtHm(s.adminMs) : "—"}</td>}
-                  <td className="p-3 text-right font-mono text-inksoft">{s.breakMs ? fmtHm(s.breakMs) : "—"}</td>
+                  <td className="p-3 text-right font-mono text-inksoft" title={s.breakMs > PAID_BREAK_MS ? `W tym ${fmtHm(s.breakMs - PAID_BREAK_MS)} poza płatną przerwą` : undefined}>{s.breakMs ? fmtHm(s.breakMs) : "—"}{s.breakMs > PAID_BREAK_MS && <span className="text-amber"> ▲</span>}</td>
+                  <td className="p-3 text-right font-mono font-semibold">{fmtHm(s.workMs + s.paidBreakMs)}</td>
                   <td className="p-3 text-right font-mono text-inksoft">{s.privateMs ? fmtHm(s.privateMs) : "—"}</td>
                 </tr>
               );
             })}
-            {monthDays.every((d) => !days.has(d)) && <tr><td colSpan={hasAdmin ? 7 : 6} className="p-6 text-center text-inksoft text-sm">Brak zarejestrowanego czasu w tym miesiącu.</td></tr>}
+            {monthDays.every((d) => !days.has(d)) && <tr><td colSpan={hasAdmin ? 8 : 7} className="p-6 text-center text-inksoft text-sm">Brak zarejestrowanego czasu w tym miesiącu.</td></tr>}
           </tbody>
         </table>
       </div>
-      <p className="text-[11px] text-inksoft mt-3 max-w-3xl">Do czasu pracy liczy się praca i wyjścia służbowe; przerwy i wyjścia prywatne nie. Widzisz tylko swój czas. Jeśli zapomniałeś kliknąć „Rozpocznij”/„Zakończ”, poproś Managera o korektę.</p>
+      <p className="text-[11px] text-inksoft mt-3 max-w-3xl">Do czasu pracy liczy się praca i wyjścia służbowe; wyjścia prywatne nie. Pierwsze 30 min przerwy w dobie jest płatne — „Płatny czas” to praca + ta płatna część (▲ = przerwa dłuższa niż 30 min, nadwyżka jest niepłatna). Widzisz tylko swój czas. Jeśli zapomniałeś kliknąć „Rozpocznij”/„Zakończ”, poproś Managera o korektę.</p>
     </div>
   );
 }
@@ -232,7 +234,7 @@ function NowBoard({ members }: { members: MemberLite[] }) {
     const cur = open.find((s) => s.user_id === m.user_id) ?? null;
     const mine = todaySegs.filter((s) => s.user_id === m.user_id);
     const day = summarizeDays(mine, now).get(warsawDay(now));
-    return { m, cur, workMs: day?.workMs ?? 0, last: mine.length ? mine[mine.length - 1] : null };
+    return { m, cur, workMs: day?.workMs ?? 0, breakMs: day?.breakMs ?? 0, last: mine.length ? mine[mine.length - 1] : null };
   });
   const rank = (r: (typeof rows)[number]) => (r.cur?.kind === "praca" || r.cur?.kind === "administracja" ? 0 : r.cur ? 1 : r.last ? 2 : 3);
   rows.sort((a, b) => rank(a) - rank(b) || displayNameForEmail(a.m.email, members).localeCompare(displayNameForEmail(b.m.email, members), "pl"));
@@ -261,11 +263,12 @@ function NowBoard({ members }: { members: MemberLite[] }) {
               <th className="p-3">Pracownik</th>
               <th className="p-3">Status</th>
               <th className="p-3">Od</th>
+              <th className="p-3 text-right" title="Czas przerwy dziś / płatna przerwa 0:30">Przerwa dziś</th>
               <th className="p-3 text-right">Dziś przepracowano</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map(({ m, cur, workMs, last }) => (
+            {rows.map(({ m, cur, workMs, breakMs, last }) => (
               <tr key={m.user_id} className="border-b border-line last:border-0">
                 <td className="p-3 font-semibold">{displayNameForEmail(m.email, members)}</td>
                 <td className="p-3">
@@ -278,6 +281,13 @@ function NowBoard({ members }: { members: MemberLite[] }) {
                   )}
                 </td>
                 <td className="p-3 font-mono text-xs">{cur ? fmtClock(Date.parse(cur.started_at)) : "—"}</td>
+                <td className="p-3 text-right font-mono" title={breakMs > PAID_BREAK_MS ? `${fmtHm(breakMs - PAID_BREAK_MS)} poza płatną przerwą` : undefined}>
+                  {breakMs ? (
+                    <span className={breakMs > PAID_BREAK_MS ? "text-amber font-semibold" : "text-inksoft"}>{fmtHm(breakMs)} / {fmtHm(PAID_BREAK_MS)}</span>
+                  ) : (
+                    <span className="text-inksoft">—</span>
+                  )}
+                </td>
                 <td className="p-3 text-right font-mono font-semibold">{workMs ? fmtHm(workMs) : "—"}</td>
               </tr>
             ))}
@@ -367,7 +377,9 @@ function Records({ session, members, isAdmin }: { session: Session; members: Mem
                 const wk = dowOf(d);
                 return <th key={d} title={isHoliday(d) ? "Święto" : undefined} className={`p-1.5 font-mono font-normal ${wk === "nd" || wk === "so" || isHoliday(d) ? "bg-paper" : ""} ${isHoliday(d) ? "text-rust" : ""}`}><div>{d.slice(8)}</div><div className="text-[9px]">{wk}</div></th>;
               })}
-              <th className="p-2 text-right">Razem</th>
+              <th className="p-2 text-right" title="Praca + wyjścia służbowe (bez przerw)">Razem</th>
+              <th className="p-2 text-right" title="Płatna część przerw: do 30 min na dobę">Przerwa</th>
+              <th className="p-2 text-right" title="Razem + płatna przerwa">Razem z przerwą</th>
             </tr>
           </thead>
           <tbody>
@@ -386,13 +398,15 @@ function Records({ session, members, isAdmin }: { session: Session; members: Mem
                   );
                 })}
                 <td className="p-2 text-right font-mono font-bold">{fmtHm(totalWorkMs(p.byDay))}</td>
+                <td className="p-2 text-right font-mono text-inksoft">{totalPaidBreakMs(p.byDay) ? fmtHm(totalPaidBreakMs(p.byDay)) : "—"}</td>
+                <td className="p-2 text-right font-mono font-bold">{fmtHm(totalWorkMs(p.byDay) + totalPaidBreakMs(p.byDay))}</td>
               </tr>
             ))}
-            {people.length === 0 && !error && <tr><td colSpan={n + 2} className="p-6 text-center text-inksoft text-sm">Brak pracowników.</td></tr>}
+            {people.length === 0 && !error && <tr><td colSpan={n + 4} className="p-6 text-center text-inksoft text-sm">Brak pracowników.</td></tr>}
           </tbody>
         </table>
       </div>
-      <p className="text-[11px] text-inksoft mt-3 max-w-3xl">Godziny pracy = praca + wyjścia służbowe (przerwy i wyjścia prywatne nie). Kody nieobecności: U urlop, UŻ na żądanie, UO okolicznościowy, UB bezpłatny, L4, N inna; szare tło = weekend lub święto. Kliknij komórkę, żeby zobaczyć szczegóły dnia, poprawić wpis albo dodać brakujący. ⚠ = wpis zamknięty automatycznie (nikt nie kliknął „Zakończ”) — sprawdź i popraw.</p>
+      <p className="text-[11px] text-inksoft mt-3 max-w-3xl">Godziny w komórkach = praca + wyjścia służbowe (bez przerw i wyjść prywatnych). Kolumna „Przerwa” to płatna część przerw — pierwsze 30 min w dobie, a „Razem z przerwą” to godziny razem z nią. Kody nieobecności: U urlop, UŻ na żądanie, UO okolicznościowy, UB bezpłatny, L4, N inna; szare tło = weekend lub święto. Kliknij komórkę, żeby zobaczyć szczegóły dnia, poprawić wpis albo dodać brakujący. ⚠ = wpis zamknięty automatycznie (nikt nie kliknął „Zakończ”) — sprawdź i popraw.</p>
       {openCell && <DayDrawer session={session} cell={openCell} segs={segs.filter((s) => s.user_id === openCell.userId)} members={members} isAdmin={isAdmin} onClose={() => setOpenCell(null)} onChanged={load} />}
     </div>
   );

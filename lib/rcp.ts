@@ -1,5 +1,7 @@
 // RCP — rejestracja czasu pracy (06.10.2026): czysta logika liczenia czasu z odcinków (patrz supabase/rcp.sql). Dni liczymy wg czasu polskiego (Europe/Warsaw).
 // Do czasu pracy liczą się "praca", "prace administracyjne" (kierownicy, 07.10.2026) i "wyjście służbowe"; "przerwa" i "wyjście prywatne" nie.
+// WYJĄTEK (12.10.2026, decyzja właściciela: "wszyscy pracownicy mają 30 min płatnej przerwy"): pierwsze 30 min przerwy w dobie jest PŁATNE — wlicza się do płatnego czasu
+// (paidBreakMs / paidMs), ale NIE do `workMs` (czasu pracy, od którego liczymy m.in. punkty na godzinę). Kto nie robi przerwy, nie dostaje tych 30 min "z urzędu".
 
 import { warsawMidnightUtcMs } from "./points";
 import { warsawYmd } from "./warsawDate";
@@ -13,6 +15,7 @@ export const RCP_KIND_LABEL: Record<RcpKind, string> = {
   wyjscie_prywatne: "Wyjście prywatne",
   wyjscie_sluzbowe: "Wyjście służbowe",
 };
+export const PAID_BREAK_MS = 30 * 60 * 1000; // płatna przerwa na dobę (wszyscy pracownicy)
 export const COUNTS_AS_WORK: RcpKind[] = ["praca", "administracja", "wyjscie_sluzbowe"];
 // Kto może rejestrować prace administracyjne (decyzja właściciela 07.10.2026: "dla kierowników"). Czas liczy się do czasu pracy, ale jest wykazywany osobno (adminMs),
 // żeby późniejsze punkty na godzinę dało się liczyć bez czasu administracji.
@@ -68,6 +71,7 @@ export type DaySummary = {
   workMs: number; // praca + prace administracyjne + wyjście służbowe
   adminMs: number; // w tym prace administracyjne
   breakMs: number;
+  paidBreakMs: number; // płatna część przerwy w tej dobie: min(przerwy, 30 min), tylko gdy tego dnia była praca
   privateMs: number;
   firstStartMs: number | null; // pierwszy początek odcinka w tym dniu
   lastEndMs: number | null; // koniec ostatniego odcinka (null, gdy trwa)
@@ -79,7 +83,7 @@ export function summarizeDays(segments: RcpSegment[], nowMs: number): Map<string
   const days = new Map<string, DaySummary>();
   const get = (day: string): DaySummary => {
     let d = days.get(day);
-    if (!d) days.set(day, (d = { day, workMs: 0, adminMs: 0, breakMs: 0, privateMs: 0, firstStartMs: null, lastEndMs: 0, open: false, review: false }));
+    if (!d) days.set(day, (d = { day, workMs: 0, adminMs: 0, breakMs: 0, paidBreakMs: 0, privateMs: 0, firstStartMs: null, lastEndMs: 0, open: false, review: false }));
     return d;
   };
   for (const s of segments) {
@@ -101,11 +105,15 @@ export function summarizeDays(segments: RcpSegment[], nowMs: number): Map<string
       else d.lastEndMs = Math.max(d.lastEndMs ?? 0, Math.min(end, dayStartMs(nextDay(piece.day))));
     }
   }
-  for (const d of days.values()) if (d.open) d.lastEndMs = null;
+  for (const d of days.values()) {
+    if (d.open) d.lastEndMs = null;
+    d.paidBreakMs = d.workMs > 0 ? Math.min(d.breakMs, PAID_BREAK_MS) : 0;
+  }
   return days;
 }
 
 export const totalWorkMs = (days: Map<string, DaySummary>) => Array.from(days.values()).reduce((n, d) => n + d.workMs, 0);
+export const totalPaidBreakMs = (days: Map<string, DaySummary>) => Array.from(days.values()).reduce((n, d) => n + d.paidBreakMs, 0);
 
 // 8 h 05 min -> "8:05"; ujemne wartości z minusem.
 export function fmtHm(ms: number): string {
@@ -126,14 +134,14 @@ export const isValidIp = (s: string): boolean => /^(\d{1,3}\.){3}\d{1,3}$/.test(
 
 // Miesięczna ewidencja jako CSV (średnik, UTF-8 z BOM — Excel w polskich ustawieniach): wiersz na osobę, kolumny dni miesiąca + suma.
 export function ewidencjaCsv(month: string, daysInMonth: number, rows: { name: string; byDay: Map<string, DaySummary>; absenceCode?: (day: string) => string }[]): string {
-  const head = ["Pracownik", ...Array.from({ length: daysInMonth }, (_, i) => String(i + 1)), "Razem (h:mm)"];
+  const head = ["Pracownik", ...Array.from({ length: daysInMonth }, (_, i) => String(i + 1)), "Razem (h:mm)", "Przerwa płatna (h:mm)", "Razem z przerwą (h:mm)"];
   const lines = [head.join(";")];
   for (const r of rows) {
     const cells = Array.from({ length: daysInMonth }, (_, i) => {
       const d = r.byDay.get(`${month}-${String(i + 1).padStart(2, "0")}`);
       return d && d.workMs > 0 ? fmtHm(d.workMs) : r.absenceCode?.(`${month}-${String(i + 1).padStart(2, "0")}`) ?? "";
     });
-    lines.push([`"${r.name.replace(/"/g, '""')}"`, ...cells, fmtHm(totalWorkMs(r.byDay))].join(";"));
+    lines.push([`"${r.name.replace(/"/g, '""')}"`, ...cells, fmtHm(totalWorkMs(r.byDay)), fmtHm(totalPaidBreakMs(r.byDay)), fmtHm(totalWorkMs(r.byDay) + totalPaidBreakMs(r.byDay))].join(";"));
   }
   return "﻿" + lines.join("\r\n");
 }

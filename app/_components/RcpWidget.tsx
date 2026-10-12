@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
-import { fmtHm, RCP_KIND_LABEL, ADMIN_WORK_ROLES, dayStartMs, summarizeDays, warsawDay, type RcpKind, type RcpSegment } from "@/lib/rcp";
+import { fmtHm, RCP_KIND_LABEL, ADMIN_WORK_ROLES, dayStartMs, summarizeDays, warsawDay, type RcpKind, type RcpSegment, PAID_BREAK_MS } from "@/lib/rcp";
 
 // Widżet RCP na górze paska bocznego po lewej (06.10.2026; wcześniej w prawym górnym rogu): zegar i JEDEN duży przycisk, którego kolor mówi o stanie — czerwony (nie pracujesz),
 // zielony (pracujesz), pomarańczowy (przerwa / wyjście); kliknięcie otwiera menu akcji dla bieżącego stanu. Widoczny na każdej zakładce dla każdej osoby z rolą.
@@ -120,7 +120,7 @@ export default function RcpWidget({ session, role, onOpenRcp }: { session: Sessi
         <div className="text-sm">{!open ? "▶ " : working ? "● " : admin ? "🗂 " : "⏸ "}{label}</div>
         {open && <div className="font-mono text-xs font-semibold opacity-90 mt-0.5" title="Łącznie dziś w tym stanie">{fmtHm(since)}</div>}
       </button>
-      {open && day && <div className="mt-1 text-center text-[11px] text-inksoft font-mono">praca {fmtHm(day.workMs)} · przerwy {fmtHm(day.breakMs)}</div>}
+      {open && day && <div className="mt-1 text-center text-[11px] text-inksoft font-mono">praca {fmtHm(day.workMs)} · przerwa {fmtHm(day.breakMs)}/{fmtHm(PAID_BREAK_MS)}</div>}
 
       {menu && (
         <div className="absolute left-0 top-full mt-1 z-30 w-56 border border-line bg-white rounded shadow-sm py-1">
