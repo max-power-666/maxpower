@@ -1483,7 +1483,7 @@ najechania na wykresie Biddera (`TradeInView.tsx`, `#C7CCB9`/`#57614F`) zostały
 - **Autoryzacja route'ów:** `isAuthorized` (sekret crona albo token zalogowanego użytkownika
   w `Authorization: Bearer`).
 - **Kto to zrobił:** zapisujemy e-mail (stały identyfikator), a wyświetlamy przez
-  `displayNameForEmail(email, members)` → skrócone imię, w razie braku imienia e-mail.
+  `displayNameForEmail(email, members)` → skrócone imię ("Maksymilian J."), w razie braku imienia e-mail. **Gdy dwie osoby mają to samo skrócenie (12.10.2026: Jakub Skowron i Jakub Szymoniak, oba "Jakub S."), dokładamy kolejne litery nazwiska, aż się rozróżnią — "Jakub Sk." i "Jakub Sz."** (porównanie z listą `members` przekazaną do funkcji, bez rozróżniania wielkości liter; przy identycznym imieniu i nazwisku — pełne imię i nazwisko). Dotyczy wszystkich widoków, bo wszędzie używana jest ta funkcja; osoby bez kolizji zostają jak dotąd.
 - **Uwagi w wierszu listy:** kolumna "Uwagi" (między Statusem a Czasem) w Serwisie, Testach i Trade-in
   to `InlineEditCell` (tak samo kolumny "Numer seryjny", "SKU" i "Pady" w Trade-in) — zapis przy wyjściu z pola/Enterem,
   Escape porzuca. W Trade-in edycja trafia też do logu zmian karty zamówienia; zapisy z listy Trade-in idą
