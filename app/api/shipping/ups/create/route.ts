@@ -39,9 +39,12 @@ export async function POST(request: Request) {
   const cod = parseUpsCod(b?.cod, receiver.countryCode, shipper.countryCode);
   if (!cod.ok) return NextResponse.json({ error: cod.error }, { status: 400 });
 
+  const signature = b?.signature === true;
+  if (signature && cod.value) return NextResponse.json({ error: "Podpis przy doręczeniu nie łączy się z pobraniem (COD) — UPS nie dopuszcza obu usług naraz." }, { status: 400 });
+
   let created;
   try {
-    created = await upsCreate(cfg, { serviceCode, shipper, receiver: upsReceiver(receiver), packages: [pack, ...extra.value], description: pack.description, reference, cod: cod.value });
+    created = await upsCreate(cfg, { serviceCode, shipper, receiver: upsReceiver(receiver), packages: [pack, ...extra.value], description: pack.description, reference, cod: cod.value, signature });
   } catch (e: any) {
     return NextResponse.json({ error: e.message || "Nie udało się nadać przesyłki." }, { status: e instanceof UpsError ? 422 : 502 });
   }
@@ -67,8 +70,8 @@ export async function POST(request: Request) {
       tracking_url: trackingUrl,
       planned_shipping_date: plannedDate,
       receiver: { ...receiver },
-      // Obiekt (nie sama tablica jak w DHL Parcel): paczki + pobranie (kwota COD, gdy zażądano) — lista przesyłek pokazuje znacznik COD.
-      package: { pieces: [pack, ...extra.value], cod: cod.value },
+      // Obiekt (nie sama tablica jak w DHL Parcel): paczki + pobranie (kwota COD, gdy zażądano) + podpis przy doręczeniu — lista przesyłek pokazuje znaczniki COD i "Podpis".
+      package: { pieces: [pack, ...extra.value], cod: cod.value, signature },
       charges,
       label_format: created.labelBase64 ? "zpl" : null,
       label_data: created.labelBase64,

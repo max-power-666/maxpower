@@ -37,8 +37,10 @@ export async function POST(request: Request) {
   const { receiver, pack } = parsed.value;
   const cod = parseUpsCod(b?.cod, receiver.countryCode, shipper.countryCode);
   if (!cod.ok) return NextResponse.json({ error: cod.error }, { status: 400 });
+  const signature = b?.signature === true;
+  if (signature && cod.value) return NextResponse.json({ error: "Podpis przy doręczeniu nie łączy się z pobraniem (COD) — UPS nie dopuszcza obu usług naraz." }, { status: 400 });
   try {
-    const quotes = await upsRate(cfg, { shipper, receiver: upsReceiver(receiver), packages: [pack, ...extra.value], cod: cod.value });
+    const quotes = await upsRate(cfg, { shipper, receiver: upsReceiver(receiver), packages: [pack, ...extra.value], cod: cod.value, signature });
     quotes.sort((a, b2) => a.price - b2.price);
     return NextResponse.json({ ok: true, env: cfg.env, defaultService: UPS_DEFAULT_SERVICE, quotes });
   } catch (e: any) {

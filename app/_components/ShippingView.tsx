@@ -126,6 +126,8 @@ export default function ShippingView({
   // Pobranie (COD) — tylko UPS i tylko przesyłki krajowe (PL → PL); kwota w PLN wpisywana ręcznie albo z zamówienia (Erli/Allegro).
   const [codOn, setCodOn] = useState(false);
   const [codAmount, setCodAmount] = useState("");
+  // Podpis przy doręczeniu (UPS, 12.10.2026): dodatkowa usługa; nie łączy się z pobraniem (UPS wyklucza obie naraz).
+  const [signatureOn, setSignatureOn] = useState(false);
   const [plannedDate, setPlannedDate] = useState(defaultShippingDate());
   const [quoting, setQuoting] = useState(false);
   const [quote, setQuote] = useState<{ carrier: Carrier; products: QuoteRow[]; warnings: string[] } | null>(null);
@@ -319,6 +321,8 @@ export default function ShippingView({
   // Pobranie idzie do żądania tylko dla UPS i kraju odbiorcy PL (serwer i tak to sprawdza).
   const codActive = carrier === "ups" && form.countryCode === "PL" && codOn;
   const codPayload = () => (codActive ? { amount: Number(codAmount.replace(",", ".")) } : undefined);
+  const signatureActive = carrier === "ups" && signatureOn && !codActive;
+  const signaturePayload = () => (signatureActive ? true : undefined);
   const codValid = !codActive || (Number(codAmount.replace(",", ".")) >= 10 && Number(codAmount.replace(",", ".")) <= 50000);
 
   async function getQuote() {
@@ -337,6 +341,7 @@ export default function ShippingView({
           package: p,
           extraPackages: carrier === "parcel" || carrier === "ups" ? extraPackagesPayload() : undefined,
           cod: codPayload(),
+          signature: signaturePayload(),
           plannedDate,
           // pola płaskie dla wyceny DHL Express (route sprawdza połączenie po tej trasie)
           destinationCountryCode: form.countryCode,
@@ -434,6 +439,7 @@ export default function ShippingView({
           package: packagePayload(),
           extraPackages: multiPiece ? extraPackagesPayload() : undefined,
           cod: codPayload(),
+          signature: signaturePayload(),
           reference: form.reference,
           order,
           billing: product.billing,
@@ -647,6 +653,7 @@ export default function ShippingView({
   function reset() {
     setCodOn(false);
     setCodAmount("");
+    setSignatureOn(false);
     setForm(EMPTY_FORM);
     setExtraPackages([]);
     setOrder(null);
@@ -831,7 +838,7 @@ export default function ShippingView({
             {carrier === "ups" && form.countryCode === "PL" && (
               <div className="mb-3 flex items-center gap-3 flex-wrap">
                 <label className="flex items-center gap-2 text-sm font-semibold">
-                  <input type="checkbox" checked={codOn} onChange={(e) => { setCodOn(e.target.checked); setQuote(null); setChosen(null); }} />
+                  <input type="checkbox" checked={codOn} onChange={(e) => { setCodOn(e.target.checked); if (e.target.checked) setSignatureOn(false); setQuote(null); setChosen(null); }} />
                   Pobranie (COD)
                 </label>
                 {codOn && (
@@ -847,6 +854,16 @@ export default function ShippingView({
                     {!codValid && <span className="text-xs text-rust font-semibold">Podaj kwotę 10–50 000 zł.</span>}
                   </>
                 )}
+              </div>
+            )}
+
+            {carrier === "ups" && (
+              <div className="mb-3 flex items-center gap-3 flex-wrap">
+                <label className={`flex items-center gap-2 text-sm font-semibold ${codActive ? "text-inksoft" : ""}`}>
+                  <input type="checkbox" checked={signatureActive} disabled={codActive} onChange={(e) => { setSignatureOn(e.target.checked); setQuote(null); setChosen(null); }} />
+                  Podpis przy doręczeniu
+                </label>
+                <span className="text-xs text-inksoft">{codActive ? "Niedostępny z pobraniem (UPS nie łączy tych usług)." : "Kurier zbiera podpis odbiorcy. W przesyłkach zagranicznych UPS dolicza opłatę (widoczna w wycenie, składnik „Podpis przy doręczeniu”)."}</span>
               </div>
             )}
 
@@ -1032,6 +1049,7 @@ Cena to wycena wg cennika konta ({quote.carrier === "ups" ? "UPS: kwota NETTO w 
                         {(s.package as { cod?: { amount?: number } | null } | null)?.cod?.amount ? (
                           <div className="text-amber font-semibold" title="Pobranie — kwotę do odbioru od odbiorcy wpłaca UPS na konto wg umowy">COD {Number((s.package as any).cod.amount).toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} zł</div>
                         ) : null}
+                        {(s.package as { signature?: boolean } | null)?.signature ? <div className="text-teal font-semibold" title="Podpis przy doręczeniu (UPS Delivery Confirmation — Signature Required)">Podpis przy doręczeniu</div> : null}
                       </td>
                       <td className="p-3 text-right font-mono text-xs whitespace-nowrap">
                         {charge ? fmtMoney({ price: charge.price, currency: charge.priceCurrency }) : "—"}

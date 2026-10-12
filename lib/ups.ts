@@ -177,6 +177,19 @@ export function upsCodOptions(cod: UpsCod | null | undefined) {
   return { ShipmentServiceOptions: { COD: { CODFundsCode: "1", CODAmount: { CurrencyCode: cod.currency, MonetaryValue: cod.amount.toFixed(2) } } } };
 }
 
+// --- podpis przy doręczeniu (12.10.2026, na prośbę właściciela)
+// Dodatkowa usługa UPS "Delivery Confirmation — Signature Required": kurier zbiera podpis odbiorcy przy doręczeniu. W żądaniu to ShipmentServiceOptions.DeliveryConfirmation.DCISType = "1"
+// na poziomie PRZESYŁKI (sprawdzone wyceną na koncie: PL→PL i PL→DE przyjmują; poziom paczki PackageServiceOptions odrzuca "accessory option is unavailable between the selected
+// locations", 111211). Wg specyfikacji UPS DeliveryConfirmation i COD wykluczają się wzajemnie. Wartość "2" to podpis osoby dorosłej (nie używamy).
+export const UPS_SIGNATURE_DCIS_TYPE = "1";
+
+// ShipmentServiceOptions łączące pobranie (COD) i podpis; {} gdy żadnej z opcji.
+export function upsShipmentServiceOptions(o: { cod?: UpsCod | null; signature?: boolean }) {
+  if (o.cod && o.signature) throw new UpsError("Podpis przy doręczeniu nie łączy się z pobraniem (COD) — UPS nie dopuszcza obu usług naraz.");
+  if (o.signature) return { ShipmentServiceOptions: { DeliveryConfirmation: { DCISType: UPS_SIGNATURE_DCIS_TYPE } } };
+  return upsCodOptions(o.cod);
+}
+
 // --- wycena (Rating, Shop)
 
 export type UpsQuote = {
@@ -190,7 +203,7 @@ export type UpsQuote = {
   warnings: string[];
 };
 
-export async function upsRate(cfg: UpsConfig, o: { shipper: UpsAddress; receiver: UpsAddress; packages: UpsPackage[]; cod?: UpsCod | null }): Promise<UpsQuote[]> {
+export async function upsRate(cfg: UpsConfig, o: { shipper: UpsAddress; receiver: UpsAddress; packages: UpsPackage[]; cod?: UpsCod | null; signature?: boolean }): Promise<UpsQuote[]> {
   const body = {
     RateRequest: {
       Request: { TransactionReference: { CustomerContext: "recoo-erp" } },
@@ -199,7 +212,7 @@ export async function upsRate(cfg: UpsConfig, o: { shipper: UpsAddress; receiver
         ShipTo: addressBlock(o.receiver),
         ShipFrom: addressBlock(o.shipper),
         ShipmentRatingOptions: { NegotiatedRatesIndicator: "Y" },
-        ...upsCodOptions(o.cod),
+        ...upsShipmentServiceOptions({ cod: o.cod, signature: o.signature }),
         Package: o.packages.map((p) => pkgBlock(p, "rate")),
       },
     },
@@ -216,7 +229,7 @@ export async function upsRate(cfg: UpsConfig, o: { shipper: UpsAddress; receiver
     const base = num(src.BaseServiceCharge) ?? num(src.TransportationCharges);
     const breakdown: { name: string; price: number }[] = [];
     if (base !== null) breakdown.push({ name: "Opłata podstawowa", price: base });
-    for (const c of src.ItemizedCharges ?? []) breakdown.push({ name: c.Code === "375" ? "Dopłata paliwowa" : `Dopłata (kod ${c.Code})`, price: Number(c.MonetaryValue) });
+    for (const c of src.ItemizedCharges ?? []) breakdown.push({ name: c.Code === "375" ? "Dopłata paliwowa" : c.Code === "121" ? "Podpis przy doręczeniu" : `Dopłata (kod ${c.Code})`, price: Number(c.MonetaryValue) });
     const svc = num(src.ServiceOptionsCharges);
     if (svc) breakdown.push({ name: "Opcje usługi", price: svc });
     return {
@@ -244,7 +257,7 @@ export type UpsCreated = {
 
 export async function upsCreate(
   cfg: UpsConfig,
-  o: { serviceCode: string; shipper: UpsAddress; receiver: UpsAddress; packages: UpsPackage[]; description: string; reference?: string; cod?: UpsCod | null }
+  o: { serviceCode: string; shipper: UpsAddress; receiver: UpsAddress; packages: UpsPackage[]; description: string; reference?: string; cod?: UpsCod | null; signature?: boolean }
 ): Promise<UpsCreated> {
   const body = {
     ShipmentRequest: {
@@ -257,7 +270,7 @@ export async function upsCreate(
         PaymentInformation: { ShipmentCharge: { Type: "01", BillShipper: { AccountNumber: cfg.account } } },
         Service: { Code: o.serviceCode },
         ShipmentRatingOptions: { NegotiatedRatesIndicator: "Y" },
-        ...upsCodOptions(o.cod),
+        ...upsShipmentServiceOptions({ cod: o.cod, signature: o.signature }),
         ...(o.reference ? { ReferenceNumber: { Code: "02", Value: o.reference.slice(0, 35) } } : {}),
         Package: o.packages.map((p) => pkgBlock(p, "ship", o.description)),
       },
