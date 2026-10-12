@@ -745,7 +745,7 @@ export default function Home() {
           {view === "tradein" && <TradeInView session={session} members={members} />}
 
           {view === "shipping" && (
-            <ShippingView session={session} isAdmin={role === "Admin"} members={members} prefill={shipPrefill} onPrefillUsed={() => setShipPrefill(null)} />
+            <ShippingView session={session} isAdmin={role === "Admin"} canEditRules={role === "Admin" || role === "Manager"} members={members} prefill={shipPrefill} onPrefillUsed={() => setShipPrefill(null)} />
           )}
 
           {view === "invoices" && <InvoicesView session={session} members={members} />}

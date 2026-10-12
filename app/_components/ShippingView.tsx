@@ -11,6 +11,8 @@ import { printRawToZebra, printPdf, listPrinters, printerNeedsImageLabel, PrintA
 import { testLabelZpl, testDeliveryNotePdfBase64 } from "@/lib/printTest";
 import type { MemberLite } from "@/lib/displayName";
 import SalesOrderCard from "./SalesOrderCard";
+import ShippingRulesView from "./ShippingRulesView";
+import { CARRIER_NAME, evaluateRules, productName, type RuleContext, type ShippingRule } from "@/lib/shippingRules";
 
 // Zakładka Wysyłka: nadawanie przesyłek DHL Express (MyDHL API) — formularz z wyceną, szablony paczek, ustawienia nadawcy i lista nadanych
 // przesyłek z etykietami (PDF 10x15 na Zebrę). Dostęp: Admin i Manager. Klucze i numer konta są tylko na serwerze
@@ -90,12 +92,14 @@ const SHIP_PAGE_SIZE = 20;
 export default function ShippingView({
   session,
   isAdmin,
+  canEditRules = false,
   members,
   prefill,
   onPrefillUsed,
 }: {
   session: Session;
   isAdmin: boolean;
+  canEditRules?: boolean; // Admin i Manager edytują reguły wysyłki; pozostali (Zamówienia) je widzą
   members: MemberLite[];
   prefill: ShipPrefill | null;
   onPrefillUsed: () => void;
@@ -110,6 +114,14 @@ export default function ShippingView({
   // Drukarki TEJ osoby (members.zebra_printer_name / a4_printer_name, ustawia Admin w Zespół -> Edytuj); puste = domyślne z ustawień nadawcy.
   const [myPrinters, setMyPrinters] = useState<{ zebra: string | null; a4: string | null }>({ zebra: null, a4: null });
   const [templates, setTemplates] = useState<Template[]>([]);
+  // Reguły wysyłki (12.10.2026): domyślny szablon / przewoźnik / produkt wg SKU, kraju i metody przesyłki; pigułki "Nadawanie" / "Reguły".
+  const [page, setPage] = useState<"ship" | "rules">("ship");
+  const [rules, setRules] = useState<ShippingRule[]>([]);
+  const [rulesLoaded, setRulesLoaded] = useState(false);
+  const [templatesLoaded, setTemplatesLoaded] = useState(false);
+  const [pendingRules, setPendingRules] = useState<(RuleContext & { hasCod: boolean }) | null>(null);
+  const [preferredProduct, setPreferredProduct] = useState<{ carrier: Carrier; code: string } | null>(null);
+  const [ruleNote, setRuleNote] = useState("");
   const [shipments, setShipments] = useState<ShipmentRow[]>([]);
   const [shipSearchInput, setShipSearchInput] = useState("");
   const [shipSearch, setShipSearch] = useState("");
@@ -157,6 +169,7 @@ export default function ShippingView({
     loadSettings();
     loadMyPrinters();
     loadTemplates();
+    loadRules();
     // Przełącznik drukowania bezpośredniego: wybór per przeglądarkę/stanowisko, nie współdzielone ustawienie.
     setDirectPrint(localStorage.getItem("shipping-direct-print") === "1");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -211,10 +224,50 @@ export default function ShippingView({
         ? `${marketplaceLabel} nie przekazał (jeszcze) pełnych danych odbiorcy dla tego zamówienia — brakuje: ${missingLabels.join(", ")}. Uzupełnij ręcznie albo sprawdź zamówienie w ${marketplaceLabel}.`
         : ""
     );
+    setRuleNote("");
+    setPreferredProduct(null);
+    setPendingRules(null);
     requestId.current = crypto.randomUUID();
+    // Reguły wysyłki: SKU wszystkich pozycji i metoda przesyłki są w sales_orders (karta zamówienia ich nie przekazuje); kraj odbiorcy jest w prefill.
+    // Same reguły stosuje osobny efekt poniżej, gdy reguły i szablony są już wczytane (przy wejściu z karty zamówienia widok dopiero się montuje).
+    (async () => {
+      const { data } = await supabase.from("sales_orders").select("sku, shipping_method").eq("marketplace", prefill.marketplace).eq("external_id", prefill.externalId).maybeSingle();
+      const skus = String((data as { sku?: string | null } | null)?.sku ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+      setPendingRules({ skus, countryCode: prefill.countryCode.toUpperCase(), shippingMethod: ((data as { shipping_method?: string | null } | null)?.shipping_method as string | null) ?? null, hasCod: !!prefill.cod });
+    })();
     onPrefillUsed();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefill]);
+
+  // Zastosowanie reguł wysyłki po wczytaniu reguł i szablonów: szablon -> formularz (waga, wymiary, opis), przewoźnik i produkt -> domyślny wybór. To tylko wartości początkowe.
+  useEffect(() => {
+    if (!pendingRules || !rulesLoaded || !templatesLoaded) return;
+    const ctx = pendingRules;
+    setPendingRules(null);
+    if (rules.length === 0) return;
+    const res = evaluateRules(rules, ctx);
+    const notes: string[] = [];
+    if (res.templateId !== null) {
+      const t = templates.find((x) => x.id === res.templateId);
+      if (t) {
+        applyTemplate(String(t.id));
+        notes.push(`szablon „${t.name}”${res.templateRule?.name ? ` (reguła: ${res.templateRule.name})` : ""}`);
+      }
+    }
+    if (res.carrier) {
+      const configured = res.carrier === "parcel" ? parcel?.configured : res.carrier === "express" ? express?.configured : ups?.configured;
+      const label = [CARRIER_NAME[res.carrier], productName(res.carrier, res.productCode)].filter(Boolean).join(" · ");
+      if (ctx.hasCod) notes.push(`przewoźnik z reguły (${label}) pominięty — zamówienie za pobraniem idzie przez UPS`);
+      else if (!configured) notes.push(`przewoźnik z reguły (${label}) nie jest skonfigurowany`);
+      else {
+        setCarrier(res.carrier);
+        setPreferredProduct(res.productCode ? { carrier: res.carrier, code: res.productCode } : null);
+        notes.push(`${label}${res.carrierRule?.name ? ` (reguła: ${res.carrierRule.name})` : ""}`);
+      }
+    }
+    setRuleNote(notes.length ? `Reguły wysyłki ustawiły: ${notes.join("; ")}. Możesz to zmienić.` : "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingRules, rulesLoaded, templatesLoaded, rules, templates]);
 
   const printerZebra = myPrinters.zebra || settings?.zebra_printer_name || null;
   const printerA4 = myPrinters.a4 || settings?.a4_printer_name || null;
@@ -231,6 +284,12 @@ export default function ShippingView({
   async function loadTemplates() {
     const { data } = await supabase.from("shipping_templates").select("*").order("name");
     setTemplates((data as Template[]) || []);
+    setTemplatesLoaded(true);
+  }
+  async function loadRules() {
+    const { data } = await supabase.from("shipping_rules").select("*").order("position").order("id"); // brak tabeli (nieuruchomione shipping.sql) = brak reguł
+    setRules((data as ShippingRule[]) || []);
+    setRulesLoaded(true);
   }
   async function loadShipments() {
     const from = (shipPage - 1) * SHIP_PAGE_SIZE;
@@ -406,11 +465,15 @@ export default function ShippingView({
         rows = (data.products as DhlProduct[]).map((p2) => ({ ...p2, economy: isEconomySelect(p2) }));
         warnings = data.warnings || [];
       }
+      // Produkt wskazany przez regułę wysyłki (jeśli dotyczy tego przewoźnika i jest dostępny na trasie) ma pierwszeństwo przed domyślnym wyborem.
+      const pref = preferredProduct && preferredProduct.carrier === carrier ? preferredProduct.code : null;
+      const prefRow = pref ? rows.find((r) => !r.unavailable && (pref === "ECONOMY" ? r.economy : r.code === pref)) : null;
+      if (pref && !prefRow) warnings = [...warnings, `Reguła wysyłki wskazała produkt ${productName(carrier, pref) ?? pref}, ale nie jest dostępny na tej trasie — wybrano domyślny.`];
       setQuote({ carrier, products: rows, warnings });
-      // Domyślny wybór: Economy Select (Express) albo najtańszy dostępny produkt (Parcel)
+      // Domyślny wybór: produkt z reguły, inaczej Economy Select (Express) albo najtańszy dostępny produkt (Parcel)
       const eco = rows.find((r) => r.economy);
       const cheapest = rows.filter((r) => !r.unavailable && r.billing).sort((x, y) => (x.billing!.price - y.billing!.price))[0];
-      setChosen(eco?.code ?? cheapest?.code ?? null);
+      setChosen(prefRow?.code ?? eco?.code ?? cheapest?.code ?? null);
     } catch (e: any) {
       setError(e.message || "Nie udało się wycenić przesyłki.");
     } finally {
@@ -661,6 +724,8 @@ export default function ShippingView({
     setChosen(null);
     setDone(null);
     setPrefillNote("");
+    setRuleNote("");
+    setPreferredProduct(null);
     setPlannedDate(defaultShippingDate());
     requestId.current = crypto.randomUUID();
   }
@@ -670,8 +735,26 @@ export default function ShippingView({
     extraPackages.every((p) => Number(p.weight.replace(",", ".")) > 0 && p.length && p.width && p.height);
   const shipTotalPages = Math.max(1, Math.ceil(shipTotal / SHIP_PAGE_SIZE));
 
+  const pageTabs = (
+    <div className="flex gap-2 mb-5">
+      <button onClick={() => setPage("ship")} className={`px-3 py-1.5 rounded-full text-sm font-semibold border ${page === "ship" ? "bg-ink text-paper border-ink" : "bg-white border-line"}`}>Nadawanie</button>
+      <button onClick={() => setPage("rules")} className={`px-3 py-1.5 rounded-full text-sm font-semibold border ${page === "rules" ? "bg-ink text-paper border-ink" : "bg-white border-line"}`}>
+        Reguły{rules.length > 0 && <span className="ml-1.5 text-xs font-normal opacity-70">{rules.filter((r) => r.active).length}</span>}
+      </button>
+    </div>
+  );
+  if (page === "rules") {
+    return (
+      <div>
+        {pageTabs}
+        <ShippingRulesView session={session} rules={rules} templates={templates.map((t) => ({ id: t.id, name: t.name }))} canEdit={canEditRules} onChanged={loadRules} />
+      </div>
+    );
+  }
+
   return (
     <div>
+      {pageTabs}
       {/* połączenie — ukryte, dopóki wszystko działa; pokazuje się tylko, gdy jest coś do zgłoszenia */}
       {((parcel && !parcel.configured) ||
         (parcel?.configured && !parcel.version) ||
@@ -705,6 +788,7 @@ export default function ShippingView({
       )}
 
       {error && <p className="text-rust text-xs mb-4">{error}</p>}
+      {ruleNote && <p className="text-xs bg-tealsoft text-ink border border-line px-3 py-2 rounded mb-4">{ruleNote}</p>}
 
       {(parcel?.configured || express?.configured || ups?.configured) && settings && (
         <>

@@ -112,3 +112,44 @@ do $$
 begin
   begin alter publication supabase_realtime add table shipments; exception when duplicate_object then null; end;
 end $$;
+
+-- ===== Reguły wysyłki (12.10.2026): domyślny szablon paczki / przewoźnik / produkt na podstawie SKU, kraju odbiorcy i metody przesyłki =====
+-- Przykłady: "jeśli SKU zaczyna się od PS4 — szablon PS4", "jeśli kraj odbiorcy to Niemcy — DHL Parcel Connect". Reguły są sprawdzane po kolei (position), a każde
+-- ustawienie (szablon; przewoźnik z produktem) bierze się z PIERWSZEJ pasującej reguły, która je podaje. Warunki puste = nie sprawdzamy; wszystkie wypełnione muszą pasować.
+-- Stosuje je formularz Wysyłki, gdy otwierasz go z karty zamówienia (to tylko wartości domyślne — można je zmienić). Czytać mogą Admin, Manager i Zamówienia
+-- (is_admin_or_manager), edytować tylko Admin i Manager.
+create or replace function shipping_rules_editor() returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from members where user_id = auth.uid() and role in ('Admin', 'Manager'));
+$$;
+
+create table if not exists shipping_rules (
+  id bigint generated always as identity primary key,
+  position int not null default 0,                     -- kolejność sprawdzania (mniejsza = wcześniej)
+  name text,
+  active boolean not null default true,
+  -- warunki
+  sku_op text check (sku_op in ('starts_with', 'contains', 'equals')),
+  sku_value text,
+  country_code text check (country_code is null or country_code ~ '^[A-Z]{2}$'),
+  shipping_method text check (shipping_method in ('Express', 'Standard')),   -- metoda przesyłki z marketplace'u (sales_orders.shipping_method)
+  -- ustawienia
+  template_id bigint references shipping_templates(id) on delete set null,
+  carrier text check (carrier in ('parcel', 'express', 'ups')),
+  product_code text,                                   -- kod produktu przewoźnika (DHL Parcel: EK/PI/CP; UPS: 07/11/54/65; Express: ECONOMY = Economy Select)
+  created_by_email text,
+  created_at timestamptz not null default now(),
+  check ((sku_op is null) = (sku_value is null))
+  -- brak CHECK "musi coś ustawiać": po usunięciu szablonu template_id wraca do NULL (on delete set null) i taki check blokowałby usunięcie szablonu; pilnuje tego formularz
+);
+create index if not exists shipping_rules_position_idx on shipping_rules (position, id);
+
+alter table shipping_rules enable row level security;
+drop policy if exists "admin manager read shipping_rules" on shipping_rules;
+create policy "admin manager read shipping_rules" on shipping_rules for select using (is_admin_or_manager());
+drop policy if exists "editor insert shipping_rules" on shipping_rules;
+create policy "editor insert shipping_rules" on shipping_rules for insert with check (shipping_rules_editor());
+drop policy if exists "editor update shipping_rules" on shipping_rules;
+create policy "editor update shipping_rules" on shipping_rules for update using (shipping_rules_editor()) with check (shipping_rules_editor());
+drop policy if exists "editor delete shipping_rules" on shipping_rules;
+create policy "editor delete shipping_rules" on shipping_rules for delete using (shipping_rules_editor());
