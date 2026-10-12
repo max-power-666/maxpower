@@ -546,12 +546,21 @@ create policy "authenticated read sales_orders_sync_meta" on sales_orders_sync_m
 -- Zespół może edytować tylko dane własne: log zmian (sales_orders.history) oraz numer seryjny i pady
 -- pozycji. Pola z API zmienia wyłącznie serwer. RLS nie umie ograniczać kolumn, więc pilnują tego
 -- triggery (zapis service_role przechodzi bez zmian).
+--
+-- Edycja zamówień tylko dla ról Admin, Manager i Zamówienia (12.10.2026, na prośbę właściciela: "serwisanci mają mieć wgląd w zamówienia, ale bez możliwości edycji") — wcześniej
+-- każdy zalogowany mógł je zmieniać wprost przez API, a blokował to tylko interfejs. Ta sama lista ról co `readOnly` w SalesOrdersHub (app/_components/SalesOrdersHub.tsx).
+-- service_role (serwer: synchronizacje, nadawanie przesyłek) przechodzi bez zmian.
+create or replace function sales_can_edit() returns boolean
+language sql stable security definer set search_path = public as $$
+  select auth.role() = 'service_role'
+      or exists (select 1 from members where user_id = auth.uid() and role in ('Admin', 'Manager', 'Zamówienia'));
+$$;
 drop policy if exists "authenticated update sales_orders" on sales_orders;
 create policy "authenticated update sales_orders" on sales_orders
-  for update using (auth.role() = 'authenticated');
+  for update using (sales_can_edit()) with check (sales_can_edit());
 drop policy if exists "authenticated update sales_order_items" on sales_order_items;
 create policy "authenticated update sales_order_items" on sales_order_items
-  for update using (auth.role() = 'authenticated');
+  for update using (sales_can_edit()) with check (sales_can_edit());
 
 create or replace function sales_orders_protect_api_fields() returns trigger
 language plpgsql as $$
@@ -593,6 +602,9 @@ create or replace function sales_order_set_status(p_marketplace text, p_external
 returns void
 language plpgsql as $$
 begin
+  if not sales_can_edit() then
+    raise exception 'Brak uprawnień do edycji zamówień (tylko Admin, Manager i Zamówienia).' using errcode = '42501';
+  end if;
   update sales_orders
      set our_status = p_status, history = history || jsonb_build_array(p_entry)
    where marketplace = p_marketplace and external_id = p_external_id;
@@ -608,6 +620,9 @@ create or replace function sales_order_add_log(p_marketplace text, p_external_id
 returns void
 language plpgsql as $$
 begin
+  if not sales_can_edit() then
+    raise exception 'Brak uprawnień do edycji zamówień (tylko Admin, Manager i Zamówienia).' using errcode = '42501';
+  end if;
   update sales_orders
      set history = history || jsonb_build_array(p_entry)
    where marketplace = p_marketplace and external_id = p_external_id;
@@ -622,6 +637,9 @@ create or replace function sales_item_update(
 ) returns void
 language plpgsql as $$
 begin
+  if not sales_can_edit() then
+    raise exception 'Brak uprawnień do edycji zamówień (tylko Admin, Manager i Zamówienia).' using errcode = '42501';
+  end if;
   update sales_order_items
      set serial_number = p_serial, pads = p_pads, pad_serials = p_pad_serials
    where marketplace = p_marketplace and external_id = p_external_id and item_key = p_item_key;
