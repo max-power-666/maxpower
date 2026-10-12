@@ -1433,6 +1433,8 @@ neutralnych, której apka nie ma (zakładka RCP to wciąż tylko pusty szkielet,
 Punkty z różnych obszarów mają się sumować w jeden wynik miesięczny (§2 ust. 6) — dziś każdy obszar
 ma osobną tabelę i podsumowanie.
 
+**Favicon (12.10.2026, na prośbę właściciela):** zielone logo (pętla "∞") z przezroczystym tłem, dostarczone jako PNG 512×512 — pliki wg konwencji Next.js App Router w `app/`: `icon.png` (512×512, ikona karty), `apple-icon.png` (180×180, ikona na ekranie głównym iOS — iOS wypełnia przezroczystość na czarno) i `favicon.ico` (48×48, starsze przeglądarki). Next sam dopisuje znaczniki `<link rel="icon">` do `<head>`; w `layout.tsx` nic nie trzeba było zmieniać. Zmiana pliku = podmiana tych trzech plików (przeglądarki mocno cache'ują favicon — po wdrożeniu może być potrzebne twarde odświeżenie albo nowa karta).
+
 ## Motyw kolorystyczny (30.09.2026)
 
 Dwa motywy, przełączane jednym **switchem** (słońce/księżyc, nie pigułki — zmienione tego samego dnia na wyraźną
