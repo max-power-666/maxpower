@@ -256,11 +256,17 @@ export function slugify(title: string | null | undefined): string {
 }
 
 export type ListingLink = { label: string; url: string; hint: string };
-export function listingLinks(l: { marketplace: string; product_id: string | null; title: string | null }): ListingLink[] {
+export function listingLinks(l: { marketplace: string; product_id: string | null; title: string | null; sku?: string | null }): ListingLink[] {
   if (l.marketplace === "backmarket") {
     const links: ListingLink[] = [];
     if (l.product_id) links.push({ label: "Strona produktu", url: `https://www.backmarket.fr/fr-fr/p/${slugify(l.title)}/${encodeURIComponent(l.product_id)}`, hint: "Publiczna strona produktu na backmarket.fr" });
-    links.push({ label: "Panel", url: "https://www.backmarket.fr/bo-seller/listings/active", hint: "Lista aktywnych listingów w panelu sprzedawcy Back Market (wyszukaj po SKU)" });
+    // Wzorzec adresu podany przez właściciela 13.10.2026 (lista aktywnych listingów przefiltrowana po SKU, najwięcej sztuk na górze).
+    const sku = (l.sku ?? "").trim();
+    links.push(
+      sku
+        ? { label: "Panel", url: `https://www.backmarket.fr/bo-seller/listings/active?orderBy=-quantity&pageSize=10&sku=${encodeURIComponent(sku)}`, hint: "Ta oferta w panelu sprzedawcy Back Market (lista przefiltrowana po SKU)" }
+        : { label: "Panel", url: "https://www.backmarket.fr/bo-seller/listings/active", hint: "Lista aktywnych listingów w panelu sprzedawcy Back Market" }
+    );
     return links;
   }
   return [{ label: "Panel", url: "https://merchant.refurbed.com/offers", hint: "Lista ofert w panelu sprzedawcy refurbed (wyszukaj po SKU)" }];
