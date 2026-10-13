@@ -43,6 +43,10 @@
     {
       "path": "/api/rcp/close-stale",
       "schedule": "30 23 * * *"
+    },
+    {
+      "path": "/api/listings/sync",
+      "schedule": "*/30 * * * *"
     }
   ]
 }
