@@ -220,7 +220,7 @@ export default function SalesOrdersHub({
         <button onClick={() => setSub("requests")} className={pillBtn(sub === "requests")}>Zapotrzebowanie</button>
       </div>
       {sub === "requests" ? (
-        <ServiceRequestsView session={session} members={members} canHandle={SERVICE_STAFF_ROLES.includes(role)} />
+        <ServiceRequestsView session={session} members={members} role={role} canHandle={SERVICE_STAFF_ROLES.includes(role)} />
       ) : (
       <>
       <div className="flex items-center justify-end gap-3 mb-4">

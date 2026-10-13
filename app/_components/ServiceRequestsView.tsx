@@ -5,7 +5,7 @@ import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { MARKETPLACES } from "@/lib/salesOrders";
-import { ACTIVE_REQUEST_STATUSES, REQUEST_PRIORITIES, REQUEST_PRIORITY_LABEL, REQUEST_PRIORITY_RANK, REQUEST_STATUSES, REQUEST_STATUS_LABEL, requestCode, type RequestPriority, type RequestStatus } from "@/lib/serviceRequests";
+import { ACTIVE_REQUEST_STATUSES, canEditRequest, REQUEST_PRIORITIES, REQUEST_PRIORITY_LABEL, REQUEST_PRIORITY_RANK, REQUEST_STATUSES, REQUEST_STATUS_LABEL, requestCode, type RequestPriority, type RequestStatus } from "@/lib/serviceRequests";
 
 // Zamówienia -> Zapotrzebowanie (08.10.2026): pracownicy zlecają zadania dla serwisu (dowolna treść albo numer zamówienia + priorytet; autor, data i numer ZAP-n automatycznie), serwisant przyjmuje zlecenie i ustawia status.
 // Kto może zmieniać status, pilnuje baza (trigger service_requests_guard); tu przyciski i lista statusu pokazują się tylko serwisantom (canHandle).
@@ -46,7 +46,7 @@ type OrderSku = { marketplace: string; sku: string | null };
 const pill = (active: boolean) => `px-3 py-1.5 rounded-full text-sm font-semibold border ${active ? "bg-ink text-paper border-ink" : "bg-white border-line"}`;
 const fmtDT = (iso: string) => new Date(iso).toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 
-export default function ServiceRequestsView({ session, members, canHandle }: { session: Session; members: MemberLite[]; canHandle: boolean }) {
+export default function ServiceRequestsView({ session, members, role, canHandle }: { session: Session; members: MemberLite[]; role: string; canHandle: boolean }) {
   const [rows, setRows] = useState<Req[]>([]);
   const [orderSkus, setOrderSkus] = useState<Record<string, OrderSku>>({}); // numer zamówienia (małymi literami) -> SKU z zamówienia
   const [loading, setLoading] = useState(true);
@@ -130,7 +130,7 @@ export default function ServiceRequestsView({ session, members, canHandle }: { s
     // Stary trigger w bazie (przed uruchomieniem service-requests.sql z 13.10.2026) odrzuca każdą zmianę treści, także serwisanta.
     if (err && /tylko system/i.test(err.message)) return "Edycja wymaga aktualizacji bazy — Admin musi uruchomić plik supabase/service-requests.sql w Supabase (SQL Editor).";
     if (err) return `Nie udało się zapisać: ${err.message}`;
-    if (!data?.length) return "Nie zapisano — zlecenie może edytować jego autor (dopóki jest aktywne) albo serwisant.";
+    if (!data?.length) return "Nie zapisano — zlecenie może edytować jego autor (dopóki jest aktywne), Admin albo Manager.";
     await load();
     return null;
   }
@@ -249,7 +249,7 @@ export default function ServiceRequestsView({ session, members, canHandle }: { s
         const r = rows.find((x) => x.id === openId);
         if (!r) return null;
         const isAuthor = !!r.created_by_user_id && r.created_by_user_id === session.user.id;
-        const canEdit = canHandle || (isAuthor && ACTIVE_REQUEST_STATUSES.includes(r.status));
+        const canEdit = canEditRequest(role, isAuthor, r.status);
         const skuHits = orderTokens(r.message).map((t) => ({ t, o: orderSkus[t.toLowerCase()] })).filter((h) => h.o);
         return (
           <RequestCard
@@ -382,7 +382,7 @@ function RequestCard({
           {savedAt && <span className="text-xs text-teal font-semibold">Zapisano ✓</span>}
         </div>
         {err && <p className="text-rust text-xs mb-2">{err}</p>}
-        {!canEdit && <p className="text-[11px] text-inksoft mb-2">Treść i priorytet zmienia autor zlecenia (dopóki jest aktywne) albo serwisant.</p>}
+        {!canEdit && <p className="text-[11px] text-inksoft mb-2">Treść i priorytet zmienia autor zlecenia (dopóki jest aktywne), Admin albo Manager. Serwis przyjmuje zlecenia i zmienia status.</p>}
 
         <h3 className="text-xs font-semibold text-inksoft mt-6 mb-2">LOG ZMIAN</h3>
         <div className="border border-line bg-white p-3 text-sm">

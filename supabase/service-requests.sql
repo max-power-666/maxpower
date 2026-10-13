@@ -3,8 +3,9 @@
 --
 -- Dowolny zalogowany dodaje zlecenie (treść + automatycznie autor i data, status "nowe"); status zlecenia zmieniają WYŁĄCZNIE serwisanci (Admin, Manager, Serwis, Kierownik serwisu) — pilnuje tego
 -- trigger w bazie (działa też przy bezpośrednim wywołaniu API). Autor, data i historia są niezmienne dla zalogowanych; kto i kiedy PRZYJĄŁ zlecenie, ustawia trigger (zegar serwera).
--- Edycja (13.10.2026): TREŚĆ i PRIORYTET zmienia serwisant (zawsze) albo autor zlecenia, dopóki zlecenie jest aktywne (nowe / przyjęte / w realizacji); każda taka zmiana trafia do historii
--- (action 'edited', changes: [{field, from, to}]) razem ze zmianami statusu — log na karcie zlecenia.
+-- Edycja (13.10.2026): TREŚĆ i PRIORYTET zmienia Admin albo Manager (zawsze) oraz autor zlecenia, dopóki zlecenie jest aktywne (nowe / przyjęte / w realizacji) — z WYJĄTKIEM serwisantów:
+-- role Serwis i Kierownik serwisu (strona realizująca zlecenia) nie edytują treści ani priorytetu, nawet własnych zleceń; dalej przyjmują zlecenia i zmieniają status.
+-- Każda zmiana treści/priorytetu trafia do historii (action 'edited', changes: [{field, from, to}]) razem ze zmianami statusu — log na karcie zlecenia.
 -- Usuwanie: Admin i Kierownik serwisu (z zapisem w deleted_records). Numer zlecenia to id (w UI "ZAP-123").
 
 create table if not exists service_requests (
@@ -42,6 +43,7 @@ declare
   who text := coalesce(auth.jwt() ->> 'email', (select email from members where user_id = auth.uid()));
   client boolean := auth.uid() is not null;   -- service_role / SQL Editor (bez auth.uid()) nie podlega ograniczeniom, ale też dostaje wpisy do historii
   changes jsonb := '[]'::jsonb;
+  my_role text := (select role from members where user_id = auth.uid());
 begin
   if tg_op = 'INSERT' then
     if client then
@@ -67,11 +69,13 @@ begin
     raise exception 'Autora i datę zlecenia oraz historię zmienia tylko system.' using errcode = 'P0001';
   end if;
 
-  -- Edycja treści / priorytetu: serwisant zawsze, autor tylko własnego zlecenia i tylko dopóki jest aktywne.
+  -- Edycja treści / priorytetu: Admin i Manager zawsze; autor tylko własnego zlecenia i tylko dopóki jest aktywne; serwisanci (Serwis, Kierownik serwisu) nigdy.
   if new.message is distinct from old.message then new.message := btrim(new.message); end if;
   if new.message is distinct from old.message or new.priority is distinct from old.priority then
-    if client and not (is_service_staff() or (old.created_by_user_id = auth.uid() and old.status in ('nowe', 'przyjete', 'w_realizacji'))) then
-      raise exception 'Treść i priorytet zlecenia zmienia jego autor (dopóki jest aktywne) albo serwisant.' using errcode = 'P0001';
+    if client and not (
+         my_role in ('Admin', 'Manager')
+      or (old.created_by_user_id = auth.uid() and old.status in ('nowe', 'przyjete', 'w_realizacji') and coalesce(my_role, '') not in ('Serwis', 'Kierownik serwisu'))) then
+      raise exception 'Treść i priorytet zlecenia zmienia jego autor (dopóki jest aktywne), Admin albo Manager — serwisanci nie edytują zleceń.' using errcode = 'P0001';
     end if;
     if new.message is distinct from old.message then
       changes := changes || jsonb_build_array(jsonb_build_object('field', 'message', 'from', old.message, 'to', new.message));

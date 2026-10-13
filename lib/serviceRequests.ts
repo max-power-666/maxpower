@@ -21,3 +21,12 @@ export const REQUEST_PRIORITY_RANK = Object.fromEntries(REQUEST_PRIORITIES.map((
 export const requestCode = (id: number) => `ZAP-${id}`;
 // Role serwisantów (przyjmują zlecenia i zmieniają status) — lustro is_service_staff() w bazie.
 export const SERVICE_STAFF_ROLES = ["Admin", "Manager", "Serwis", "Kierownik serwisu"];
+// Edycja treści i priorytetu (13.10.2026) — lustro service_requests_guard w bazie: Admin i Manager zawsze; autor własnego zlecenia, dopóki jest aktywne;
+// role realizujące zlecenia (Serwis, Kierownik serwisu) nie edytują, nawet własnych.
+export const REQUEST_EDITOR_ROLES = ["Admin", "Manager"];
+export const REQUEST_NO_EDIT_ROLES = ["Serwis", "Kierownik serwisu"];
+export function canEditRequest(role: string, isAuthor: boolean, status: RequestStatus): boolean {
+  if (REQUEST_EDITOR_ROLES.includes(role)) return true;
+  if (REQUEST_NO_EDIT_ROLES.includes(role)) return false;
+  return isAuthor && ACTIVE_REQUEST_STATUSES.includes(status);
+}
