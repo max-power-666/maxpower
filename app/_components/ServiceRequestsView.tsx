@@ -1,11 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { MARKETPLACES } from "@/lib/salesOrders";
-import { ACTIVE_REQUEST_STATUSES, canEditRequest, REQUEST_PRIORITIES, REQUEST_PRIORITY_LABEL, REQUEST_PRIORITY_RANK, REQUEST_STATUSES, REQUEST_STATUS_LABEL, requestCode, type RequestPriority, type RequestStatus } from "@/lib/serviceRequests";
+import { ACTIVE_REQUEST_STATUSES, canEditRequest, REQUEST_DELETE_ROLES, REQUEST_PRIORITIES, REQUEST_PRIORITY_LABEL, REQUEST_PRIORITY_RANK, REQUEST_STATUSES, REQUEST_STATUS_LABEL, requestCode, type RequestPriority, type RequestStatus } from "@/lib/serviceRequests";
 
 // Zamówienia -> Zapotrzebowanie (08.10.2026): pracownicy zlecają zadania dla serwisu (dowolna treść albo numer zamówienia + priorytet; autor, data i numer ZAP-n automatycznie), serwisant przyjmuje zlecenie i ustawia status.
 // Kto może zmieniać status, pilnuje baza (trigger service_requests_guard); tu przyciski i lista statusu pokazują się tylko serwisantom (canHandle).
@@ -57,6 +57,11 @@ export default function ServiceRequestsView({ session, members, role, canHandle 
   const [filter, setFilter] = useState<"active" | "all" | RequestStatus>("active");
   const [searchInput, setSearchInput] = useState("");
   const [openId, setOpenId] = useState<number | null>(null);
+  // Hurtowe usuwanie (13.10.2026): checkboxy po lewej widzą tylko role z prawem usuwania (Admin, Kierownik serwisu — jak polityka delete w bazie).
+  const canDelete = REQUEST_DELETE_ROLES.includes(role);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [deleting, setDeleting] = useState(false);
+  const headerCb = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     const { data, error: err } = await supabase.from("service_requests").select(COLS).order("id", { ascending: false }).limit(500);
@@ -152,6 +157,51 @@ export default function ServiceRequestsView({ session, members, role, canHandle 
   );
   const count = (f: (r: Req) => boolean) => rows.filter(f).length;
 
+  // Zaznaczenie dotyczy tylko widocznych wierszy: zmiana filtra/wyszukiwania i przeładowanie listy zdejmują zaznaczenie wierszy, których już nie widać.
+  useEffect(() => {
+    const ids = new Set(visible.map((r) => r.id));
+    setSelected((prev) => {
+      const next = new Set([...prev].filter((id) => ids.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [visible]);
+  const allVisibleSelected = visible.length > 0 && visible.every((r) => selected.has(r.id));
+  useEffect(() => {
+    if (headerCb.current) headerCb.current.indeterminate = selected.size > 0 && !allVisibleSelected;
+  }, [selected, allVisibleSelected]);
+  const toggleOne = (id: number) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const toggleAll = () => setSelected(allVisibleSelected ? new Set() : new Set(visible.map((r) => r.id)));
+
+  async function deleteSelected() {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    const codes = ids.slice().sort((a, b) => a - b).map(requestCode);
+    const preview = codes.length > 8 ? `${codes.slice(0, 8).join(", ")} … (+${codes.length - 8})` : codes.join(", ");
+    if (!confirm(`Usunąć ${ids.length} ${ids.length === 1 ? "zlecenie" : ids.length % 10 >= 2 && ids.length % 10 <= 4 && (ids.length % 100 < 12 || ids.length % 100 > 14) ? "zlecenia" : "zleceń"} (${preview})?\n\nOperacji nie da się cofnąć w aplikacji — wiersze trafią do dziennika usunięć (tylko Admin w Supabase).`)) return;
+    setDeleting(true);
+    setError("");
+    let removed = 0;
+    for (let i = 0; i < ids.length; i += 100) {
+      const chunk = ids.slice(i, i + 100);
+      const { data, error: err } = await supabase.from("service_requests").delete().in("id", chunk).select("id");
+      if (err) {
+        setError(`Usunięto ${removed} z ${ids.length}. Błąd: ${err.message}`);
+        break;
+      }
+      removed += data?.length ?? 0;
+    }
+    if (removed < ids.length && !error) setError(`Usunięto ${removed} z ${ids.length} — pozostałych nie wolno Ci usunąć (usuwa Admin i Kierownik serwisu) albo już ich nie ma.`);
+    setSelected(new Set());
+    setDeleting(false);
+    await load();
+  }
+
   return (
     <div>
       <div className="border border-line bg-white p-4 mb-5">
@@ -187,10 +237,23 @@ export default function ServiceRequestsView({ session, members, role, canHandle 
         <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="Szukaj: treść, ZAP-nr, osoba" className="ml-auto border border-line bg-white px-3 py-1.5 rounded text-sm w-64" />
       </div>
 
+      {canDelete && selected.size > 0 && (
+        <div className="flex flex-wrap items-center gap-3 mb-3 border border-line bg-white px-4 py-2 text-sm">
+          <span className="font-semibold">Zaznaczono: {selected.size}</span>
+          <button onClick={deleteSelected} disabled={deleting} className="bg-rust text-paper px-3 py-1.5 rounded text-sm font-semibold disabled:opacity-50">{deleting ? "Usuwanie…" : `Usuń zaznaczone (${selected.size})`}</button>
+          <button onClick={() => setSelected(new Set())} disabled={deleting} className="text-inksoft hover:underline text-sm">Odznacz</button>
+        </div>
+      )}
+
       <div className="border border-line bg-white overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-inksoft border-b border-line">
+              {canDelete && (
+                <th className="p-3 w-8">
+                  <input ref={headerCb} type="checkbox" checked={allVisibleSelected} onChange={toggleAll} disabled={visible.length === 0 || deleting} aria-label="Zaznacz wszystkie widoczne" title="Zaznacz / odznacz wszystkie widoczne" />
+                </th>
+              )}
               <th className="p-3">ID</th>
               <th className="p-3">Data</th>
               <th className="p-3">Zlecił(a)</th>
@@ -204,9 +267,14 @@ export default function ServiceRequestsView({ session, members, role, canHandle 
             </tr>
           </thead>
           <tbody>
-            {!loading && visible.length === 0 && !error && <tr><td colSpan={canHandle ? 10 : 9} className="p-6 text-center text-inksoft text-sm">{rows.length === 0 ? "Brak zleceń — dodaj pierwsze powyżej." : "Brak zleceń w tym widoku."}</td></tr>}
+            {!loading && visible.length === 0 && !error && <tr><td colSpan={(canHandle ? 10 : 9) + (canDelete ? 1 : 0)} className="p-6 text-center text-inksoft text-sm">{rows.length === 0 ? "Brak zleceń — dodaj pierwsze powyżej." : "Brak zleceń w tym widoku."}</td></tr>}
             {visible.map((r) => (
-              <tr key={r.id} className="border-b border-line last:border-b-0 align-top">
+              <tr key={r.id} className={`border-b border-line last:border-b-0 align-top ${selected.has(r.id) ? "bg-tealsoft" : ""}`}>
+                {canDelete && (
+                  <td className="p-3">
+                    <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleOne(r.id)} disabled={deleting} aria-label={`Zaznacz ${requestCode(r.id)}`} />
+                  </td>
+                )}
                 <td className="p-3 whitespace-nowrap"><button onClick={() => setOpenId(r.id)} title="Otwórz kartę zlecenia" className="font-mono text-xs font-semibold text-teal hover:underline">{requestCode(r.id)}</button></td>
                 <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDT(r.created_at)}</td>
                 <td className="p-3 font-semibold whitespace-nowrap">{name(r.created_by_email)}</td>
