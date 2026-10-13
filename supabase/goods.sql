@@ -5,11 +5,19 @@
 --
 -- Dane z arkusza wgrywa się osobnym plikiem jednorazowym (poza repozytorium — to dane, nie schemat), który ładuje wiersze tylko do PUSTEGO rodzaju.
 -- Kolumny finansowe ("cena PLN + koszty", "Cena PLN", "prowizja + PCC") są wartościami Z ARKUSZA — nie przeliczamy ich w aplikacji.
--- Odczyt: tylko Admin i Manager (ceny zakupu, dostawcy). Zapis: tylko przez serwer/SQL Editor (service_role) — brak polityk insert/update/delete.
+-- Dostęp (odczyt i DODAWANIE) ma każdy, kto ma zakładkę Towar (13.10.2026): Admin zawsze, Manager domyślnie, a dla pozostałych osób — gdy Admin zaznaczył im "Towar" w Zespół -> Edytuj
+-- (members.view_access). Edycja i usuwanie zostają tylko przy Adminie. Zapis przy dodawaniu przechodzi przez RLS jako zalogowany użytkownik (autor i numer wiersza ustawia trigger).
 
+-- To samo co effectiveAccess() w app/page.tsx: zapisana lista zakładek osoby (view_access) ZASTĘPUJE domyślny zestaw roli; bez niej (null) obowiązuje rola.
 create or replace function goods_can_read() returns boolean
 language sql stable security definer set search_path = public as $$
-  select exists (select 1 from members where user_id = auth.uid() and role in ('Admin', 'Manager'));
+  select exists (
+    select 1 from members
+    where user_id = auth.uid()
+      and (role = 'Admin'
+        or (view_access is null and role = 'Manager')
+        or (view_access is not null and 'goods' = any (view_access)))
+  );
 $$;
 
 create table if not exists goods_register (
