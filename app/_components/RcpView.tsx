@@ -375,6 +375,7 @@ function Records({ session, members, isAdmin }: { session: Session; members: Mem
         <span className="text-sm font-semibold w-40 text-center capitalize">{monthLabel(month)}</span>
         <button onClick={() => setMonth(shiftMonth(month, 1))} disabled={month >= monthKeyOf(new Date().toISOString())!} className="bg-white border border-line px-3 py-1.5 rounded text-sm font-semibold disabled:opacity-40">›</button>
         {reviewCount > 0 && <span className="text-xs font-semibold text-amber bg-ambersoft px-2 py-1 rounded">⚠ {reviewCount} wpisów do sprawdzenia (zamknięte automatycznie)</span>}
+        <span className="text-[11px] text-inksoft" title="W komórce dnia: góra = czas pracy, dół = przerwa">W komórce: <span className="font-mono font-bold text-ink">7:34</span> praca · <span className="font-mono text-[10px]">0:22</span> przerwa</span>
         <button onClick={exportCsv} className="ml-auto bg-white border border-line px-4 py-2 rounded text-sm font-semibold">Pobierz CSV</button>
       </div>
       <div className="bg-white border border-line overflow-x-auto">
@@ -401,9 +402,11 @@ function Records({ session, members, isAdmin }: { session: Session; members: Mem
                   const wk = dowOf(d);
                   const ab = absenceOnDay(absences.filter((a) => a.user_id === p.user_id), d);
                   return (
-                    <td key={d} onClick={() => setOpenCell({ userId: p.user_id, email: p.email, day: d })} title={ab ? absenceKind(ab.kind)?.label : undefined} className={`p-1.5 text-center font-mono cursor-pointer hover:bg-tealsoft ${wk === "nd" || wk === "so" || isHoliday(d) ? "bg-paper" : ""} ${s?.open ? "text-teal font-bold" : ""}`}>
-                      {s && s.workMs > 0 ? fmtHm(s.workMs) : ab ? <span className="text-[10px] font-bold text-amber">{absenceKind(ab.kind)?.short}</span> : ""}
-                      {s?.review && <span className="text-amber">⚠</span>}
+                    <td key={d} onClick={() => setOpenCell({ userId: p.user_id, email: p.email, day: d })} title={ab ? absenceKind(ab.kind)?.label : undefined} className={`p-1.5 text-center font-mono align-top cursor-pointer hover:bg-tealsoft ${wk === "nd" || wk === "so" || isHoliday(d) ? "bg-paper" : ""} ${s?.open ? "text-teal font-bold" : ""}`}>
+                      {s && s.workMs > 0 ? <div title="Czas pracy (praca + wyjścia służbowe)">{fmtHm(s.workMs)}{s.review && <span className="text-amber">⚠</span>}</div> : ab ? <span className="text-[10px] font-bold text-amber">{absenceKind(ab.kind)?.short}</span> : s?.review ? <span className="text-amber">⚠</span> : ""}
+                      {s && s.breakMs > 0 && (
+                        <div className={`text-[10px] leading-tight ${s.breakMs > PAID_BREAK_MS ? "text-amber font-semibold" : "text-inksoft font-normal"}`} title={s.breakMs > PAID_BREAK_MS ? `Przerwa ${fmtHm(s.breakMs)} (w tym ${fmtHm(s.breakMs - PAID_BREAK_MS)} poza płatną przerwą 0:30)` : `Przerwa ${fmtHm(s.breakMs)}`}>{fmtHm(s.breakMs)}</div>
+                      )}
                     </td>
                   );
                 })}
@@ -415,7 +418,7 @@ function Records({ session, members, isAdmin }: { session: Session; members: Mem
           </tbody>
         </table>
       </div>
-      <p className="text-[11px] text-inksoft mt-3 max-w-3xl">Godziny w komórkach = praca + wyjścia służbowe (bez przerw i wyjść prywatnych). „Godziny w miesiącu” (zielona kolumna po nazwisku) to łączna liczba godzin z płatną przerwą; „Razem (praca)” i „Przerwa” po prawej to jej składniki (praca + wyjścia służbowe oraz płatna część przerw — pierwsze 30 min w dobie). Kody nieobecności: U urlop, UŻ na żądanie, UO okolicznościowy, UB bezpłatny, L4, N inna; szare tło = weekend lub święto. Kliknij komórkę, żeby zobaczyć szczegóły dnia, poprawić wpis albo dodać brakujący. ⚠ = wpis zamknięty automatycznie (nikt nie kliknął „Zakończ”) — sprawdź i popraw.</p>
+      <p className="text-[11px] text-inksoft mt-3 max-w-3xl">W komórce dnia: <b>górna liczba</b> = praca + wyjścia służbowe (bez przerw i wyjść prywatnych), <b>dolna, mniejsza</b> = łączny czas przerw tego dnia (na bursztynowo, gdy przekracza płatne 30 min). „Godziny w miesiącu” (zielona kolumna po nazwisku) to łączna liczba godzin z płatną przerwą; „Razem (praca)” i „Przerwa” po prawej to jej składniki (praca + wyjścia służbowe oraz płatna część przerw — pierwsze 30 min w dobie). Kody nieobecności: U urlop, UŻ na żądanie, UO okolicznościowy, UB bezpłatny, L4, N inna; szare tło = weekend lub święto. Kliknij komórkę, żeby zobaczyć szczegóły dnia, poprawić wpis albo dodać brakujący. ⚠ = wpis zamknięty automatycznie (nikt nie kliknął „Zakończ”) — sprawdź i popraw.</p>
       {openCell && <DayDrawer session={session} cell={openCell} segs={segs.filter((s) => s.user_id === openCell.userId)} members={members} isAdmin={isAdmin} onClose={() => setOpenCell(null)} onChanged={load} />}
     </div>
   );
