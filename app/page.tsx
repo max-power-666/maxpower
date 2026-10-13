@@ -231,6 +231,7 @@ function LoginScreen() {
 /* ---------------- brak przypisanej roli ---------------- */
 
 // Rolę nadaje administrator z zakładki Zespół — nowy użytkownik nie wybiera jej sam.
+// Przycisk wylogowania (13.10.2026, zgłoszenie z Backlogu ZAD-4): po zalogowaniu na zły adres e-mail nie było jak się stąd wylogować i wejść na właściwy.
 function NoRoleScreen({ email, onRetry }: { email: string; onRetry: () => void }) {
   return (
     <div className="min-h-screen flex items-center justify-center bg-paper px-4">
@@ -243,6 +244,12 @@ function NoRoleScreen({ email, onRetry }: { email: string; onRetry: () => void }
         <button onClick={onRetry} className="mt-3 text-sm font-semibold text-teal hover:underline">
           Sprawdź ponownie
         </button>
+        <div className="mt-6 pt-4 border-t border-line">
+          <p className="text-inksoft text-xs mb-2">To nie ten adres e-mail?</p>
+          <button onClick={() => supabase.auth.signOut()} className="text-sm font-semibold border border-line bg-white px-4 py-2 rounded hover:bg-paper">
+            Wyloguj i zaloguj się na inne konto
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -583,6 +590,7 @@ export default function Home() {
           <>
             <span>Nie udało się wczytać Twojej roli ({roleError}).</span>
             <button onClick={() => loadRole()} className="font-semibold text-teal hover:underline">Spróbuj ponownie</button>
+            <button onClick={() => supabase.auth.signOut()} className="text-xs text-inksoft hover:underline">Wyloguj i zaloguj się na inne konto</button>
           </>
         ) : (
           "Ładowanie…"
