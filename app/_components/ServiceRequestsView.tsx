@@ -9,10 +9,13 @@ import { ACTIVE_REQUEST_STATUSES, REQUEST_PRIORITIES, REQUEST_PRIORITY_LABEL, RE
 
 // Zamówienia -> Zapotrzebowanie (08.10.2026): pracownicy zlecają zadania dla serwisu (dowolna treść albo numer zamówienia + priorytet; autor, data i numer ZAP-n automatycznie), serwisant przyjmuje zlecenie i ustawia status.
 // Kto może zmieniać status, pilnuje baza (trigger service_requests_guard); tu przyciski i lista statusu pokazują się tylko serwisantom (canHandle).
+// Karta zlecenia (13.10.2026): klik w ID otwiera panel z edycją treści i priorytetu (autor, dopóki zlecenie jest aktywne, albo serwisant), przyciskiem "Duplikuj" i logiem zmian (kolumna history, wypełniana triggerem).
 
+type HistoryEntry = { at: string; by_email: string | null; action: "created" | "status" | "edited"; from?: string; to?: string; changes?: { field: string; from: string | null; to: string | null }[] };
 type Req = {
   id: number;
   message: string;
+  created_by_user_id: string | null;
   created_by_email: string | null;
   created_at: string;
   status: RequestStatus;
@@ -21,8 +24,9 @@ type Req = {
   accepted_at: string | null;
   status_changed_by_email: string | null;
   status_changed_at: string | null;
+  history: HistoryEntry[] | null;
 };
-const COLS = "id, message, created_by_email, created_at, status, priority, accepted_by_email, accepted_at, status_changed_by_email, status_changed_at";
+const COLS = "id, message, created_by_user_id, created_by_email, created_at, status, priority, accepted_by_email, accepted_at, status_changed_by_email, status_changed_at, history";
 const STATUS_STYLE: Record<RequestStatus, string> = {
   nowe: "bg-ambersoft text-amber",
   przyjete: "bg-[#e3ecf9] text-[#2a6bb5]",
@@ -52,6 +56,7 @@ export default function ServiceRequestsView({ session, members, canHandle }: { s
   const [saving, setSaving] = useState(false);
   const [filter, setFilter] = useState<"active" | "all" | RequestStatus>("active");
   const [searchInput, setSearchInput] = useState("");
+  const [openId, setOpenId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     const { data, error: err } = await supabase.from("service_requests").select(COLS).order("id", { ascending: false }).limit(500);
@@ -110,6 +115,24 @@ export default function ServiceRequestsView({ session, members, canHandle }: { s
     load();
   }
 
+  // Duplikat = nowe zlecenie z tą samą treścią i priorytetem (autor, data, status "nowe" ustawia baza); po utworzeniu otwieramy jego kartę, żeby od razu poprawić treść.
+  async function duplicate(src: Req) {
+    setError("");
+    const { data, error: err } = await supabase.from("service_requests").insert({ message: src.message, priority: src.priority }).select("id").single();
+    if (err || !data) return setError(`Nie udało się zduplikować zlecenia: ${err?.message ?? "brak odpowiedzi"}`);
+    await load();
+    setOpenId((data as { id: number }).id);
+  }
+
+  // Zapis treści i priorytetu z karty. Zwraca komunikat błędu albo null. Baza dopisuje wpis do logu (trigger), więc po zapisie tylko przeładowujemy listę.
+  async function saveEdit(id: number, patch: { message: string; priority: RequestPriority }): Promise<string | null> {
+    const { data, error: err } = await supabase.from("service_requests").update(patch).eq("id", id).select("id");
+    if (err) return `Nie udało się zapisać: ${err.message}`;
+    if (!data?.length) return "Nie zapisano — zlecenie może edytować jego autor (dopóki jest aktywne) albo serwisant.";
+    await load();
+    return null;
+  }
+
   const name = (email: string | null) => (email ? displayNameForEmail(email, members) : "—");
   const search = searchInput.trim().toLowerCase();
   const visible = useMemo(
@@ -126,7 +149,6 @@ export default function ServiceRequestsView({ session, members, canHandle }: { s
     [rows, filter, search, members]
   );
   const count = (f: (r: Req) => boolean) => rows.filter(f).length;
-  void session;
 
   return (
     <div>
@@ -176,13 +198,14 @@ export default function ServiceRequestsView({ session, members, canHandle }: { s
               <th className="p-3">Status</th>
               <th className="p-3">Przyjął(ęła)</th>
               {canHandle && <th className="p-3"></th>}
+              <th className="p-3"></th>
             </tr>
           </thead>
           <tbody>
-            {!loading && visible.length === 0 && !error && <tr><td colSpan={canHandle ? 9 : 8} className="p-6 text-center text-inksoft text-sm">{rows.length === 0 ? "Brak zleceń — dodaj pierwsze powyżej." : "Brak zleceń w tym widoku."}</td></tr>}
+            {!loading && visible.length === 0 && !error && <tr><td colSpan={canHandle ? 10 : 9} className="p-6 text-center text-inksoft text-sm">{rows.length === 0 ? "Brak zleceń — dodaj pierwsze powyżej." : "Brak zleceń w tym widoku."}</td></tr>}
             {visible.map((r) => (
               <tr key={r.id} className="border-b border-line last:border-b-0 align-top">
-                <td className="p-3 font-mono text-xs font-semibold whitespace-nowrap">{requestCode(r.id)}</td>
+                <td className="p-3 whitespace-nowrap"><button onClick={() => setOpenId(r.id)} title="Otwórz kartę zlecenia" className="font-mono text-xs font-semibold text-teal hover:underline">{requestCode(r.id)}</button></td>
                 <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDT(r.created_at)}</td>
                 <td className="p-3 font-semibold whitespace-nowrap">{name(r.created_by_email)}</td>
                 <td className="p-3 whitespace-nowrap"><span className={`text-xs font-semibold px-2 py-1 rounded ${PRIORITY_STYLE[r.priority]}`}>{REQUEST_PRIORITY_LABEL[r.priority]}</span></td>
@@ -212,12 +235,176 @@ export default function ServiceRequestsView({ session, members, canHandle }: { s
                     {r.status === "nowe" && <button onClick={() => setStatus(r.id, "przyjete")} className="bg-teal text-paper px-3 py-1 rounded text-xs font-semibold">Przyjmij</button>}
                   </td>
                 )}
+                <td className="p-3 whitespace-nowrap">
+                  <button onClick={() => duplicate(r)} title="Utwórz nowe zlecenie z tą samą treścią i priorytetem" className="text-xs font-semibold text-inksoft hover:text-ink hover:underline">Duplikuj</button>
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      {openId !== null && (() => {
+        const r = rows.find((x) => x.id === openId);
+        if (!r) return null;
+        const isAuthor = !!r.created_by_user_id && r.created_by_user_id === session.user.id;
+        const canEdit = canHandle || (isAuthor && ACTIVE_REQUEST_STATUSES.includes(r.status));
+        const skuHits = orderTokens(r.message).map((t) => ({ t, o: orderSkus[t.toLowerCase()] })).filter((h) => h.o);
+        return (
+          <RequestCard
+            key={r.id}
+            r={r}
+            canEdit={canEdit}
+            canHandle={canHandle}
+            name={name}
+            skuHits={skuHits}
+            onClose={() => setOpenId(null)}
+            onSave={(patch) => saveEdit(r.id, patch)}
+            onSetStatus={(st) => setStatus(r.id, st)}
+            onDuplicate={() => duplicate(r)}
+          />
+        );
+      })()}
       <p className="text-[11px] text-inksoft mt-3 max-w-3xl">Gdy w treści jest numer zamówienia, kolumna SKU pokazuje SKU z tego zamówienia. Zapotrzebowania dodaje każdy; przyjmuje je i zmienia status serwisant (Serwis, Kierownik serwisu, Manager, Admin). „Przyjęte” zapisuje, kto i kiedy zajął się zleceniem.</p>
+    </div>
+  );
+}
+
+const CARD_BTN = "px-3 py-1.5 rounded text-sm font-semibold border border-line bg-white disabled:opacity-50";
+
+function RequestCard({
+  r, canEdit, canHandle, name, skuHits, onClose, onSave, onSetStatus, onDuplicate,
+}: {
+  r: Req;
+  canEdit: boolean;
+  canHandle: boolean;
+  name: (email: string | null) => string;
+  skuHits: { t: string; o: OrderSku }[];
+  onClose: () => void;
+  onSave: (patch: { message: string; priority: RequestPriority }) => Promise<string | null>;
+  onSetStatus: (st: RequestStatus) => void;
+  onDuplicate: () => void;
+}) {
+  const [message, setMessage] = useState(r.message);
+  const [priority, setPriority] = useState<RequestPriority>(r.priority);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+  const [savedAt, setSavedAt] = useState(false);
+
+  // Gdy zlecenie zmieni się z zewnątrz (realtime / zapis), a niczego tu nie edytujemy, pokaż świeże wartości.
+  const dirty = message !== r.message || priority !== r.priority;
+  useEffect(() => {
+    if (!dirty) {
+      setMessage(r.message);
+      setPriority(r.priority);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [r.message, r.priority]);
+
+  async function save() {
+    const text = message.trim();
+    if (!text) return setErr("Treść zlecenia nie może być pusta.");
+    setSaving(true);
+    setErr("");
+    const e = await onSave({ message: text, priority });
+    setSaving(false);
+    if (e) return setErr(e);
+    setMessage(text);
+    setSavedAt(true);
+    setTimeout(() => setSavedAt(false), 2000);
+  }
+
+  const history = r.history ?? [];
+  const fieldLabel = (f: string) => (f === "message" ? "Treść" : f === "priority" ? "Priorytet" : f);
+  const valueLabel = (f: string, v: string | null) => (f === "priority" ? REQUEST_PRIORITY_LABEL[v as RequestPriority] ?? v ?? "—" : v || "—");
+
+  return (
+    <div className="fixed inset-0 bg-black/30 flex justify-end z-50" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="w-full max-w-lg bg-paper h-full overflow-y-auto p-6 border-l border-line">
+        <div className="flex justify-between items-start mb-3">
+          <div className="text-xs text-inksoft font-mono">{requestCode(r.id)}</div>
+          <button onClick={onClose} className="text-inksoft text-lg" aria-label="Zamknij">✕</button>
+        </div>
+
+        <div className="text-xs font-semibold text-inksoft mb-1">TREŚĆ</div>
+        {canEdit ? (
+          <textarea
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            maxLength={2000}
+            rows={4}
+            className="w-full border border-line bg-white px-3 py-2 rounded text-sm mb-3"
+          />
+        ) : (
+          <div className="border border-line bg-white p-3 text-sm whitespace-pre-wrap break-words mb-3">{r.message}</div>
+        )}
+
+        <div className="border border-line bg-white mb-3 text-sm">
+          <div className="flex justify-between gap-3 px-3 py-2 border-b border-line">
+            <span className="text-inksoft">Priorytet</span>
+            {canEdit ? (
+              <select value={priority} onChange={(e) => setPriority(e.target.value as RequestPriority)} className="border border-line bg-white px-2 py-1 rounded text-sm">
+                {REQUEST_PRIORITIES.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
+              </select>
+            ) : (
+              <span className={`text-xs font-semibold px-2 py-1 rounded ${PRIORITY_STYLE[r.priority]}`}>{REQUEST_PRIORITY_LABEL[r.priority]}</span>
+            )}
+          </div>
+          <div className="flex justify-between gap-3 px-3 py-2 border-b border-line">
+            <span className="text-inksoft">Status</span>
+            {canHandle ? (
+              <select value={r.status} onChange={(e) => onSetStatus(e.target.value as RequestStatus)} className={`text-xs font-semibold px-2 py-1 rounded border border-line ${STATUS_STYLE[r.status]}`}>
+                {REQUEST_STATUSES.map((st) => <option key={st.key} value={st.key}>{st.label}</option>)}
+              </select>
+            ) : (
+              <span className={`text-xs font-semibold px-2 py-1 rounded ${STATUS_STYLE[r.status]}`}>{REQUEST_STATUS_LABEL[r.status]}</span>
+            )}
+          </div>
+          <div className="flex justify-between gap-3 px-3 py-2 border-b border-line"><span className="text-inksoft">Zlecił(a)</span><span className="font-semibold">{name(r.created_by_email)}</span></div>
+          <div className="flex justify-between gap-3 px-3 py-2 border-b border-line"><span className="text-inksoft">Dodano</span><span>{fmtDT(r.created_at)}</span></div>
+          <div className="flex justify-between gap-3 px-3 py-2 border-b border-line">
+            <span className="text-inksoft">Przyjął(ęła)</span>
+            <span>{r.accepted_at ? `${name(r.accepted_by_email)}, ${fmtDT(r.accepted_at)}` : "—"}</span>
+          </div>
+          <div className="flex justify-between gap-3 px-3 py-2">
+            <span className="text-inksoft">SKU z zamówienia</span>
+            <span className="font-mono text-xs text-right">
+              {skuHits.length === 0 ? "—" : skuHits.map(({ t, o }) => <div key={t} title={`Zamówienie ${t}`}>{o.sku || "brak SKU"}</div>)}
+            </span>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 mb-2">
+          {canEdit && <button onClick={save} disabled={saving || !dirty || !message.trim()} className="bg-ink text-paper px-4 py-1.5 rounded text-sm font-semibold disabled:opacity-50">{saving ? "Zapisywanie…" : "Zapisz zmiany"}</button>}
+          {canEdit && dirty && <button onClick={() => { setMessage(r.message); setPriority(r.priority); setErr(""); }} className={CARD_BTN}>Cofnij zmiany</button>}
+          <button onClick={onDuplicate} title="Utwórz nowe zlecenie z tą samą treścią i priorytetem" className={CARD_BTN}>Duplikuj</button>
+          {savedAt && <span className="text-xs text-teal font-semibold">Zapisano ✓</span>}
+        </div>
+        {err && <p className="text-rust text-xs mb-2">{err}</p>}
+        {!canEdit && <p className="text-[11px] text-inksoft mb-2">Treść i priorytet zmienia autor zlecenia (dopóki jest aktywne) albo serwisant.</p>}
+
+        <h3 className="text-xs font-semibold text-inksoft mt-6 mb-2">LOG ZMIAN</h3>
+        <div className="border border-line bg-white p-3 text-sm">
+          {history.length === 0 && <div className="text-inksoft">Brak wpisów.</div>}
+          {history.map((h, i) => (
+            <div key={i} className="mb-2 last:mb-0">
+              <div>
+                <span className="font-mono text-inksoft mr-1">{i + 1}.</span>
+                {h.action === "created" && <>Utworzono</>}
+                {h.action === "status" && <>Status: <span className="font-semibold">{REQUEST_STATUS_LABEL[h.from as RequestStatus] ?? h.from}</span> → <span className="font-semibold">{REQUEST_STATUS_LABEL[h.to as RequestStatus] ?? h.to}</span></>}
+                {h.action === "edited" && <>Edytowano</>}
+                {" — "}<span className="font-semibold">{h.by_email ? name(h.by_email) : "system"}</span>, {fmtDT(h.at)}
+              </div>
+              {!!h.changes?.length && (
+                <ul className="ml-6 list-disc text-xs text-inksoft">
+                  {h.changes.map((c, j) => (
+                    <li key={j} className="break-words">{fieldLabel(c.field)}: „{valueLabel(c.field, c.from)}” → „{valueLabel(c.field, c.to)}”</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
