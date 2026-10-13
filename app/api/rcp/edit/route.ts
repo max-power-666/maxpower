@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { rcpAdmin, rcpCaller } from "@/lib/rcpServer";
 import { RCP_KIND_LABEL } from "@/lib/rcp";
+import { keepIfSameMinute, overlapsByMinute } from "@/lib/rcpOverlap";
 
 // Korekty czasu pracy (Admin i Manager): poprawa odcinka albo dodanie brakującego. Każda zmiana wymaga uzasadnienia i zostaje w history odcinka (kto, kiedy, co z czego na co);
 // odcinek po korekcie nie jest już "do sprawdzenia". Usuwanie to osobna operacja tylko dla Admina (polityka delete + audit_delete w bazie).
@@ -30,7 +31,7 @@ export async function POST(request: Request) {
       if (o.id === exceptId) return false;
       const os = Date.parse(o.started_at);
       const oe = o.ended_at ? Date.parse(o.ended_at) : Infinity;
-      return os < e && oe > s;
+      return overlapsByMinute(s, e, os, oe); // na pełnych minutach — patrz lib/rcpOverlap.ts
     });
   }
 
@@ -68,8 +69,11 @@ export async function POST(request: Request) {
       if (!KINDS.includes(String(b.kind))) return NextResponse.json({ error: "Nieprawidłowy rodzaj." }, { status: 400 });
       set("kind", "Rodzaj", String(b.kind), cur.kind);
     }
-    const start = b.started_at !== undefined ? iso(b.started_at) : (cur.started_at as string);
-    const end = b.ended_at !== undefined ? (b.ended_at ? iso(b.ended_at) : null) : (cur.ended_at as string | null);
+    // Formularz wysyła tylko minuty — wartość niezmieniona z dokładnością do minuty zostaje z oryginalnymi sekundami (nie jest zmianą i nie nakłada się na sąsiada).
+    const sentStart = b.started_at !== undefined ? iso(b.started_at) : null;
+    const sentEnd = b.ended_at !== undefined && b.ended_at ? iso(b.ended_at) : null;
+    const start = b.started_at !== undefined ? (sentStart ? keepIfSameMinute(sentStart, cur.started_at as string) : null) : (cur.started_at as string);
+    const end = b.ended_at !== undefined ? (b.ended_at ? (sentEnd ? keepIfSameMinute(sentEnd, cur.ended_at as string | null) : null) : null) : (cur.ended_at as string | null);
     if (!start) return NextResponse.json({ error: "Nieprawidłowy początek." }, { status: 400 });
     if (b.ended_at !== undefined && b.ended_at && !end) return NextResponse.json({ error: "Nieprawidłowy koniec." }, { status: 400 });
     if (end && Date.parse(end) <= Date.parse(start)) return NextResponse.json({ error: "Koniec musi być po początku." }, { status: 400 });
