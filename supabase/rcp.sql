@@ -189,8 +189,14 @@ create table if not exists rcp_leave_balances (
 alter table rcp_absences enable row level security;
 alter table rcp_leave_balances enable row level security;
 
+-- Kierownik serwisu (13.10.2026) widzi wnioski urlopowe SERWISANTÓW (rola "Serwis"), tylko do odczytu — nie innych ról i nie czas pracy. Funkcja security definer czyta members bez uprawnień do niej.
+create or replace function rcp_service_lead_sees(target uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from members where user_id = auth.uid() and role = 'Kierownik serwisu')
+     and exists (select 1 from members where user_id = target and role = 'Serwis');
+$$;
 drop policy if exists "own or manager read rcp_absences" on rcp_absences;
-create policy "own or manager read rcp_absences" on rcp_absences for select using (user_id = auth.uid() or rcp_is_manager());
+create policy "own or manager read rcp_absences" on rcp_absences for select using (user_id = auth.uid() or rcp_is_manager() or rcp_service_lead_sees(user_id));
 drop policy if exists "admin delete rcp_absences" on rcp_absences;
 create policy "admin delete rcp_absences" on rcp_absences for delete using (is_admin());
 drop trigger if exists rcp_absences_audit_delete on rcp_absences;
@@ -198,6 +204,6 @@ create trigger rcp_absences_audit_delete before delete on rcp_absences
   for each row execute function audit_delete();
 
 drop policy if exists "own or manager read rcp_leave_balances" on rcp_leave_balances;
-create policy "own or manager read rcp_leave_balances" on rcp_leave_balances for select using (user_id = auth.uid() or rcp_is_manager());
+create policy "own or manager read rcp_leave_balances" on rcp_leave_balances for select using (user_id = auth.uid() or rcp_is_manager() or rcp_service_lead_sees(user_id));
 drop policy if exists "admin write rcp_leave_balances" on rcp_leave_balances;
 create policy "admin write rcp_leave_balances" on rcp_leave_balances for all using (is_admin()) with check (is_admin());

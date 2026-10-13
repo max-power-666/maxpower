@@ -10,6 +10,7 @@ import { warsawDay } from "@/lib/rcp";
 //  create_for — Admin/Manager wpisuje nieobecność za pracownika (od razu "zaakceptowany", np. L4); przekroczenie limitu to tylko ostrzeżenie,
 //  decide     — Admin/Manager akceptuje/odrzuca wniosek (odrzucenie wymaga powodu; Manager nie rozpatruje własnych wniosków),
 //  cancel     — Admin/Manager anuluje zaakceptowaną nieobecność (wymaga powodu).
+// Kierownik serwisu (13.10.2026) może tylko "decide", i to wyłącznie dla wniosków osób z rolą Serwis (nie własnych, nie innych ról); wpisywanie nieobecności za kogoś i anulowanie zostają przy Adminie/Managerze.
 export const dynamic = "force-dynamic";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -21,6 +22,7 @@ export async function POST(request: Request) {
   const me = await rcpCaller(request, db);
   if (!me) return err("Brak uprawnień.", 403);
   const isManager = me.role === "Admin" || me.role === "Manager";
+  const isLead = me.role === "Kierownik serwisu";
   const b = await request.json().catch(() => null);
   const action = typeof b?.action === "string" ? b.action : "";
   const note = typeof b?.note === "string" ? b.note.trim().slice(0, 500) : "";
@@ -99,7 +101,7 @@ export async function POST(request: Request) {
     return error ? dbError(error) : NextResponse.json({ ok: true });
   }
 
-  if (!isManager) return err("Brak uprawnień.", 403);
+  if (!isManager && !(isLead && action === "decide")) return err("Brak uprawnień.", 403);
 
   if (action === "create_for") {
     const req = parseRequest();
@@ -124,6 +126,10 @@ export async function POST(request: Request) {
     if (!a) return err("Nie znaleziono wniosku.", 404);
     if (a.status !== "oczekuje") return err("Ten wniosek został już rozpatrzony.", 409);
     if (a.user_id === me.uid && me.role !== "Admin") return err("Własnego wniosku nie rozpatrujesz — zrobi to Admin.", 403);
+    if (isLead) {
+      const { data: target } = await db.from("members").select("role").eq("user_id", a.user_id).maybeSingle();
+      if (target?.role !== "Serwis") return err("Kierownik serwisu rozpatruje wnioski serwisantów.", 403);
+    }
     const t = nowIso();
     const { error } = await db.from("rcp_absences").update({ status: decision, decided_by_email: me.email, decided_at: t, decision_note: note || null, history: [...(a.history || []), { at: t, by_email: me.email, event: decision === "zaakceptowany" ? "Zaakceptowano" : "Odrzucono", note }] }).eq("id", id);
     return error ? dbError(error) : NextResponse.json({ ok: true });

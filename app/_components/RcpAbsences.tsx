@@ -185,7 +185,9 @@ function Decide({ session, a, label, requireNote, action, onDone }: { session: S
   );
 }
 
-export function Requests({ session, members, isAdmin }: { session: Session; members: MemberLite[]; isAdmin: boolean }) {
+// scope "service" (13.10.2026): widok Kierownika serwisu — tylko wnioski osób z rolą Serwis; zatwierdza/odrzuca, ale nie wpisuje nieobecności za kogoś, nie anuluje i nie zmienia limitów (to Admin/Manager).
+export function Requests({ session, members, isAdmin, scope = "all" }: { session: Session; members: MemberLite[]; isAdmin: boolean; scope?: "all" | "service" }) {
+  const serviceScope = scope === "service";
   const [year, setYear] = useState(new Date().getFullYear());
   const [abs, setAbs] = useState<Absence[]>([]);
   const [people, setPeople] = useState<{ user_id: string; email: string; role: string }[]>([]);
@@ -210,9 +212,11 @@ export function Requests({ session, members, isAdmin }: { session: Session; memb
   }, [load]);
 
   const name = (email: string) => displayNameForEmail(email, members);
-  const pendingList = abs.filter((a) => a.status === "oczekuje").sort((a, b) => a.date_from.localeCompare(b.date_from));
-  const rest = abs.filter((a) => a.status !== "oczekuje" && (statusFilter === "all" || a.status === statusFilter) && (!personFilter || a.user_id === personFilter));
-  const sortedPeople = [...people].sort((a, b) => name(a.email).localeCompare(name(b.email), "pl"));
+  const scopedIds = serviceScope ? new Set(people.filter((p) => p.role === "Serwis").map((p) => p.user_id)) : null;
+  const inScope = (a: Absence) => !scopedIds || (!!a.user_id && scopedIds.has(a.user_id));
+  const pendingList = abs.filter((a) => inScope(a) && a.status === "oczekuje").sort((a, b) => a.date_from.localeCompare(b.date_from));
+  const rest = abs.filter((a) => inScope(a) && a.status !== "oczekuje" && (statusFilter === "all" || a.status === statusFilter) && (!personFilter || a.user_id === personFilter));
+  const sortedPeople = [...people].filter((p) => !scopedIds || scopedIds.has(p.user_id)).sort((a, b) => name(a.email).localeCompare(name(b.email), "pl"));
 
   async function saveLimit(userId: string, raw: string | null) {
     const n = raw === null || raw.trim() === "" ? null : Number(raw.trim().replace(",", "."));
@@ -260,7 +264,7 @@ export function Requests({ session, members, isAdmin }: { session: Session; memb
         </table>
       </div>
 
-      <div className="mb-6"><AbsenceForm session={session} members={sortedPeople} forUser onDone={load} /></div>
+      {!serviceScope && <div className="mb-6"><AbsenceForm session={session} members={sortedPeople} forUser onDone={load} /></div>}
 
       <div className="flex items-center gap-3 mb-2 flex-wrap">
         <h2 className="text-xs font-semibold text-inksoft">HISTORIA {year}</h2>
@@ -285,7 +289,7 @@ export function Requests({ session, members, isAdmin }: { session: Session; memb
                 <td className="p-3 text-right font-mono">{a.workdays}</td>
                 <td className="p-3"><Badge s={a.status} /></td>
                 <td className="p-3 text-xs text-inksoft">{[a.decided_by_email ? name(a.decided_by_email) : "", a.decision_note || a.note || ""].filter(Boolean).join(" · ") || "—"}</td>
-                <td className="p-3">{a.status === "zaakceptowany" && <Decide session={session} a={a} label="Anuluj" requireNote action="cancel" onDone={load} />}</td>
+                <td className="p-3">{a.status === "zaakceptowany" && !serviceScope && <Decide session={session} a={a} label="Anuluj" requireNote action="cancel" onDone={load} />}</td>
               </tr>
             ))}
             {rest.length === 0 && !error && <tr><td colSpan={7} className="p-6 text-center text-inksoft text-sm">Brak wpisów.</td></tr>}
@@ -340,13 +344,15 @@ function LimitCell({ value, onSave }: { value: number | null; onSave: (v: string
 }
 
 // Licznik wniosków do rozpatrzenia (pigułka "Wnioski (n)" dla Admina/Managera).
-export function usePendingCount(enabled: boolean): number {
+export function usePendingCount(enabled: boolean, excludeUserId?: string): number {
   const [n, setN] = useState(0);
   useEffect(() => {
     if (!enabled) return;
     let alive = true;
     const run = async () => {
-      const { count } = await supabase.from("rcp_absences").select("id", { count: "exact", head: true }).eq("status", "oczekuje");
+      let q = supabase.from("rcp_absences").select("id", { count: "exact", head: true }).eq("status", "oczekuje");
+      if (excludeUserId) q = q.neq("user_id", excludeUserId); // Kierownik serwisu: bez własnego wniosku (widzi go przez politykę "swoje")
+      const { count } = await q;
       if (alive) setN(count ?? 0);
     };
     run();
@@ -355,7 +361,7 @@ export function usePendingCount(enabled: boolean): number {
       alive = false;
       clearInterval(t);
     };
-  }, [enabled]);
+  }, [enabled, excludeUserId]);
   return n;
 }
 void useMemo;

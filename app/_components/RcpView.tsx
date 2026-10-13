@@ -56,10 +56,12 @@ async function fetchSegments(month: string, userId?: string): Promise<RcpSegment
 export default function RcpView({ session, role, members }: { session: Session; role: string; members: MemberLite[] }) {
   const isManager = role === "Admin" || role === "Manager";
   const isAdmin = role === "Admin";
+  const isLead = role === "Kierownik serwisu"; // widzi i rozpatruje wnioski urlopowe serwisantów (13.10.2026)
+  const canSeeRequests = isManager || isLead;
   const [sub, setSub] = useState<Sub>(() => {
     // baner "Wnioski urlopowe do rozpatrzenia" (ReminderBanners) otwiera RCP od razu na Wnioskach
     try {
-      if (isManager && sessionStorage.getItem("rcp-sub") === "requests") {
+      if (canSeeRequests && sessionStorage.getItem("rcp-sub") === "requests") {
         sessionStorage.removeItem("rcp-sub");
         return "requests";
       }
@@ -68,7 +70,7 @@ export default function RcpView({ session, role, members }: { session: Session; 
     }
     return isManager ? "now" : "mine";
   });
-  const pending = usePendingCount(isManager);
+  const pending = usePendingCount(canSeeRequests, isLead ? session.user.id : undefined);
   return (
     <div>
       <div className="flex gap-2 mb-5 flex-wrap">
@@ -76,11 +78,11 @@ export default function RcpView({ session, role, members }: { session: Session; 
         {isManager && <button onClick={() => setSub("records")} className={pill(sub === "records")}>Ewidencja</button>}
         {tracksWorkTime(role) && <button onClick={() => setSub("mine")} className={pill(sub === "mine")}>Mój czas</button>}
         <button onClick={() => setSub("leave")} className={pill(sub === "leave")}>Urlopy</button>
-        {isManager && <button onClick={() => setSub("requests")} className={pill(sub === "requests")}>Wnioski{pending > 0 ? ` (${pending})` : ""}</button>}
+        {canSeeRequests && <button onClick={() => setSub("requests")} className={pill(sub === "requests")}>{isLead ? "Wnioski serwisantów" : "Wnioski"}{pending > 0 ? ` (${pending})` : ""}</button>}
         {isManager && <button onClick={() => setSub("settings")} className={pill(sub === "settings")}>Ustawienia</button>}
       </div>
       {sub === "leave" && <MyLeave session={session} />}
-      {sub === "requests" && isManager && <Requests session={session} members={members} isAdmin={isAdmin} />}
+      {sub === "requests" && canSeeRequests && <Requests session={session} members={members} isAdmin={isAdmin} scope={isLead ? "service" : "all"} />}
       {sub === "mine" && <MyTime session={session} members={members} />}
       {sub === "now" && isManager && <NowBoard members={members} />}
       {sub === "records" && isManager && <Records session={session} members={members} isAdmin={isAdmin} />}
