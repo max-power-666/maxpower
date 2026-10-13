@@ -85,7 +85,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
   const [error, setError] = useState("");
   const [openSerial, setOpenSerial] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
-  const [editRow, setEditRow] = useState<GoodsEditRow | null>(null); // edycja wiersza (tylko Admin)
+  const [editRow, setEditRow] = useState<GoodsEditRow | null>(null); // edycja wiersza (każdy z dostępem do zakładki)
   const [reloadKey, setReloadKey] = useState(0); // rośnie po dodaniu/usunięciu wiersza — odświeża listę, sumy i listy filtrów
   const seq = useRef(0);
 
@@ -242,7 +242,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
       .map(([v, n]) => ({ value: v, label: `${v === NONE ? "— (brak)" : v} (${n})` }));
   const anyFilter = !!(search || category || supplier);
   const showGroup = tab === "all"; // w "Wszystkie" pierwsza kolumna mówi, do której pigułki należy wiersz
-  const colSpan = (isTradeIn ? 17 : 14) + (showGroup ? 1 : 0) + (isAdmin ? 1 : 0);
+  const colSpan = (isTradeIn ? 17 : 14) + (showGroup ? 1 : 0) + 1; // kolumna akcji (Edytuj / Usuń)
   const groupOf = (r: Row) => (r.vat === "V23" ? "V23" : r.kind === "trade_in" ? "Skup" : "VM");
 
   const headers = useMemo(
@@ -263,9 +263,9 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
       "Cena PLN + koszty",
       "Cena PLN",
       ...(isTradeIn ? ["PCC", "Kraj", "Prowizja + PCC"] : []),
-      ...(isAdmin ? [""] : []),
+      "", // kolumna akcji
     ],
-    [isTradeIn, isAdmin, showGroup]
+    [isTradeIn, showGroup]
   );
 
   return (
@@ -391,12 +391,10 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
                     <td className="p-2 whitespace-nowrap text-right">{fmtNum(r.commission_pcc)}</td>
                   </>
                 )}
-                {isAdmin && (
-                  <td className="p-2 whitespace-nowrap text-right">
-                    <button onClick={() => startEdit(r)} className="text-teal hover:underline mr-3">Edytuj</button>
-                    <button onClick={() => removeRow(r)} className="text-rust hover:underline">Usuń</button>
-                  </td>
-                )}
+                <td className="p-2 whitespace-nowrap text-right">
+                  <button onClick={() => startEdit(r)} className="text-teal hover:underline">Edytuj</button>
+                  {isAdmin && <button onClick={() => removeRow(r)} className="text-rust hover:underline ml-3">Usuń</button>}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -413,7 +411,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
         {isTradeIn && <span>PCC: <span className="font-semibold">{fmtPln(totals?.pcc)}</span></span>}
         {isTradeIn && <span>Prowizja + PCC: <span className="font-semibold">{fmtPln(totals?.commission_pcc)}</span></span>}
       </div>
-      <p className="text-[11px] text-inksoft mt-2 max-w-3xl">Dane z arkusza Towar.numbers i dopisane formularzem „Dodaj towar”; edytować i usuwać może tylko Admin (każda edycja zapisuje się w historii zmian). Kwoty „Cena PLN”, „Koszty”, „Cena PLN + koszty” i „Prowizja + PCC” to wartości z arkusza, nie przeliczenia aplikacji; sumy dotyczą całego wyniku filtrów.</p>
+      <p className="text-[11px] text-inksoft mt-2 max-w-3xl">Dane z arkusza Towar.numbers i dopisane formularzem „Dodaj towar”; edytować może każdy, kto ma zakładkę Towar (każda edycja zapisuje się w historii zmian: kto, kiedy, co), a usuwać tylko Admin. Kwoty „Cena PLN”, „Koszty”, „Cena PLN + koszty” i „Prowizja + PCC” to wartości z arkusza, nie przeliczenia aplikacji; sumy dotyczą całego wyniku filtrów.</p>
 
       {openSerial && <ProductCardDrawer serial={openSerial} members={members} onClose={() => setOpenSerial(null)} />}
     </div>

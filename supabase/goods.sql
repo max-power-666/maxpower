@@ -5,8 +5,8 @@
 --
 -- Dane z arkusza wgrywa się osobnym plikiem jednorazowym (poza repozytorium — to dane, nie schemat), który ładuje wiersze tylko do PUSTEGO rodzaju.
 -- Kolumny finansowe ("cena PLN + koszty", "Cena PLN", "prowizja + PCC") są wartościami Z ARKUSZA — nie przeliczamy ich w aplikacji.
--- Dostęp (odczyt i DODAWANIE) ma każdy, kto ma zakładkę Towar (13.10.2026): Admin zawsze, Manager domyślnie, a dla pozostałych osób — gdy Admin zaznaczył im "Towar" w Zespół -> Edytuj
--- (members.view_access). Edycja i usuwanie zostają tylko przy Adminie. Zapis przy dodawaniu przechodzi przez RLS jako zalogowany użytkownik (autor i numer wiersza ustawia trigger).
+-- Dostęp (odczyt, DODAWANIE i EDYCJA) ma każdy, kto ma zakładkę Towar (13.10.2026): Admin zawsze, Manager domyślnie, a dla pozostałych osób — gdy Admin zaznaczył im "Towar" w Zespół -> Edytuj
+-- (members.view_access). Usuwanie zostaje tylko przy Adminie. Zapis przechodzi przez RLS jako zalogowany użytkownik (autora, numer wiersza i historię zmian ustawiają triggery).
 
 -- To samo co effectiveAccess() w app/page.tsx: zapisana lista zakładek osoby (view_access) ZASTĘPUJE domyślny zestaw roli; bez niej (null) obowiązuje rola.
 create or replace function goods_can_read() returns boolean
@@ -61,6 +61,10 @@ language plpgsql security definer set search_path = public as $$
 begin
   new.row_no := coalesce((select max(row_no) from goods_register where kind = new.kind), 0) + 1;
   new.created_by_email := coalesce(auth.jwt() ->> 'email', new.created_by_email);
+  -- Dodanie z aplikacji to pierwszy wpis w historii (kto i kiedy); wiersze z importu/SQL (bez e-maila z sesji) zostają z pustą historią.
+  if auth.jwt() ->> 'email' is not null then
+    new.history := jsonb_build_array(jsonb_build_object('at', now(), 'by', auth.jwt() ->> 'email', 'action', 'created', 'changes', '[]'::jsonb));
+  end if;
   return new;
 end;
 $$;
@@ -78,7 +82,7 @@ create trigger goods_register_audit_delete before delete on goods_register
   for each row execute function audit_delete();
 
 -- ===== Edycja wierszy przez Admina (10.10.2026) =====
--- Edytować może tylko Admin (RLS update). Każda realna zmiana trafia do `history` (kto, kiedy, pole: było -> jest) — trigger, więc nie da się jej ominąć
+-- Edytować może każdy z dostępem do zakładki Towar (od 13.10.2026; wcześniej tylko Admin) — RLS update jak insert. Każda realna zmiana trafia do `history` (kto, kiedy, pole: było -> jest) — trigger, więc nie da się jej ominąć
 -- z przeglądarki; id, row_no, autor i data dodania są niezmienne. Zapis bez zmiany wartości niczego nie loguje.
 alter table goods_register add column if not exists updated_at timestamptz;
 alter table goods_register add column if not exists updated_by_email text;
@@ -111,7 +115,7 @@ begin
   if jsonb_array_length(ch) = 0 then
     return new;
   end if;
-  who := coalesce(auth.jwt() ->> 'email', old.updated_by_email);
+  who := coalesce(auth.jwt() ->> 'email', 'poza aplikacją');  -- zmiana z SQL Editora/serwera nie ma e-maila z sesji — nie przypisujemy jej poprzedniemu edytorowi
   new.updated_at := now();
   new.updated_by_email := who;
   new.history := coalesce(old.history, '[]'::jsonb) || jsonb_build_array(jsonb_build_object('at', now(), 'by', who, 'changes', ch));
@@ -123,4 +127,5 @@ create trigger goods_register_before_update before update on goods_register
   for each row execute function goods_register_before_update();
 
 drop policy if exists "admin update goods_register" on goods_register;
-create policy "admin update goods_register" on goods_register for update using (is_admin()) with check (is_admin());
+drop policy if exists "goods access update goods_register" on goods_register;
+create policy "goods access update goods_register" on goods_register for update using (goods_can_read()) with check (goods_can_read());

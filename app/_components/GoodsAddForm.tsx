@@ -9,10 +9,10 @@ import { countryFromOrderNo, goodsPricePln, goodsTotalPln, suggestTradeInFees } 
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 
 // Formularz "Dodaj towar" (10.10.2026): jeden wiersz rejestru goods_register dla bieżącej pigułki (VM, V23 albo Skup).
-// Ten sam formularz służy Adminowi do EDYCJI istniejącego wiersza (prop `edit`): pola z zapisaną wartością są wtedy traktowane jak wpisane ręcznie
+// Ten sam formularz służy do EDYCJI istniejącego wiersza (prop `edit`): pola z zapisaną wartością są wtedy traktowane jak wpisane ręcznie
 // (zmiana ceny/waluty/daty NIE przelicza po cichu kursu ani kwot — jest link "przelicz ponownie"), jest pole Grupa (VM / V23 / Skup) i historia zmian.
 // Pola liczone — kurs NBP (ostatni dzień roboczy PRZED datą zakupu), Cena PLN, PCC, prowizja + PCC, cena PLN + koszty — są PODPOWIEDZIĄ:
-// wypełniają się same, a każde można poprawić ręcznie (wtedy przestaje się przeliczać). Zapis idzie wprost do bazy (RLS: Admin i Manager).
+// wypełniają się same, a każde można poprawić ręcznie (wtedy przestaje się przeliczać). Zapis idzie wprost do bazy (RLS: kto ma dostęp do zakładki Towar).
 
 type Kind = "vm_v23" | "trade_in";
 type Group = "VM" | "V23" | "Skup";
@@ -38,7 +38,7 @@ export type GoodsEditRow = {
   pcc: number | null;
   country: string | null;
   commission_pcc: number | null;
-  history?: { at: string; by: string | null; changes: { field: string; from: unknown; to: unknown }[] }[];
+  history?: { at: string; by: string | null; action?: string; changes?: { field: string; from: unknown; to: unknown }[] }[];
 };
 
 const groupOfRow = (r: { vat: string | null; kind: Kind }): Group => (r.vat === "V23" ? "V23" : r.kind === "trade_in" ? "Skup" : "VM");
@@ -160,7 +160,7 @@ export default function GoodsAddForm({
   suppliers: string[];
   onAdded: () => void;
   onClose: () => void;
-  edit?: GoodsEditRow | null; // tryb edycji (Admin): zapis to UPDATE tego wiersza
+  edit?: GoodsEditRow | null; // tryb edycji (każdy z dostępem do Towaru): zapis to UPDATE tego wiersza
   members?: MemberLite[];
 }) {
   const isEdit = !!edit;
@@ -280,7 +280,7 @@ export default function GoodsAddForm({
       const { data: upd, error: updErr } = await supabase.from("goods_register").update(row).eq("id", edit.id).select("id");
       setSaving(false);
       if (updErr) return setError(updErr.code === "PGRST204" || updErr.code === "42703" ? "Baza nie ma jeszcze kolumn edycji — uruchom ponownie supabase/goods.sql w Supabase." : `Nie udało się zapisać: ${updErr.message}`);
-      if (!upd || upd.length === 0) return setError("Nie zapisano — edytować może tylko Admin (albo wiersz już nie istnieje).");
+      if (!upd || upd.length === 0) return setError("Nie zapisano — brak uprawnień do edycji (potrzebny dostęp do zakładki Towar) albo wiersz już nie istnieje.");
       onAdded();
       onClose();
       return;
@@ -288,7 +288,7 @@ export default function GoodsAddForm({
     const { error: err } = await supabase.from("goods_register").insert(row);
     setSaving(false);
     if (err) {
-      setError(err.code === "42501" ? "Brak uprawnień do dodawania towaru (tylko Admin i Manager)." : err.code === "PGRST204" || err.code === "42703" ? "Baza nie ma jeszcze nowych kolumn — uruchom ponownie supabase/goods.sql w Supabase." : `Nie udało się dodać: ${err.message}`);
+      setError(err.code === "42501" ? "Brak uprawnień do dodawania towaru (potrzebny dostęp do zakładki Towar)." : err.code === "PGRST204" || err.code === "42703" ? "Baza nie ma jeszcze nowych kolumn — uruchom ponownie supabase/goods.sql w Supabase." : `Nie udało się dodać: ${err.message}`);
       return;
     }
     // Zostawiamy datę, dostawcę, kategorię, walutę i VAT — przy dodawaniu kilku sztuk z jednej dostawy to oszczędza pisanie.
@@ -436,14 +436,14 @@ export default function GoodsAddForm({
         <div className="mt-5 border-t border-line pt-3">
           <h3 className="text-xs font-semibold text-inksoft mb-2">HISTORIA ZMIAN</h3>
           {!edit!.history?.length ? (
-            <p className="text-xs text-inksoft">Brak zmian od importu z arkusza.</p>
+            <p className="text-xs text-inksoft">Brak zmian od dodania pozycji (wiersze z arkusza: od importu).</p>
           ) : (
             <ul className="text-xs space-y-1">
               {[...edit!.history!].reverse().map((h, i) => (
                 <li key={i}>
                   <span className="font-mono text-inksoft">{new Date(h.at).toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>{" "}
                   <span className="font-semibold">{displayNameForEmail(h.by, members)}</span>:{" "}
-                  {h.changes.map((c) => `${FIELD_LABEL[c.field] ?? c.field}: ${fmtVal(c.from)} → ${fmtVal(c.to)}`).join("; ")}
+                  {h.action === "created" ? "dodano pozycję" : (h.changes ?? []).map((c) => `${FIELD_LABEL[c.field] ?? c.field}: ${fmtVal(c.from)} → ${fmtVal(c.to)}`).join("; ")}
                 </li>
               ))}
             </ul>
