@@ -127,6 +127,8 @@ export default function ServiceRequestsView({ session, members, canHandle }: { s
   // Zapis treści i priorytetu z karty. Zwraca komunikat błędu albo null. Baza dopisuje wpis do logu (trigger), więc po zapisie tylko przeładowujemy listę.
   async function saveEdit(id: number, patch: { message: string; priority: RequestPriority }): Promise<string | null> {
     const { data, error: err } = await supabase.from("service_requests").update(patch).eq("id", id).select("id");
+    // Stary trigger w bazie (przed uruchomieniem service-requests.sql z 13.10.2026) odrzuca każdą zmianę treści, także serwisanta.
+    if (err && /tylko system/i.test(err.message)) return "Edycja wymaga aktualizacji bazy — Admin musi uruchomić plik supabase/service-requests.sql w Supabase (SQL Editor).";
     if (err) return `Nie udało się zapisać: ${err.message}`;
     if (!data?.length) return "Nie zapisano — zlecenie może edytować jego autor (dopóki jest aktywne) albo serwisant.";
     await load();
