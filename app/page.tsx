@@ -738,7 +738,7 @@ export default function Home() {
             />
           )}
 
-          {view === "service" && <ServiceHub session={session} members={members} isAdmin={role === "Admin"} isAdminOrManager={role === "Admin" || role === "Manager"} isServiceLead={role === "Kierownik serwisu"} />}
+          {view === "service" && <ServiceHub session={session} members={members} role={role} isAdmin={role === "Admin"} isAdminOrManager={role === "Admin" || role === "Manager"} isServiceLead={role === "Kierownik serwisu"} />}
 
           {view === "tests" && <TestsView session={session} members={members} isAdmin={role === "Admin"} isAdminOrManager={role === "Admin" || role === "Manager"} />}
 

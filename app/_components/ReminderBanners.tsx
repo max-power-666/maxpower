@@ -49,7 +49,7 @@ export default function ReminderBanners({ session, role, onOpen }: { session: Se
     const blN = backlog.error ? 0 : backlog.count ?? 0; // Backlog to teraz lista wiadomości (10.10.2026) — liczymy wszystkie niezrobione
     if (blN > 0) list.push({ key: "backlog", icon: "📋", text: `Wiadomości w Backlogu do zrobienia: ${blN}`, view: "backlog" });
     const reqN = reqs.error ? 0 : reqs.count ?? 0;
-    if (reqN > 0) list.push({ key: "requests", icon: "🔧", text: `Nowe zapotrzebowania dla serwisu: ${reqN}`, view: "sales", sub: { storage: "sales-sub", value: "requests" } });
+    if (reqN > 0) list.push({ key: "requests", icon: "🔧", text: `Nowe zapotrzebowania dla serwisu: ${reqN}`, view: "service", sub: { storage: "service-sub", value: "requests" } });
     setAuto(list);
   }, [isAdmin, canDecideLeave, isService, session.user.id]);
 
@@ -80,6 +80,7 @@ export default function ReminderBanners({ session, role, onOpen }: { session: Se
   function open(a: Auto) {
     try {
       if (a.sub) sessionStorage.setItem(a.sub.storage, a.sub.value);
+      window.dispatchEvent(new Event("nav-sub-changed")); // widok, który już jest otwarty, sam przełączy podstronę
     } catch {
       /* sessionStorage może być niedostępne — otworzymy zakładkę bez podstrony */
     }
