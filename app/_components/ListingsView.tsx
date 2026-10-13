@@ -193,14 +193,11 @@ export default function ListingsView({ session }: { session: Session }) {
   const summarize = (list: Listing[]) => {
     let qty = 0;
     let live = 0;
-    const value = new Map<string, number>();
     for (const r of list) {
-      const q = r.quantity ?? 0;
-      qty += q;
+      qty += r.quantity ?? 0;
       if (isListingLive(r)) live += 1;
-      if (r.price !== null && q > 0) value.set(r.currency ?? "?", (value.get(r.currency ?? "?") ?? 0) + r.price * q);
     }
-    return { offers: list.length, live, qty, value: [...value.entries()] };
+    return { offers: list.length, live, qty };
   };
   const all = useMemo(() => summarize(rows), [rows]);
   const part = useMemo(() => summarize(filtered), [filtered]);
@@ -257,11 +254,10 @@ export default function ListingsView({ session }: { session: Session }) {
       {!error && meta?.last_error && <p className="text-amber text-xs mb-3">Ostatnia synchronizacja zakończyła się błędem: {meta.last_error}</p>}
       {note && <p className="text-inksoft text-xs mb-3">{note}</p>}
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
         <Tile label={`Oferty ${mpLabel}`} value={fmtInt(all.offers)} hint="Wszystkie listingi zwrócone przez marketplace (także offline)" />
         <Tile label="Aktywne (online, ilość > 0)" value={fmtInt(all.live)} hint={all.offers ? `${Math.round((all.live / all.offers) * 100)}% ofert` : undefined} />
         <Tile label="Ilość łącznie (szt.)" value={fmtInt(all.qty)} hint="Suma ilości ze wszystkich ofert" />
-        <Tile label="Wartość ofert" value={all.value.length ? all.value.map(([c, v]) => fmtMoney(v, c)).join(" · ") : "—"} hint="Suma cena × ilość (waluta oferty)" small />
       </div>
 
       <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -348,7 +344,6 @@ export default function ListingsView({ session }: { session: Session }) {
         <span className="font-semibold text-inksoft text-xs">WYNIK FILTRÓW</span>
         <span>Ofert: <span className="font-semibold">{fmtInt(part.offers)}</span></span>
         <span>Ilość: <span className="font-semibold">{fmtInt(part.qty)}</span> szt.</span>
-        {part.value.length > 0 && <span>Wartość: <span className="font-semibold">{part.value.map(([c, v]) => fmtMoney(v, c)).join(" · ")}</span></span>}
         <span className="ml-auto flex items-center gap-2 text-xs text-inksoft">
           <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }} className="border border-line bg-white px-2 py-1 rounded text-xs">
             {PAGE_SIZES.map((n) => <option key={n} value={n}>{n} na stronie</option>)}
@@ -368,11 +363,11 @@ export default function ListingsView({ session }: { session: Session }) {
   );
 }
 
-function Tile({ label, value, hint, small }: { label: string; value: string; hint?: string; small?: boolean }) {
+function Tile({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div className="border border-line bg-white p-4" title={hint}>
       <div className="text-xs font-semibold text-inksoft mb-1">{label}</div>
-      <div className={`font-semibold ${small ? "text-base" : "text-2xl"}`}>{value}</div>
+      <div className="font-semibold text-2xl">{value}</div>
       {hint && <div className="text-[11px] text-inksoft mt-1">{hint}</div>}
     </div>
   );
