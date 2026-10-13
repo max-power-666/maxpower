@@ -8,6 +8,7 @@ import { monthKeyOf, monthRange } from "@/lib/points";
 import { MyLeave, Requests, usePendingCount } from "./RcpAbsences";
 import { absenceKind, absenceOnDay, type Absence } from "@/lib/rcpAbsence";
 import { isHoliday } from "@/lib/holidays";
+import { fmtWarsawDateTime, humanizeIsoTimes } from "@/lib/warsawDate";
 import {
   RCP_KIND_LABEL, tracksWorkTime, dayStartMs, ewidencjaCsv, fmtClock, fmtHm, summarizeDays, totalWorkMs, totalPaidBreakMs, warsawDay, PAID_BREAK_MS,
   type RcpKind, type RcpSegment,
@@ -496,7 +497,7 @@ function DayDrawer({ session, cell, segs, members, isAdmin, onClose, onChanged }
               {!!s.history?.length && (
                 <ul className="mt-2 ml-2 text-[11px] text-inksoft list-disc list-inside">
                   {s.history.map((h, i) => (
-                    <li key={i}>{new Date(h.at).toLocaleString("pl-PL")}{h.by_email ? ` · ${displayNameForEmail(h.by_email, members)}` : ""}: {h.reason}{h.changes?.length ? ` (${h.changes.map((c) => `${c.field}: ${c.from ?? "—"} → ${c.to ?? "—"}`).join("; ")})` : ""}</li>
+                    <li key={i}>{fmtWarsawDateTime(Date.parse(h.at), true)}{h.by_email ? ` · ${displayNameForEmail(h.by_email, members)}` : ""}: {h.reason}{h.changes?.length ? ` (${h.changes.map((c) => `${c.field}: ${humanizeIsoTimes(c.from ?? "—")} → ${humanizeIsoTimes(c.to ?? "—")}`).join("; ")})` : ""}</li>
                   ))}
                 </ul>
               )}
