@@ -1,10 +1,11 @@
 "use client";
 
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { COUNTRY_NAMES, DHL_EU_COUNTRIES, isEconomySelect, type DhlMoney, type DhlProduct } from "@/lib/dhlExpress";
 import { base64ToBlobUrl, defaultShippingDate, dhlCharge, parcelQuoteTotal, stripPhoneSpaces, type ShipPrefill } from "@/lib/shipping";
+import { summarizeShippingCosts, type ShipmentCostRow } from "@/lib/shippingCosts";
 import { MARKETPLACES } from "@/lib/salesOrders";
 import { escapeLike } from "@/lib/search";
 import { printRawToZebra, printPdf, listPrinters, printerNeedsImageLabel, PrintAgentError } from "@/lib/printAgent";
@@ -127,6 +128,9 @@ export default function ShippingView({
   const [shipSearch, setShipSearch] = useState("");
   const [shipPage, setShipPage] = useState(1);
   const [shipTotal, setShipTotal] = useState(0);
+  const [costRows, setCostRows] = useState<ShipmentCostRow[] | null>(null); // wszystkie przesyłki (lekkie kolumny) do podsumowania miesięcznych kosztów
+  const costLoading = useRef(false);
+  const costTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [error, setError] = useState("");
   const [prefillNote, setPrefillNote] = useState(""); // ostrzeżenie: marketplace nie przekazał (jeszcze) pełnych danych odbiorcy
 
@@ -316,6 +320,28 @@ export default function ShippingView({
     }
     setShipments(((data as (ShipmentRow & { label_format: string | null })[]) || []).map((r) => ({ ...r, has_label: !!r.label_format })));
     setShipTotal(count ?? 0);
+    scheduleLoadCosts();
+  }
+
+  // Podsumowanie kosztów liczymy ze WSZYSTKICH przesyłek (nie tylko widocznej strony): lekkie kolumny, strony po 1000 (limit PostgREST). Odświeżane po każdym wczytaniu listy (z krótkim opóźnieniem).
+  function scheduleLoadCosts() {
+    if (costTimer.current) clearTimeout(costTimer.current);
+    costTimer.current = setTimeout(async () => {
+      if (costLoading.current) return;
+      costLoading.current = true;
+      try {
+        const all: ShipmentCostRow[] = [];
+        for (let from = 0; ; from += 1000) {
+          const { data, error: err } = await supabase.from("shipments").select("created_at, carrier, cancelled_at, environment, charges").order("created_at", { ascending: false }).range(from, from + 999);
+          if (err) return; // podsumowanie jest dodatkiem — błąd nie psuje listy
+          all.push(...((data as ShipmentCostRow[]) || []));
+          if (!data || data.length < 1000) break;
+        }
+        setCostRows(all);
+      } finally {
+        costLoading.current = false;
+      }
+    }, 600);
   }
 
   function setField(k: keyof typeof EMPTY_FORM, v: string) {
@@ -1175,6 +1201,8 @@ Cena to wycena wg cennika konta ({quote.carrier === "ups" ? "UPS: kwota NETTO w 
             </table>
           </div>
 
+          <ShippingCostSummary rows={costRows} />
+
           <TemplatesPanel templates={templates} isAdmin={isAdmin} session={session} settings={settings} onChanged={loadTemplates} onError={setError} />
           {isAdmin && <SenderPanel settings={settings} onSaved={loadSettings} onError={setError} />}
         </>
@@ -1183,6 +1211,72 @@ Cena to wycena wg cennika konta ({quote.carrier === "ups" ? "UPS: kwota NETTO w 
       {openOrder && (
         <SalesOrderCard marketplace={openOrder.marketplace} externalId={openOrder.externalId} session={session} members={members} onClose={() => setOpenOrder(null)} />
       )}
+    </div>
+  );
+}
+
+/* ---------------- podsumowanie kosztów wysyłki ---------------- */
+
+const COST_CARRIER_LABEL: Record<string, string> = { dhl_parcel: "DHL Parcel", dhl_express: "DHL Express", ups: "UPS", erli_paczkomat: "Erli Paczkomat" };
+const fmtPln = (v: number) => `${v.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} zł`;
+const monthLabel = (ym: string) => new Date(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)) - 1, 1).toLocaleDateString("pl-PL", { month: "long", year: "numeric" });
+
+// Miesięczne koszty wysyłki i średnia cena przesyłki (13.10.2026) — liczone w lib/shippingCosts.ts z cen zapisanych przy nadaniu (netto, PLN).
+function ShippingCostSummary({ rows }: { rows: ShipmentCostRow[] | null }) {
+  const sum = useMemo(() => (rows ? summarizeShippingCosts(rows) : null), [rows]);
+  return (
+    <div className="mb-8">
+      <h2 className="text-xs font-semibold text-inksoft mb-2">KOSZTY WYSYŁKI — MIESIĘCZNIE</h2>
+      <div className="border border-line bg-white overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-inksoft border-b border-line">
+              <th className="p-3">Miesiąc</th>
+              <th className="p-3 text-right">Przesyłek</th>
+              <th className="p-3 text-right">Koszt łącznie (netto)</th>
+              <th className="p-3 text-right">Średnia cena przesyłki</th>
+              <th className="p-3">Wg przewoźnika</th>
+            </tr>
+          </thead>
+          <tbody>
+            {!sum && <tr><td colSpan={5} className="p-6 text-center text-inksoft text-sm">Wczytywanie…</td></tr>}
+            {sum && sum.months.length === 0 && <tr><td colSpan={5} className="p-6 text-center text-inksoft text-sm">Brak nadanych przesyłek (produkcyjnych, nieanulowanych).</td></tr>}
+            {sum && sum.months.map((m) => (
+              <tr key={m.month} className="border-b border-line last:border-b-0 align-top">
+                <td className="p-3 font-semibold whitespace-nowrap">{monthLabel(m.month)}</td>
+                <td className="p-3 text-right font-mono text-xs whitespace-nowrap">
+                  {m.shipments}
+                  {m.priced < m.shipments && <div className="text-amber" title="Przesyłki bez ceny w PLN nie wchodzą do sumy ani do średniej">{m.shipments - m.priced} bez ceny</div>}
+                </td>
+                <td className="p-3 text-right font-mono text-xs font-semibold whitespace-nowrap">{m.priced === 0 ? "—" : fmtPln(m.total)}</td>
+                <td className="p-3 text-right font-mono text-xs font-semibold whitespace-nowrap">{m.average === null ? "—" : fmtPln(m.average)}</td>
+                <td className="p-3 text-xs text-inksoft">
+                  {Object.entries(m.byCarrier).map(([c, v]) => (
+                    <div key={c} className="whitespace-nowrap">
+                      {COST_CARRIER_LABEL[c] ?? c}: {v.shipments} szt.{v.priced > 0 && <> · {fmtPln(v.total)} · śr. {fmtPln(v.total / v.priced)}</>}
+                    </div>
+                  ))}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          {sum && sum.months.length > 1 && (
+            <tfoot>
+              <tr className="border-t border-line bg-paper font-semibold">
+                <td className="p-3">Razem</td>
+                <td className="p-3 text-right font-mono text-xs">{sum.all.shipments}</td>
+                <td className="p-3 text-right font-mono text-xs whitespace-nowrap">{fmtPln(sum.all.total)}</td>
+                <td className="p-3 text-right font-mono text-xs whitespace-nowrap">{sum.all.average === null ? "—" : fmtPln(sum.all.average)}</td>
+                <td className="p-3"></td>
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+      <p className="text-[11px] text-inksoft mt-2 max-w-3xl">
+        Ceny netto w PLN z wyceny zapisanej przy nadaniu; bez anulowanych i testowych przesyłek. Średnia = koszt łącznie ÷ liczba przesyłek z ceną (przesyłka z kilkoma paczkami liczy się jako jedna).
+        Przesyłki bez ceny (np. Erli Paczkomat, które rozlicza Erli, albo starsze wpisy — przy DHL Parcel jest link „Dolicz cenę") nie wchodzą do sumy. To ceny z wyceny, nie faktura przewoźnika.
+      </p>
     </div>
   );
 }
