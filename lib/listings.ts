@@ -236,3 +236,32 @@ export async function refurbedFetchOffersPage(c: RefurbedClient, startAfter: str
     return { offers: (data.offers || []) as any[], hasMore: !!data.has_more };
   }
 }
+
+// ---- linki do oferty (13.10.2026) ----
+// Sprawdzone 13.10.2026: backmarket.fr/p/{slug}/{product_id} przekierowuje na /fr-fr/p/{slug}/{product_id} (strona produktu otwiera się po UUID produktu), a /bo-seller/listings(/active) to istniejąca
+// trasa panelu sprzedawcy (po zalogowaniu). Publiczna strona refurbed wymaga właściwego sluga rodziny produktu (np. "iphone-13"), którego nie da się wyprowadzić z naszych danych — dla refurbed
+// jest więc tylko panel sprzedawcy (lista ofert; adres pojedynczej oferty nie jest udokumentowany).
+export function slugify(title: string | null | undefined): string {
+  const s = (title ?? "")
+    .replace(/ł/g, "l") // "ł" nie rozkłada się w NFKD
+    .replace(/Ł/g, "L")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80)
+    .replace(/-+$/g, "");
+  return s || "produit";
+}
+
+export type ListingLink = { label: string; url: string; hint: string };
+export function listingLinks(l: { marketplace: string; product_id: string | null; title: string | null }): ListingLink[] {
+  if (l.marketplace === "backmarket") {
+    const links: ListingLink[] = [];
+    if (l.product_id) links.push({ label: "Strona produktu", url: `https://www.backmarket.fr/fr-fr/p/${slugify(l.title)}/${encodeURIComponent(l.product_id)}`, hint: "Publiczna strona produktu na backmarket.fr" });
+    links.push({ label: "Panel", url: "https://www.backmarket.fr/bo-seller/listings/active", hint: "Lista aktywnych listingów w panelu sprzedawcy Back Market (wyszukaj po SKU)" });
+    return links;
+  }
+  return [{ label: "Panel", url: "https://merchant.refurbed.com/offers", hint: "Lista ofert w panelu sprzedawcy refurbed (wyszukaj po SKU)" }];
+}

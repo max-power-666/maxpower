@@ -5,9 +5,9 @@ import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { fmtWarsawDateTime } from "@/lib/warsawDate";
 import {
-  BM_GRADE_LABEL,
   isListingLive,
   LISTING_MARKETPLACES,
+  listingLinks,
   listingStateLabel,
   type ListingMarketplace,
   type MarketPriceBrief,
@@ -28,8 +28,6 @@ type Listing = {
   min_price: number | null;
   max_price: number | null;
   state: string | null;
-  grade: string | null;
-  warranty_months: number | null;
   product_id: string | null;
   listing_ref: string | null;
   details: Record<string, any> | null;
@@ -40,7 +38,7 @@ type Meta = { last_synced_at: string | null; last_count: number | null; scan_cur
 type SortKey = "sku" | "title" | "quantity" | "price" | "state";
 type StockFilter = "all" | "live" | "zero";
 
-const COLS = "marketplace, external_id, sku, title, quantity, price, currency, min_price, max_price, state, grade, warranty_months, product_id, listing_ref, details, listed_at, snapshot_at";
+const COLS = "marketplace, external_id, sku, title, quantity, price, currency, min_price, max_price, state, product_id, listing_ref, details, listed_at, snapshot_at";
 const PAGE_SIZES = [50, 100, 200];
 const MISSING_TABLE = "Brak tabel listingów — uruchom supabase/listings.sql w Supabase.";
 
@@ -53,10 +51,6 @@ function stateStyle(l: Listing): string {
   if (isListingLive(l)) return "bg-tealsoft text-teal";
   if (l.marketplace === "backmarket" ? l.state === "4" || l.state === "0" : l.state === "REJECTED") return "bg-rustsoft text-rust";
   return "bg-ambersoft text-amber";
-}
-function gradeLabel(l: Listing): string {
-  if (!l.grade) return "—";
-  return l.marketplace === "backmarket" ? BM_GRADE_LABEL[l.grade] ?? l.grade : l.grade;
 }
 
 export default function ListingsView({ session }: { session: Session }) {
@@ -72,7 +66,6 @@ export default function ListingsView({ session }: { session: Session }) {
   const [search, setSearch] = useState("");
   const [stock, setStock] = useState<StockFilter>("all");
   const [stateFilter, setStateFilter] = useState("");
-  const [gradeFilter, setGradeFilter] = useState("");
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "sku", dir: 1 });
   const [pageSize, setPageSize] = useState(100);
   const [page, setPage] = useState(1);
@@ -113,7 +106,6 @@ export default function ListingsView({ session }: { session: Session }) {
 
   useEffect(() => {
     setStateFilter("");
-    setGradeFilter("");
     setOpen(null);
     setPage(1);
     load(mp);
@@ -153,12 +145,8 @@ export default function ListingsView({ session }: { session: Session }) {
   // Facety (listy rozwijane) z całego marketplace'u.
   const facets = useMemo(() => {
     const st = new Map<string, number>();
-    const gr = new Map<string, number>();
-    for (const r of rows) {
-      st.set(r.state ?? "", (st.get(r.state ?? "") ?? 0) + 1);
-      gr.set(r.grade ?? "", (gr.get(r.grade ?? "") ?? 0) + 1);
-    }
-    return { states: [...st.entries()].sort((a, b) => b[1] - a[1]), grades: [...gr.entries()].sort((a, b) => b[1] - a[1]) };
+    for (const r of rows) st.set(r.state ?? "", (st.get(r.state ?? "") ?? 0) + 1);
+    return { states: [...st.entries()].sort((a, b) => b[1] - a[1]) };
   }, [rows]);
 
   const filtered = useMemo(() => {
@@ -166,7 +154,6 @@ export default function ListingsView({ session }: { session: Session }) {
       if (stock === "live" && !isListingLive(r)) return false;
       if (stock === "zero" && (r.quantity ?? 0) > 0) return false;
       if (stateFilter !== "" && (r.state ?? "") !== (stateFilter === "—" ? "" : stateFilter)) return false;
-      if (gradeFilter !== "" && (r.grade ?? "") !== (gradeFilter === "—" ? "" : gradeFilter)) return false;
       if (search) {
         const hay = `${r.sku ?? ""} ${r.title ?? ""} ${r.external_id} ${r.listing_ref ?? ""} ${r.product_id ?? ""}`.toLowerCase();
         if (!hay.includes(search)) return false;
@@ -187,7 +174,7 @@ export default function ListingsView({ session }: { session: Session }) {
       const c = typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y), "pl", { numeric: true });
       return (c || (a.sku ?? "").localeCompare(b.sku ?? "", "pl", { numeric: true })) * sort.dir;
     });
-  }, [rows, stock, stateFilter, gradeFilter, search, sort]);
+  }, [rows, stock, stateFilter, search, sort]);
 
   // Sumy całej listy marketplace'u (kafelki) i bieżącego wyniku filtrów (pasek pod tabelą).
   const summarize = (list: Listing[]) => {
@@ -214,9 +201,9 @@ export default function ListingsView({ session }: { session: Session }) {
 
   function exportCsv() {
     const q = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-    const head = ["SKU", "Produkt", "Ilość", "Cena", "Waluta", "Cena min", "Cena max", "Stan oferty", "Klasa", "Gwarancja (mies.)", "ID oferty", "ID produktu"];
+    const head = ["SKU", "Produkt", "Ilość", "Cena", "Waluta", "Cena min", "Cena max", "Stan oferty", "ID oferty", "ID produktu"];
     const lines = filtered.map((r) =>
-      [r.sku, r.title, r.quantity, r.price ?? "", r.currency, r.min_price ?? "", r.max_price ?? "", listingStateLabel(r.marketplace, r.state), gradeLabel(r), r.warranty_months ?? "", r.external_id, r.product_id].map(q).join(";")
+      [r.sku, r.title, r.quantity, r.price ?? "", r.currency, r.min_price ?? "", r.max_price ?? "", listingStateLabel(r.marketplace, r.state), r.external_id, r.product_id].map(q).join(";")
     );
     const csv = "﻿" + [head.map(q).join(";"), ...lines].join("\r\n");
     const a = document.createElement("a");
@@ -273,12 +260,6 @@ export default function ListingsView({ session }: { session: Session }) {
             <option key={s || "—"} value={s || "—"}>{listingStateLabel(mp, s || null)} ({fmtInt(n)})</option>
           ))}
         </select>
-        <select value={gradeFilter} onChange={(e) => { setGradeFilter(e.target.value); setPage(1); }} className="border border-line bg-white px-2 py-1.5 rounded text-sm">
-          <option value="">Klasa: wszystkie</option>
-          {facets.grades.map(([g, n]) => (
-            <option key={g || "—"} value={g || "—"}>{g ? (mp === "backmarket" ? BM_GRADE_LABEL[g] ?? g : g) : "Bez klasy"} ({fmtInt(n)})</option>
-          ))}
-        </select>
         <button onClick={exportCsv} disabled={filtered.length === 0} className="ml-auto bg-white border border-line px-3 py-1.5 rounded text-sm font-semibold disabled:opacity-50">Pobierz CSV</button>
       </div>
 
@@ -292,16 +273,15 @@ export default function ListingsView({ session }: { session: Session }) {
               <th className={`${thBtn} text-right`} onClick={() => toggleSort("price")}>Cena{arrow("price")}</th>
               <th className={`${th} text-right`}>Min / max</th>
               <th className={thBtn} onClick={() => toggleSort("state")}>Stan oferty{arrow("state")}</th>
-              <th className={th}>Klasa</th>
-              <th className={`${th} text-right`}>Gwarancja</th>
+              <th className={th}>Oferta</th>
               <th className={th}></th>
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={9} className="p-6 text-center text-inksoft text-sm">Wczytywanie…</td></tr>}
+            {loading && <tr><td colSpan={8} className="p-6 text-center text-inksoft text-sm">Wczytywanie…</td></tr>}
             {!loading && visible.length === 0 && !error && (
               <tr>
-                <td colSpan={9} className="p-6 text-center text-inksoft text-sm">
+                <td colSpan={8} className="p-6 text-center text-inksoft text-sm">
                   {rows.length === 0 ? `Brak ofert ${mpLabel} w bazie — kliknij „Odśwież”, żeby pobrać je z marketplace’u.` : "Brak ofert spełniających filtry."}
                 </td>
               </tr>
@@ -322,15 +302,20 @@ export default function ListingsView({ session }: { session: Session }) {
                       <td className="p-3 whitespace-nowrap">
                         <span className={`text-xs font-semibold px-2 py-1 rounded ${stateStyle(r)}`} title={r.state !== null ? `Surowa wartość: ${r.state}` : undefined}>{listingStateLabel(r.marketplace, r.state)}</span>
                       </td>
-                      <td className="p-3 text-xs whitespace-nowrap">{gradeLabel(r)}</td>
-                      <td className="p-3 text-right text-xs whitespace-nowrap">{r.warranty_months ? `${r.warranty_months} mies.` : "—"}</td>
+                      <td className="p-3 text-xs whitespace-nowrap">
+                        {listingLinks(r).map((lk) => (
+                          <div key={lk.label}>
+                            <a href={lk.url} target="_blank" rel="noreferrer" title={lk.hint} className="text-teal font-semibold hover:underline">{lk.label} ↗</a>
+                          </div>
+                        ))}
+                      </td>
                       <td className="p-3 text-right whitespace-nowrap">
                         <button onClick={() => setOpen(isOpen ? null : r.external_id)} className="text-xs font-semibold text-teal hover:underline">{isOpen ? "Zwiń ▴" : "Szczegóły ▾"}</button>
                       </td>
                     </tr>
                     {isOpen && (
                       <tr className="border-b border-line bg-paper">
-                        <td colSpan={9} className="p-4"><Details l={r} /></td>
+                        <td colSpan={8} className="p-4"><Details l={r} /></td>
                       </tr>
                     )}
                   </Fragment>
