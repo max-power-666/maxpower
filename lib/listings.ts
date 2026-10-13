@@ -240,7 +240,7 @@ export async function refurbedFetchOffersPage(c: RefurbedClient, startAfter: str
 // ---- linki do oferty (13.10.2026) ----
 // Sprawdzone 13.10.2026: backmarket.fr/p/{slug}/{product_id} przekierowuje na /fr-fr/p/{slug}/{product_id} (strona produktu otwiera się po UUID produktu), a /bo-seller/listings(/active) to istniejąca
 // trasa panelu sprzedawcy (po zalogowaniu). Publiczna strona refurbed wymaga właściwego sluga rodziny produktu (np. "iphone-13"), którego nie da się wyprowadzić z naszych danych — dla refurbed
-// jest więc tylko panel sprzedawcy (lista ofert; adres pojedynczej oferty nie jest udokumentowany).
+// jest więc tylko panel sprzedawcy (szczegóły oferty po jej ID).
 export function slugify(title: string | null | undefined): string {
   const s = (title ?? "")
     .replace(/ł/g, "l") // "ł" nie rozkłada się w NFKD
@@ -256,7 +256,7 @@ export function slugify(title: string | null | undefined): string {
 }
 
 export type ListingLink = { label: string; url: string; hint: string };
-export function listingLinks(l: { marketplace: string; product_id: string | null; title: string | null; sku?: string | null }): ListingLink[] {
+export function listingLinks(l: { marketplace: string; product_id: string | null; title: string | null; sku?: string | null; external_id?: string | null }): ListingLink[] {
   if (l.marketplace === "backmarket") {
     const links: ListingLink[] = [];
     if (l.product_id) links.push({ label: "Strona produktu", url: `https://www.backmarket.fr/fr-fr/p/${slugify(l.title)}/${encodeURIComponent(l.product_id)}`, hint: "Publiczna strona produktu na backmarket.fr" });
@@ -269,5 +269,10 @@ export function listingLinks(l: { marketplace: string; product_id: string | null
     );
     return links;
   }
-  return [{ label: "Panel", url: "https://merchant.refurbed.com/offers", hint: "Lista ofert w panelu sprzedawcy refurbed (wyszukaj po SKU)" }];
+  // refurbed: szczegóły pojedynczej oferty w panelu — wzorzec podany przez właściciela 13.10.2026 (https://merchant.refurbed.com/offers/details/{id}; parametry tableOptions/freeSearchOptions
+  // z jego przykładu to tylko stan listy, więc pomijamy je jak przy linku do zamówienia). {id} to Offer.id z API (nasze external_id).
+  const id = (l.external_id ?? "").trim();
+  return id
+    ? [{ label: "Panel", url: `https://merchant.refurbed.com/offers/details/${encodeURIComponent(id)}`, hint: "Ta oferta w panelu sprzedawcy refurbed" }]
+    : [{ label: "Panel", url: "https://merchant.refurbed.com/offers", hint: "Lista ofert w panelu sprzedawcy refurbed" }];
 }
