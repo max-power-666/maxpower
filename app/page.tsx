@@ -16,6 +16,7 @@ import NbpView from "./_components/NbpView";
 import { stockTradeInCosts, type BuybackOrderLite, type CostLine } from "@/lib/stockCosts";
 import type { NbpRate } from "@/lib/nbp";
 import CategoryBreakdown, { FAKTUROWNIA_PALETTE } from "./_components/CategoryBreakdown";
+import { skuCategoryOf } from "@/lib/skuParts";
 import OverviewSalesDashboard from "./_components/OverviewSalesDashboard";
 import OverviewMarginChart from "./_components/OverviewMarginChart";
 import RcpView from "./_components/RcpView";
@@ -452,32 +453,75 @@ export default function Home() {
   async function fetchSkuBreakdown(): Promise<FakturowniaSku | null> {
     const PAGE = 1000;
     let from = 0;
-    const rows: { sku_category: string | null; purchase_price_gross: number }[] = [];
+    const rows: { name: string | null; sku_category: string | null; purchase_price_gross: number }[] = [];
     while (true) {
       const { data, error } = await supabase
         .from("fakturownia_stock_with_sku")
-        .select("sku_category, purchase_price_gross")
+        .select("name, sku_category, purchase_price_gross")
         .range(from, from + PAGE - 1);
       if (error) return null;
       rows.push(...((data as any[]) || []));
       if (!data || data.length < PAGE) break;
       from += PAGE;
     }
+    // Dane z zakładki Towar (14.10.2026, na prośbę właściciela): sztuki bez SKU w widoku szukamy w rejestrze Towar po numerze seryjnym —
+    // (1) nazwa wyglądająca jak SKU (bez spacji, z myślnikiem) daje kategorię z SKU jak zwykle; (2) w przeciwnym razie kategoria z arkusza Towaru
+    // (Aparat, Watch, Konsola…) jako osobny wiersz "<kategoria> (Towar)" zamiast zbiorczego "Bez SKU". Bez dostępu do Towaru (RLS) lista jest pusta
+    // i wykres działa jak dotąd.
+    const goodsBySerial = new Map<string, { name: string | null; category: string | null }[]>();
+    try {
+      for (let gFrom = 0; ; gFrom += PAGE) {
+        const { data: g, error: gErr } = await supabase.from("goods_register").select("serial, name, category").order("id").range(gFrom, gFrom + PAGE - 1);
+        if (gErr) break;
+        for (const x of (g as { serial: string | null; name: string | null; category: string | null }[]) || []) {
+          const k = (x.serial || "").trim().toUpperCase();
+          if (!k) continue;
+          const list = goodsBySerial.get(k) ?? [];
+          list.push({ name: x.name, category: x.category });
+          goodsBySerial.set(k, list);
+        }
+        if (!g || g.length < PAGE) break;
+      }
+    } catch {
+      /* Towar niedostępny — wykres bez dodatkowych danych */
+    }
+    const looksLikeSku = (n: string | null) => !!n && !/\s/.test(n.trim()) && n.includes("-");
+    const goodsCategoryLabel = (c: string | null) => {
+      const t = (c || "").trim().replace(/\d+$/, "").trim();
+      if (!t) return null;
+      const low = t.toLowerCase();
+      const nice = low === "ipad" ? "iPad" : low === "iphone" ? "iPhone" : `${low.charAt(0).toUpperCase()}${low.slice(1)}`;
+      return `${nice} (Towar)`;
+    };
     const totals = new Map<string, FakturowniaCategorySummary>();
     const none = { count: 0, value: 0 };
     let count = 0;
     for (const r of rows) {
       const value = Number(r.purchase_price_gross) || 0;
-      if (!r.sku_category) {
+      let category = r.sku_category;
+      let hasSku = !!category;
+      if (!category) {
+        const g = goodsBySerial.get((r.name || "").trim().toUpperCase()) ?? [];
+        const skuRow = g.find((x) => looksLikeSku(x.name));
+        if (skuRow) {
+          category = skuCategoryOf(skuRow.name) || null;
+          hasSku = !!category;
+        }
+        if (!category) {
+          const label = g.map((x) => goodsCategoryLabel(x.category)).find(Boolean);
+          if (label) category = label;
+        }
+      }
+      if (!category) {
         none.count += 1;
         none.value += value;
         continue;
       }
-      const entry = totals.get(r.sku_category) || { name: r.sku_category, count: 0, value: 0 };
+      const entry = totals.get(category) || { name: category, count: 0, value: 0 };
       entry.count += 1;
       entry.value += value;
-      totals.set(r.sku_category, entry);
-      count += 1;
+      totals.set(category, entry);
+      if (hasSku) count += 1;
     }
     return { count, categories: Array.from(totals.values()).sort((a, b) => b.value - a.value), none };
   }
