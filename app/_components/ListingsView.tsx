@@ -367,6 +367,7 @@ function Details({ l }: { l: Listing }) {
   const markets: MarketPriceBrief[] = Array.isArray(d.markets) ? d.markets : [];
   const ships: { c: string | null; s: string | null; d: number | null; p: number | null }[] = Array.isArray(d.shippings) ? d.shippings : [];
   const BUYBOX: Record<string, string> = { WON: "Wygrany", SHOULD_WIN: "Powinien wygrać", ELIGIBLE: "Kwalifikuje się", WON_ELSEWHERE: "Wygrany gdzie indziej", INELIGIBLE: "Nie kwalifikuje się" };
+  const INELIGIBLE_HINT = "Oferta nie może w tej chwili zdobyć BuyBox. Wg dokumentacji refurbed bywa tak m.in. gdy dla produktu włączona jest „ochrona BuyBox” i stan oferty jest zbyt niski; API nie podaje dokładnego powodu.";
   const VIS: Record<string, string> = { FULL: "Pełna", LIMITED: "Ograniczona", NONE: "Brak", HIDDEN: "Ukryta" };
   const won = markets.filter((m) => m.b === "WON").length;
   return (
@@ -405,12 +406,13 @@ function Details({ l }: { l: Listing }) {
                     <td className="py-0.5 pr-3 font-mono">{m.m}{m.calc ? <span className="text-inksoft" title="Cena wyliczona przez refurbed"> *</span> : ""}</td>
                     <td className="py-0.5 pr-3 text-right font-mono">{fmtMoney(m.p, m.c)}</td>
                     <td className="py-0.5 pr-3">{m.v ? VIS[m.v] ?? m.v : "—"}</td>
-                    <td className="py-0.5">{m.b ? BUYBOX[m.b] ?? m.b : "—"}</td>
+                    <td className="py-0.5" title={m.b === "INELIGIBLE" ? INELIGIBLE_HINT : undefined}>{m.b ? BUYBOX[m.b] ?? m.b : "—"}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
             <div className="text-inksoft mt-1">* cena wyliczona automatycznie z ceny referencyjnej</div>
+            {markets.some((m) => m.b === "INELIGIBLE") && <div className="text-amber mt-1">{INELIGIBLE_HINT}</div>}
           </div>
         )}
         {ships.length === 0 && markets.length === 0 && <div className="text-inksoft">Brak dodatkowych danych o wysyłce i cenach na rynkach.</div>}
