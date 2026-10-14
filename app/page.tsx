@@ -157,25 +157,39 @@ function effectiveAccess(role: string, viewAccess: string[] | null | undefined, 
   return (viewAccess as ViewKey[] | null | undefined) ?? ROLE_ACCESS[role] ?? fallback;
 }
 
-type FakturowniaCategorySummary = { name: string; count: number; value: number };
+type FakturowniaCategorySummary = { name: string; count: number; value: number; children?: FakturowniaCategorySummary[] };
 // sku: rozbicie dostępnych sztuk wg "kategorii z SKU" (widok fakturownia_stock_with_sku); null = nie udało się policzyć
 // (np. nie uruchomiono inventory.sql). `categories` bez sztuk bez SKU — te są osobno w `none`.
-// Grupy SKU na wykresie "Wg kategorii z SKU" (14.10.2026, na prośbę właściciela): wszystkie warianty zaczynające się tak samo liczą się jako jedna kategoria
-// i są zawsze widoczne jako osobne wiersze (CategoryBreakdown `pinned`). Tylko wykres — filtry i Raw data w Magazynie dalej używają pełnej kategorii z SKU.
-const SKU_CHART_GROUPS: { prefix: RegExp; name: string }[] = [
+// Rodziny SKU na wykresie "Wg kategorii z SKU" (14.10.2026, na prośbę właściciela — "od ogółu do szczegółu"): kategorie z SKU o wspólnym początku zbiera jedna rodzina
+// (PS4 = PS4 + PS4S + PS4P…), a po kliknięciu wiersza widać warianty. Rodziny z `SKU_CHART_PINNED` są zawsze widoczne jako osobne wiersze. Tylko wykres — filtry i Raw data
+// w Magazynie dalej używają pełnej kategorii z SKU. Kolejność reguł ma znaczenie (pierwsza pasująca); nieopisane kategorie są własną rodziną.
+const SKU_CHART_FAMILIES: { prefix: RegExp; name: string }[] = [
   { prefix: /^PS5/, name: "PS5" },
-  { prefix: /^AW/, name: "AW" }, // Apple Watch: AW6C, AW9C, AWSE, AWS9C…
-  { prefix: /^APM/, name: "APM" },
+  { prefix: /^PS4/, name: "PS4" },
+  { prefix: /^(NSDL|NDS|NNDS|N3DS)/, name: "NDS" }, // Nintendo DS — przed Switchem
+  { prefix: /^NS/, name: "NS" }, // Nintendo Switch: NS, NSO, NSL, NS2…
   { prefix: /^XOS/, name: "XOS" },
   { prefix: /^XOX/, name: "XOX" },
+  { prefix: /^XO/, name: "XO" },
+  { prefix: /^XSX/, name: "XSX" },
   { prefix: /^XSS/, name: "XSS" },
+  { prefix: /^AW/, name: "AW" }, // Apple Watch: AW6C, AW9C, AWSE, AWS9C…
+  { prefix: /^APM/, name: "APM" },
+  { prefix: /^AHP/, name: "AHP" },
   { prefix: /^ID/, name: "ID" }, // wszystkie iPady: ID9, ID8, IDP111, IDM5C…
+  { prefix: /^IP/, name: "IP" }, // iPhone
+  { prefix: /^(SGS|SG21|S20FE)/, name: "SGS" }, // Samsung Galaxy S
+  { prefix: /^SGA/, name: "SGA" },
+  { prefix: /^SGN/, name: "SGN" },
+  { prefix: /^SGW/, name: "SGW" },
+  { prefix: /^MB/, name: "MB" }, // Macbooki
 ];
-const SKU_CHART_PINNED = SKU_CHART_GROUPS.map((g) => g.name);
-function chartSkuGroup(category: string): string {
-  if (category.includes("(Towar)")) return category;
-  const u = category.trim().toUpperCase(); // wielkość liter nie rozdziela kategorii (np. ipse2 / IPSE2)
-  return SKU_CHART_GROUPS.find((g) => g.prefix.test(u))?.name ?? u;
+const SKU_CHART_PINNED = ["PS5", "AW", "APM", "XOS", "XOX", "XSS", "ID"];
+// wielkość liter nie rozdziela kategorii (np. ipse2 / IPSE2); kategorie z Towaru ("<Kategoria> (Towar)") zostają bez zmian
+const chartVariantOf = (category: string) => (category.includes("(Towar)") ? category : category.trim().toUpperCase());
+function chartFamilyOf(variant: string): string {
+  if (variant.includes("(Towar)")) return variant;
+  return SKU_CHART_FAMILIES.find((f) => f.prefix.test(variant))?.name ?? variant;
 }
 
 type FakturowniaSku = { count: number; categories: FakturowniaCategorySummary[]; none: { count: number; value: number } };
@@ -535,14 +549,32 @@ export default function Home() {
         none.value += value;
         continue;
       }
-      category = chartSkuGroup(category);
+      category = chartVariantOf(category);
       const entry = totals.get(category) || { name: category, count: 0, value: 0 };
       entry.count += 1;
       entry.value += value;
       totals.set(category, entry);
       if (hasSku) count += 1;
     }
-    return { count, categories: Array.from(totals.values()).sort((a, b) => b.value - a.value), none };
+    // warianty -> rodziny (z wariantami jako `children`, gdy rodzina ma więcej niż samą siebie)
+    const families = new Map<string, { name: string; count: number; value: number; variants: FakturowniaCategorySummary[] }>();
+    for (const v of totals.values()) {
+      const f = chartFamilyOf(v.name);
+      const fam = families.get(f) || { name: f, count: 0, value: 0, variants: [] };
+      fam.count += v.count;
+      fam.value += v.value;
+      fam.variants.push(v);
+      families.set(f, fam);
+    }
+    const categories: FakturowniaCategorySummary[] = Array.from(families.values())
+      .map((f) => ({
+        name: f.name,
+        count: f.count,
+        value: f.value,
+        children: f.variants.length > 1 || f.variants[0].name !== f.name ? [...f.variants].sort((a, b) => b.value - a.value) : undefined,
+      }))
+      .sort((a, b) => b.value - a.value);
+    return { count, categories, none };
   }
 
   // Koszty dodatkowe sztuk w magazynie (dziś: Trade-in). Zamówienia BM dopasowujemy po `description` sztuki (numer zamówienia), w paczkach po 60
@@ -927,7 +959,7 @@ function FakturowniaSummaryView({ summary }: { summary: FakturowniaSummary }) {
               none={summary.sku.none}
               maxRows={FAKTUROWNIA_PALETTE.length * 2}
               pinned={SKU_CHART_PINNED}
-              note="PS5, AW, APM, XOS, XOX, XSS i ID zbierają wszystkie warianty SKU zaczynające się tak samo (np. ID = wszystkie iPady, AW = Apple Watch)."
+              note="Kliknij wiersz z ▸, żeby zobaczyć warianty (np. PS4 → PS4, PS4S, PS4P). Rodzina zbiera SKU zaczynające się tak samo, np. ID = wszystkie iPady, AW = Apple Watch."
             />
           ) : (
             <div className="border border-line bg-white p-6 text-sm text-inksoft">

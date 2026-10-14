@@ -1,8 +1,11 @@
 "use client";
 
+import { useState } from "react";
+
 export const FAKTUROWNIA_PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4"];
 const FAKTUROWNIA_OTHER_COLOR = "#898781"; // wyciszony szary — wycinek zbiorczy, nie jest częścią palety kategorii
-export type CategorySummary = { name: string; count: number; value: number };
+// children: warianty kategorii (np. PS4 -> PS4, PS4S, PS4P) — wiersz z `children` rozwija się po kliknięciu (od ogółu do szczegółu).
+export type CategorySummary = { name: string; count: number; value: number; children?: CategorySummary[] };
 
 function fmtPLN(n: number) {
   return Math.round(n).toLocaleString("pl-PL") + " zł";
@@ -29,6 +32,14 @@ export default function CategoryBreakdown({
   pinned?: string[]; // kategorie zawsze widoczne jako osobne wiersze, nawet poza `maxRows` (np. grupy SKU wskazane przez właściciela)
   note?: string; // podpis pod tabelą
 }) {
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  const toggle = (k: string) =>
+    setOpen((prev) => {
+      const n = new Set(prev);
+      if (n.has(k)) n.delete(k);
+      else n.add(k);
+      return n;
+    });
   const TOP_N = FAKTUROWNIA_PALETTE.length;
   const colorAt = (i: number) => (i < TOP_N ? FAKTUROWNIA_PALETTE[i] : FAKTUROWNIA_OTHER_COLOR);
   const noneRow = none && none.count > 0 ? { name: "Bez SKU", count: none.count, value: none.value, color: FAKTUROWNIA_NONE_COLOR } : null;
@@ -48,6 +59,7 @@ export default function CategoryBreakdown({
             count: restTail.reduce((s, c) => s + c.count, 0),
             value: restTail.reduce((s, c) => s + c.value, 0),
             color: FAKTUROWNIA_OTHER_COLOR,
+            children: restTail as CategorySummary[], // po kliknięciu "Inne" widać, jakie kategorie w nim są
           },
         ]
       : [...head, ...pinnedTail];
@@ -75,6 +87,37 @@ export default function CategoryBreakdown({
       const offset = -cursor;
       cursor += share * CIRC;
       return { ...s, share, length, offset };
+    });
+
+  type RowData = CategorySummary & { color?: string };
+  const renderRows = (list: RowData[], depth: number, path: string): JSX.Element[] =>
+    list.flatMap((c) => {
+      const key = `${path}/${c.name}`;
+      const expandable = !!c.children && c.children.length > 0;
+      const isOpen = open.has(key);
+      const row = (
+        <tr
+          key={key}
+          onClick={expandable ? () => toggle(key) : undefined}
+          className={`border-b border-line last:border-b-0 ${expandable ? "cursor-pointer hover:bg-paper" : ""} ${depth > 0 ? "bg-paper/60" : ""}`}
+        >
+          <td className="py-2 pr-3" style={{ paddingLeft: depth * 20 }}>
+            <span className="flex items-center gap-2">
+              <span className="w-3 text-[10px] text-inksoft shrink-0 text-center">{expandable ? (isOpen ? "▾" : "▸") : ""}</span>
+              {depth === 0 ? (
+                <span className="w-3 h-3 rounded-sm inline-block shrink-0" style={{ background: c.color }} />
+              ) : (
+                <span className="w-1.5 h-1.5 rounded-full inline-block shrink-0 bg-inksoft" />
+              )}
+              <span className={depth === 0 ? "font-semibold" : "text-xs font-medium"}>{c.name}</span>
+            </span>
+          </td>
+          <td className={`py-2 pr-3 font-mono ${depth > 0 ? "text-xs" : ""}`}>{c.count}</td>
+          <td className={`py-2 pr-3 font-mono whitespace-nowrap ${depth > 0 ? "text-xs" : ""}`}>{fmtPLN(c.value)}</td>
+          <td className={`py-2 font-mono text-inksoft ${depth > 0 ? "text-xs" : ""}`}>{totalValue > 0 ? Math.round((c.value / totalValue) * 100) : 0}%</td>
+        </tr>
+      );
+      return expandable && isOpen ? [row, ...renderRows(c.children as RowData[], depth + 1, key)] : [row];
     });
 
   return (
@@ -115,19 +158,7 @@ export default function CategoryBreakdown({
               </tr>
             </thead>
             <tbody>
-              {tableAll.map((c, i) => (
-                <tr key={c.name + i} className="border-b border-line last:border-b-0">
-                  <td className="py-2 pr-3">
-                    <span className="flex items-center gap-2">
-                      <span className="w-3 h-3 rounded-sm inline-block shrink-0" style={{ background: c.color }} />
-                      <span className="font-semibold">{c.name}</span>
-                    </span>
-                  </td>
-                  <td className="py-2 pr-3 font-mono">{c.count}</td>
-                  <td className="py-2 pr-3 font-mono whitespace-nowrap">{fmtPLN(c.value)}</td>
-                  <td className="py-2 font-mono text-inksoft">{totalValue > 0 ? Math.round((c.value / totalValue) * 100) : 0}%</td>
-                </tr>
-              ))}
+              {renderRows(tableAll as RowData[], 0, "")}
             </tbody>
           </table>
           {note && <p className="text-[11px] text-inksoft mt-2">{note}</p>}
