@@ -160,6 +160,24 @@ function effectiveAccess(role: string, viewAccess: string[] | null | undefined, 
 type FakturowniaCategorySummary = { name: string; count: number; value: number };
 // sku: rozbicie dostępnych sztuk wg "kategorii z SKU" (widok fakturownia_stock_with_sku); null = nie udało się policzyć
 // (np. nie uruchomiono inventory.sql). `categories` bez sztuk bez SKU — te są osobno w `none`.
+// Grupy SKU na wykresie "Wg kategorii z SKU" (14.10.2026, na prośbę właściciela): wszystkie warianty zaczynające się tak samo liczą się jako jedna kategoria
+// i są zawsze widoczne jako osobne wiersze (CategoryBreakdown `pinned`). Tylko wykres — filtry i Raw data w Magazynie dalej używają pełnej kategorii z SKU.
+const SKU_CHART_GROUPS: { prefix: RegExp; name: string }[] = [
+  { prefix: /^PS5/, name: "PS5" },
+  { prefix: /^AW/, name: "AW" }, // Apple Watch: AW6C, AW9C, AWSE, AWS9C…
+  { prefix: /^APM/, name: "APM" },
+  { prefix: /^XOS/, name: "XOS" },
+  { prefix: /^XOX/, name: "XOX" },
+  { prefix: /^XSS/, name: "XSS" },
+  { prefix: /^ID/, name: "ID" }, // wszystkie iPady: ID9, ID8, IDP111, IDM5C…
+];
+const SKU_CHART_PINNED = SKU_CHART_GROUPS.map((g) => g.name);
+function chartSkuGroup(category: string): string {
+  if (category.includes("(Towar)")) return category;
+  const u = category.trim().toUpperCase(); // wielkość liter nie rozdziela kategorii (np. ipse2 / IPSE2)
+  return SKU_CHART_GROUPS.find((g) => g.prefix.test(u))?.name ?? u;
+}
+
 type FakturowniaSku = { count: number; categories: FakturowniaCategorySummary[]; none: { count: number; value: number } };
 // costs: koszty dodatkowe sztuk w magazynie (dziś tylko Trade-in; kolejne składniki jako kolejne linie) — patrz lib/stockCosts.ts; null = nie udało się policzyć.
 type FakturowniaSummary = { totalCount: number; totalValue: number; sku: FakturowniaSku | null; costs: CostLine[] | null; categories: FakturowniaCategorySummary[] };
@@ -517,6 +535,7 @@ export default function Home() {
         none.value += value;
         continue;
       }
+      category = chartSkuGroup(category);
       const entry = totals.get(category) || { name: category, count: 0, value: 0 };
       entry.count += 1;
       entry.value += value;
@@ -907,6 +926,8 @@ function FakturowniaSummaryView({ summary }: { summary: FakturowniaSummary }) {
               totalValue={summary.totalValue}
               none={summary.sku.none}
               maxRows={FAKTUROWNIA_PALETTE.length * 2}
+              pinned={SKU_CHART_PINNED}
+              note="PS5, AW, APM, XOS, XOX, XSS i ID zbierają wszystkie warianty SKU zaczynające się tak samo (np. ID = wszystkie iPady, AW = Apple Watch)."
             />
           ) : (
             <div className="border border-line bg-white p-6 text-sm text-inksoft">

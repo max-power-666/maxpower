@@ -18,30 +18,39 @@ export default function CategoryBreakdown({
   totalValue,
   none,
   maxRows,
+  pinned,
+  note,
 }: {
   title: string;
   categories: CategorySummary[];
   totalValue: number;
   none?: { count: number; value: number };
   maxRows?: number;
+  pinned?: string[]; // kategorie zawsze widoczne jako osobne wiersze, nawet poza `maxRows` (np. grupy SKU wskazane przez właściciela)
+  note?: string; // podpis pod tabelą
 }) {
   const TOP_N = FAKTUROWNIA_PALETTE.length;
   const colorAt = (i: number) => (i < TOP_N ? FAKTUROWNIA_PALETTE[i] : FAKTUROWNIA_OTHER_COLOR);
   const noneRow = none && none.count > 0 ? { name: "Bez SKU", count: none.count, value: none.value, color: FAKTUROWNIA_NONE_COLOR } : null;
 
   const sorted = categories.map((c, i) => ({ ...c, color: colorAt(i) }));
+  const head = maxRows !== undefined ? sorted.slice(0, maxRows) : sorted;
+  const tail = maxRows !== undefined ? sorted.slice(maxRows) : [];
+  const pinnedTail = tail.filter((c) => pinned?.includes(c.name));
+  const restTail = tail.filter((c) => !pinned?.includes(c.name));
   const tableRows =
-    maxRows !== undefined && sorted.length > maxRows
+    restTail.length > 0
       ? [
-          ...sorted.slice(0, maxRows),
+          ...head,
+          ...pinnedTail,
           {
-            name: `Inne (${sorted.length - maxRows} kat.)`,
-            count: sorted.slice(maxRows).reduce((s, c) => s + c.count, 0),
-            value: sorted.slice(maxRows).reduce((s, c) => s + c.value, 0),
+            name: `Inne (${restTail.length} kat.)`,
+            count: restTail.reduce((s, c) => s + c.count, 0),
+            value: restTail.reduce((s, c) => s + c.value, 0),
             color: FAKTUROWNIA_OTHER_COLOR,
           },
         ]
-      : sorted;
+      : [...head, ...pinnedTail];
   const tableAll = noneRow ? [...tableRows, noneRow] : tableRows;
 
   // Wycinki pierścienia: top N z palety + "Inne" zbiorczo (szary) + ewentualne "Bez SKU".
@@ -121,6 +130,7 @@ export default function CategoryBreakdown({
               ))}
             </tbody>
           </table>
+          {note && <p className="text-[11px] text-inksoft mt-2">{note}</p>}
         </div>
       </div>
     </div>
