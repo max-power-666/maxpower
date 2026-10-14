@@ -8,7 +8,7 @@ import { requireRole } from "@/lib/serverAuth";
 // SSRF: tylko https i tylko hosty spoza prywatnych/lokalnych zakresów — to i tak trafia tylko do
 // zaufanego, zalogowanego zespołu, nie jest publiczne.
 
-const ROLES = ["Admin", "Manager", "Zamówienia"];
+const ROLES = ["Admin", "Manager", "Księgowa", "Zamówienia"];
 const admin = () => createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 const BLOCKED_HOST_PATTERNS = [/^localhost$/i, /^127\./, /^0\.0\.0\.0$/, /^169\.254\./, /^10\./, /^172\.(1[6-9]|2\d|3[01])\./, /^192\.168\./, /^\[?::1\]?$/];
 

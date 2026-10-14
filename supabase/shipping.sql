@@ -12,7 +12,7 @@
 -- przez tabele Wysyłki, więc zmiana nazwy niczego by nie ułatwiła.
 create or replace function is_admin_or_manager() returns boolean
 language sql stable security definer set search_path = public as $$
-  select exists (select 1 from members where user_id = auth.uid() and role in ('Admin', 'Manager', 'Zamówienia'));
+  select exists (select 1 from members where user_id = auth.uid() and role in ('Admin', 'Manager', 'Księgowa', 'Zamówienia'));
 $$;
 
 create table if not exists shipping_settings (
@@ -120,7 +120,7 @@ end $$;
 -- (is_admin_or_manager), edytować tylko Admin i Manager.
 create or replace function shipping_rules_editor() returns boolean
 language sql stable security definer set search_path = public as $$
-  select exists (select 1 from members where user_id = auth.uid() and role in ('Admin', 'Manager'));
+  select exists (select 1 from members where user_id = auth.uid() and role in ('Admin', 'Manager', 'Księgowa'));
 $$;
 
 create table if not exists shipping_rules (

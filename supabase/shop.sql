@@ -13,7 +13,7 @@
 
 create or replace function can_edit_shop() returns boolean
 language sql stable security definer set search_path = public as $$
-  select exists (select 1 from members where user_id = auth.uid() and role in ('Admin', 'Manager', 'Sklep'));
+  select exists (select 1 from members where user_id = auth.uid() and role in ('Admin', 'Manager', 'Księgowa', 'Sklep'));
 $$;
 
 create table if not exists shop_categories (

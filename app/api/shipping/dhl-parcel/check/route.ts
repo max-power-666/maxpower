@@ -9,7 +9,7 @@ import { admin, loadShipper } from "@/lib/parcelServer";
 //  POST -> wycena (getPrice) produktów międzynarodowych z PARCEL_PRODUCTS (lib/dhlParcel.ts) dla wpisanej trasy i paczki.
 // Wycena niczego nie tworzy i nic nie kosztuje. Hasło i numer SAP zostają na serwerze.
 
-const ROLES = ["Admin", "Manager", "Zamówienia"];
+const ROLES = ["Admin", "Manager", "Księgowa", "Zamówienia"];
 
 export async function GET(request: Request) {
   const db = admin();

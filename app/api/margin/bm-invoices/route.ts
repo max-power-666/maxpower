@@ -13,7 +13,7 @@ type Line = { invoice_ref: string; invoice_key: string; order_id: string | null;
 
 export async function GET(request: Request) {
   const db = admin();
-  if (!(await requireRole(request, db, ["Admin", "Manager"]))) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
+  if (!(await requireRole(request, db, ["Admin", "Manager", "Księgowa"]))) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
 
   const lines: Line[] = [];
   for (let from = 0; from < 200_000; from += 1000) {

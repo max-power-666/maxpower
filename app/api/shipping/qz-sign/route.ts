@@ -14,7 +14,7 @@ import { requireRole } from "@/lib/serverAuth";
 // nigdy w przeglądarce — para wygenerowana raz (openssl, self-signed, 10 lat), publiczny certyfikat
 // (`QZ_CERT` w `lib/printAgent.ts`) nie jest sekretem, więc jest wprost w kodzie klienta.
 
-const ROLES = ["Admin", "Manager", "Zamówienia"];
+const ROLES = ["Admin", "Manager", "Księgowa", "Zamówienia"];
 const admin = () => createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 
 export async function POST(request: Request) {

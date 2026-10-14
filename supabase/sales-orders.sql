@@ -553,7 +553,7 @@ create policy "authenticated read sales_orders_sync_meta" on sales_orders_sync_m
 create or replace function sales_can_edit() returns boolean
 language sql stable security definer set search_path = public as $$
   select auth.role() = 'service_role'
-      or exists (select 1 from members where user_id = auth.uid() and role in ('Admin', 'Manager', 'Zamówienia'));
+      or exists (select 1 from members where user_id = auth.uid() and role in ('Admin', 'Manager', 'Księgowa', 'Zamówienia'));
 $$;
 drop policy if exists "authenticated update sales_orders" on sales_orders;
 create policy "authenticated update sales_orders" on sales_orders
@@ -603,7 +603,7 @@ returns void
 language plpgsql as $$
 begin
   if not sales_can_edit() then
-    raise exception 'Brak uprawnień do edycji zamówień (tylko Admin, Manager i Zamówienia).' using errcode = '42501';
+    raise exception 'Brak uprawnień do edycji zamówień (tylko Admin, Manager, Księgowa i Zamówienia).' using errcode = '42501';
   end if;
   update sales_orders
      set our_status = p_status, history = history || jsonb_build_array(p_entry)
@@ -621,7 +621,7 @@ returns void
 language plpgsql as $$
 begin
   if not sales_can_edit() then
-    raise exception 'Brak uprawnień do edycji zamówień (tylko Admin, Manager i Zamówienia).' using errcode = '42501';
+    raise exception 'Brak uprawnień do edycji zamówień (tylko Admin, Manager, Księgowa i Zamówienia).' using errcode = '42501';
   end if;
   update sales_orders
      set history = history || jsonb_build_array(p_entry)
@@ -638,7 +638,7 @@ create or replace function sales_item_update(
 language plpgsql as $$
 begin
   if not sales_can_edit() then
-    raise exception 'Brak uprawnień do edycji zamówień (tylko Admin, Manager i Zamówienia).' using errcode = '42501';
+    raise exception 'Brak uprawnień do edycji zamówień (tylko Admin, Manager, Księgowa i Zamówienia).' using errcode = '42501';
   end if;
   update sales_order_items
      set serial_number = p_serial, pads = p_pads, pad_serials = p_pad_serials

@@ -11,7 +11,7 @@ import { admin, loadShipper } from "@/lib/parcelServer";
 // chwili wywołania, nie z chwili nadania (przy zmianie cennika/dopłaty paliwowej może minimalnie się różnić).
 // Nigdy nie nadpisuje istniejącej ceny, nie rusza przesyłek anulowanych ani innych przewoźników.
 
-const ROLES = ["Admin", "Manager", "Zamówienia"];
+const ROLES = ["Admin", "Manager", "Księgowa", "Zamówienia"];
 
 export async function POST(request: Request) {
   const db = admin();

@@ -16,7 +16,7 @@ const PERIODS: MarginPeriod[] = ["all", "current", "previous"];
 
 export async function GET(request: Request) {
   const db = admin();
-  if (!(await requireRole(request, db, ["Admin", "Manager"]))) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
+  if (!(await requireRole(request, db, ["Admin", "Manager", "Księgowa"]))) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
   try {
     const { results } = await loadMarginResults(db);
     const periods: Record<string, { total: MarginAgg; byMarketplace: Record<string, MarginAgg> }> = {};

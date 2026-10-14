@@ -36,7 +36,7 @@ import ConsoleCatalogView from "./_components/ConsoleCatalogView";
 import ThemeSwitcher from "./_components/ThemeSwitcher";
 import { displayNameForEmail } from "@/lib/displayName";
 
-const ROLES = ["Admin", "Manager", "Magazyn", "Zamówienia", "Serwis", "Kierownik serwisu", "Testy", "Bidder", "Trade-in", "Kierownik trade-in", "Sklep"];
+const ROLES = ["Admin", "Manager", "Księgowa", "Magazyn", "Zamówienia", "Serwis", "Kierownik serwisu", "Testy", "Bidder", "Trade-in", "Kierownik trade-in", "Sklep"];
 
 type ViewKey =
   | "overview" | "inventory" | "sales" | "team" | "service" | "tests" | "tradein" | "orders" | "backlog" | "shipping" | "invoices" | "margin" | "points" | "nbp" | "ai" | "rcp" | "returns" | "reminders" | "goods" | "listings"
@@ -126,6 +126,7 @@ const ROLE_ACCESS: Record<string, ViewKey[]> = {
   // "ai" (asystent AI, 03.10.2026) — na tym etapie TYLKO Admin (także serwer: app/api/ai/ask); Manager go nie ma.
   Admin: ["overview", "inventory", "goods", "listings", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "margin", "points", "nbp", "ai", "rcp", "returns", "reminders", "shop_products", "shop_stock"],
   Manager: ["overview", "inventory", "goods", "listings", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "margin", "points", "nbp", "rcp", "returns", "shop_products", "shop_stock"], // wszystko (poza AI); Zespół tylko do odczytu, usuwa tylko Admin
+  Księgowa: ["overview", "inventory", "goods", "listings", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "margin", "points", "nbp", "rcp", "returns", "shop_products", "shop_stock"], // 14.10.2026: na razie dokładnie jak Manager (na prośbę właściciela)
   Magazyn: ["inventory", "backlog", "rcp", "returns"],
   Zamówienia: ["sales", "shipping", "invoices", "backlog", "rcp", "returns"],
   // Serwis i Kierownik serwisu (08.10.2026): dodatkowo "sales" — wgląd w Zamówienia BEZ edycji (readOnly) i Zapotrzebowanie, które serwis przyjmuje.
@@ -653,7 +654,7 @@ export default function Home() {
       </aside>
 
       <main className="flex-1">
-        {(role === "Admin" || role === "Manager" || role === "Serwis" || role === "Kierownik serwisu") && <ReminderBanners session={session} role={role} onOpen={(v) => setView(v as ViewKey)} />}
+        {(role === "Admin" || role === "Manager" || role === "Księgowa" || role === "Serwis" || role === "Kierownik serwisu") && <ReminderBanners session={session} role={role} onOpen={(v) => setView(v as ViewKey)} />}
         {/* Tytuł zakładki usunięty (10.10.2026) — zajmował miejsce; pasek zostaje tylko w Magazynie, bo trzyma przycisk "Odśwież". */}
         {view === "inventory" && (
         <div className="flex items-center justify-end px-8 py-3 border-b border-line">
@@ -719,7 +720,7 @@ export default function Home() {
 
               {invSub === "raw" && <InventoryRawView reloadKey={rawReloadKey} members={members} />}
 
-              {invSub === "catalog" && <ConsoleCatalogView isAdmin={role === "Admin"} canSeePrices={role === "Admin" || role === "Manager"} />}
+              {invSub === "catalog" && <ConsoleCatalogView isAdmin={role === "Admin"} canSeePrices={role === "Admin" || role === "Manager" || role === "Księgowa"} />}
             </div>
           )}
 
@@ -727,7 +728,7 @@ export default function Home() {
               session={session}
               members={members}
               isAdmin={role === "Admin"}
-              readOnly={!["Admin", "Manager", "Zamówienia"].includes(role ?? "")}
+              readOnly={!["Admin", "Manager", "Księgowa", "Zamówienia"].includes(role ?? "")}
               role={role ?? ""}
               canShip={effectiveAccess(role ?? "", viewAccess, []).includes("shipping")}
               onShip={(p) => {
@@ -749,14 +750,14 @@ export default function Home() {
             />
           )}
 
-          {view === "service" && <ServiceHub session={session} members={members} role={role} isAdmin={role === "Admin"} isAdminOrManager={role === "Admin" || role === "Manager"} isServiceLead={role === "Kierownik serwisu"} />}
+          {view === "service" && <ServiceHub session={session} members={members} role={role} isAdmin={role === "Admin"} isAdminOrManager={role === "Admin" || role === "Manager" || role === "Księgowa"} isServiceLead={role === "Kierownik serwisu"} />}
 
-          {view === "tests" && <TestsView session={session} members={members} isAdmin={role === "Admin"} isAdminOrManager={role === "Admin" || role === "Manager"} />}
+          {view === "tests" && <TestsView session={session} members={members} isAdmin={role === "Admin"} isAdminOrManager={role === "Admin" || role === "Manager" || role === "Księgowa"} />}
 
           {view === "tradein" && <TradeInView session={session} members={members} />}
 
           {view === "shipping" && (
-            <ShippingView session={session} isAdmin={role === "Admin"} canEditRules={role === "Admin" || role === "Manager"} members={members} prefill={shipPrefill} onPrefillUsed={() => setShipPrefill(null)} />
+            <ShippingView session={session} isAdmin={role === "Admin"} canEditRules={role === "Admin" || role === "Manager" || role === "Księgowa"} members={members} prefill={shipPrefill} onPrefillUsed={() => setShipPrefill(null)} />
           )}
 
           {view === "invoices" && <InvoicesView session={session} members={members} />}
@@ -781,7 +782,7 @@ export default function Home() {
 
           {view === "backlog" && <BacklogView session={session} members={members} isAdmin={role === "Admin"} />}
 
-          {view === "orders" && <TradeInHub session={session} members={members} isAdmin={role === "Admin"} isAdminOrManager={role === "Admin" || role === "Manager"} />}
+          {view === "orders" && <TradeInHub session={session} members={members} isAdmin={role === "Admin"} isAdminOrManager={role === "Admin" || role === "Manager" || role === "Księgowa"} />}
         </div>
       </main>
 

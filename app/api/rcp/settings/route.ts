@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const db = rcpAdmin();
   const me = await rcpCaller(request, db);
-  if (!me || !["Admin", "Manager"].includes(me.role)) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
+  if (!me || !["Admin", "Manager", "Księgowa"].includes(me.role)) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
   return NextResponse.json({ ok: true, allowedIps: await loadAllowedIps(db), myIp: clientIp(request) });
 }
 

@@ -9,7 +9,7 @@ import { admin } from "@/lib/parcelServer";
 // kolumny tylko pod cache i uniknąć przestarzałej etykiety; format domyślny/"pdf" (BLP) działa jak dotąd i zapisuje.
 export async function POST(request: Request) {
   const db = admin();
-  if (!(await requireRole(request, db, ["Admin", "Manager", "Zamówienia"]))) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
+  if (!(await requireRole(request, db, ["Admin", "Manager", "Księgowa", "Zamówienia"]))) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
   const cfg = dhlParcelConfigFromEnv();
   if (!cfg) return NextResponse.json({ error: "Brak konfiguracji DHL Parcel." }, { status: 400 });
   const b = await request.json().catch(() => null);

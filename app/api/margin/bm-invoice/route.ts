@@ -14,7 +14,7 @@ const EXPECTED = ["invoice_key", "value_date", "sku", "order_id", "designation",
 
 export async function POST(request: Request) {
   const db = admin();
-  const uid = await requireRole(request, db, ["Admin", "Manager"]);
+  const uid = await requireRole(request, db, ["Admin", "Manager", "Księgowa"]);
   if (!uid) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
 
   const body = await request.json().catch(() => null);

@@ -12,7 +12,7 @@ const admin = () => createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.
 
 export async function POST(request: Request) {
   const db = admin();
-  const uid = await requireRole(request, db, ["Admin", "Manager", "Serwis", "Kierownik serwisu"]);
+  const uid = await requireRole(request, db, ["Admin", "Manager", "Księgowa", "Serwis", "Kierownik serwisu"]);
   if (!uid) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
   const body = await request.json().catch(() => null);
   const v = validateImport(body);
@@ -42,7 +42,7 @@ export async function POST(request: Request) {
 // Podgląd pierwszego wolnego kodu (nieblokujący — ostateczne numery nadaje zapis).
 export async function GET(request: Request) {
   const db = admin();
-  if (!(await requireRole(request, db, ["Admin", "Manager", "Serwis", "Kierownik serwisu"]))) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
+  if (!(await requireRole(request, db, ["Admin", "Manager", "Księgowa", "Serwis", "Kierownik serwisu"]))) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
   const { data, error } = await db.rpc("service_parts_next_code");
   if (error) return NextResponse.json({ ok: true, next: null });
   return NextResponse.json({ ok: true, next: String(data) });

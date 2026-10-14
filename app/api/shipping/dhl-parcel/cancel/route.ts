@@ -8,7 +8,7 @@ import { admin } from "@/lib/parcelServer";
 // nie jest usuwany (zapis księgowy).
 export async function POST(request: Request) {
   const db = admin();
-  const uid = await requireRole(request, db, ["Admin", "Manager", "Zamówienia"]);
+  const uid = await requireRole(request, db, ["Admin", "Manager", "Księgowa", "Zamówienia"]);
   if (!uid) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
   const cfg = dhlParcelConfigFromEnv();
   if (!cfg) return NextResponse.json({ error: "Brak konfiguracji DHL Parcel." }, { status: 400 });

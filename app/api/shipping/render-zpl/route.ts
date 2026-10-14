@@ -7,7 +7,7 @@ import { requireRole } from "@/lib/serverAuth";
 // cala), 8dpmm odpowiada standardowej rozdzielczości 203 dpi etykieciarek Zebra. Tylko Admin, Manager i Zamówienia
 // (te same role, co reszta Wysyłki) — nic nie zapisuje, czysty odczyt/konwersja.
 
-const ROLES = ["Admin", "Manager", "Zamówienia"];
+const ROLES = ["Admin", "Manager", "Księgowa", "Zamówienia"];
 const admin = () => createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 
 export async function POST(request: Request) {

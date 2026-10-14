@@ -9,7 +9,7 @@ import { erliShipConfigFromEnv, erliCancelParcel, ErliShipError } from "@/lib/er
 
 export async function POST(request: Request) {
   const db = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
-  const uid = await requireRole(request, db, ["Admin", "Manager", "Zamówienia"]);
+  const uid = await requireRole(request, db, ["Admin", "Manager", "Księgowa", "Zamówienia"]);
   if (!uid) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
   const cfg = erliShipConfigFromEnv();
   if (!cfg) return NextResponse.json({ error: "Brak konfiguracji Erli (ERLI_API_KEY)." }, { status: 400 });

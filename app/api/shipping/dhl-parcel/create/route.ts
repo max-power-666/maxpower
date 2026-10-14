@@ -14,7 +14,7 @@ export const maxDuration = 60;
 
 export async function POST(request: Request) {
   const db = admin();
-  const uid = await requireRole(request, db, ["Admin", "Manager", "Zamówienia"]);
+  const uid = await requireRole(request, db, ["Admin", "Manager", "Księgowa", "Zamówienia"]);
   if (!uid) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
   const cfg = dhlParcelConfigFromEnv();
   if (!cfg) return NextResponse.json({ error: "Brak konfiguracji DHL Parcel (zmienne środowiskowe)." }, { status: 400 });

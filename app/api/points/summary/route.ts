@@ -76,7 +76,7 @@ async function fetchHours(db: ReturnType<typeof admin>, from: string, to: string
 
 export async function GET(request: Request) {
   const db = admin();
-  if (!(await requireRole(request, db, ["Admin", "Manager"]))) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
+  if (!(await requireRole(request, db, ["Admin", "Manager", "Księgowa"]))) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
   const months = lastMonths(6);
   const from = monthRange(months[0]).from;
   const to = monthRange(months[months.length - 1]).to;

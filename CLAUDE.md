@@ -48,7 +48,7 @@ numerach seryjnych, wielokanałowa synchronizacja stanów, naprawy, auto-wycena)
 
 **Tytuł zakładki nad treścią usunięty (10.10.2026, na prośbę właściciela — "zajmuje tylko miejsce"):** nazwa aktywnej zakładki widać już w menu bocznym, więc nagłówek `<h1>` z paska nad treścią zniknął na wszystkich stronach; pasek z przyciskiem "Odśwież" i datą synchronizacji został tylko w Magazynie (`app/page.tsx`).
 
-Role: **Admin, Manager, Magazyn, Zamówienia, Serwis, Kierownik serwisu (05.10.2026), Testy, Bidder, Trade-in, Kierownik trade-in (07.10.2026)** (+ Sklep). Rolę nadaje Admin w zakładce Zespół (tam też
+Role: **Admin, Manager, Księgowa (14.10.2026), Magazyn, Zamówienia, Serwis, Kierownik serwisu (05.10.2026), Testy, Bidder, Trade-in, Kierownik trade-in (07.10.2026)** (+ Sklep). Rolę nadaje Admin w zakładce Zespół (tam też
 imię i nazwisko — `members.name`). Nowa osoba po pierwszym logowaniu dostaje pusty wiersz
 w `members` i ekran "poproś administratora o rolę" (`NoRoleScreen`); sama roli nie wybiera.
 Rola odświeża się sama po nadaniu/zmianie przez Admina (realtime na `members` — wymaga bloku publikacji z `schema.sql`;
@@ -59,6 +59,7 @@ element listy w `ROLE_ACCESS` — Testy startują w Testach, Trade-in w Trade-in
 dostępu: `ROLE_ACCESS` w `app/page.tsx`.
 Manager widzi wszystkie zakładki (Zespół tylko do odczytu), ale niczego nie usuwa i nie zmienia ról ani imion (to tylko Admin, także w bazie).
 Rola jest zwykłym tekstem w `members.role` — dodanie roli nie wymaga SQL.
+**Rola "Księgowa" (14.10.2026, na prośbę właściciela — "na ten moment takie same uprawnienia jak manager"):** na razie jest w KAŻDYM miejscu równa Managerowi — te same zakładki (`ROLE_ACCESS.Księgowa` = kopia `Manager`, zmiana uprawnień Księgowej to osobna lista), te same endpointy serwera (każde `["Admin", "Manager", …]` w `app/api` i `lib` ma też "Księgowa"), te same warunki w bazie (`role-ksiegowa.sql`: `rcp_is_manager`, `is_admin_or_manager`, `shipping_rules_editor`, `sales_can_edit`, `is_service_staff`, `service_requests_guard`, `can_edit_shop`, `goods_can_read`; te same definicje są w `rcp.sql`, `shipping.sql`, `sales-orders.sql`, `service-requests.sql`, `shop.sql`, `goods.sql`/`goods-access.sql`). Konsekwencje przejęte z Managera: nie usuwa niczego (usuwa tylko Admin), Zespół tylko do odczytu, jej własnego wniosku urlopowego nie rozpatruje ona sama (robi to Admin), **nie rejestruje czasu pracy w RCP** (`RCP_NO_TRACKING_ROLES` w `lib/rcp.ts` — jeśli ma klikać RCP jak zwykła pracownica, wystarczy usunąć ją z tej listy) i widzi baner z wnioskami urlopowymi. **Nowe miejsce sprawdzające rolę "Manager" trzeba rozszerzyć o "Księgowa" — albo wspólna lista ról w jednym miejscu, gdy uprawnienia się rozjadą.** Nadaje ją Admin w Zespół (dokładna nazwa `Księgowa`); wymaga uruchomienia `supabase/role-ksiegowa.sql` (bez niego interfejs ją zna, ale baza nie wpuści jej do danych chronionych RLS).
 
 | Zakładka | Klucz widoku | Kto widzi |
 |---|---|---|

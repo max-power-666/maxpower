@@ -8,7 +8,7 @@ import { admin } from "@/lib/parcelServer";
 // Uwaga: przesyłka nadana na środowisku testowym UPS jest anulowana w teście, produkcyjna — naprawdę.
 export async function POST(request: Request) {
   const db = admin();
-  const uid = await requireRole(request, db, ["Admin", "Manager", "Zamówienia"]);
+  const uid = await requireRole(request, db, ["Admin", "Manager", "Księgowa", "Zamówienia"]);
   if (!uid) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
   const cfg = upsConfigFromEnv();
   if (!cfg) return NextResponse.json({ error: "Brak konfiguracji UPS." }, { status: 400 });

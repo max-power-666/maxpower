@@ -22,7 +22,7 @@ export const COUNTS_AS_WORK: RcpKind[] = ["praca", "administracja", "wyjscie_slu
 export const ADMIN_WORK_ROLES = ["Kierownik serwisu", "Kierownik trade-in"];
 // Role, które NIE rejestrują czasu pracy (decyzja właściciela 07.10.2026: "wyłącz rejestrowanie czasu dla admin i manager"): bez widżetu, serwer odrzuca akcje, nie ma ich
 // na listach "Teraz w pracy" i w Ewidencji (chyba że mają zapisany wcześniejszy czas). Nadal widzą i prowadzą RCP jako zarządzający (ewidencja, korekty, wnioski, ustawienia).
-export const RCP_NO_TRACKING_ROLES = ["Admin", "Manager"];
+export const RCP_NO_TRACKING_ROLES = ["Admin", "Manager", "Księgowa"];
 export const tracksWorkTime = (role: string | null | undefined): boolean => !RCP_NO_TRACKING_ROLES.includes(role || "");
 
 export type RcpSegment = {

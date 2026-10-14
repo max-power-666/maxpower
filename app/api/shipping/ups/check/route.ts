@@ -11,7 +11,7 @@ import { loadUpsShipper, parseUpsCod, upsReceiver } from "@/lib/upsServer";
 // Client ID/Secret i numer konta zostają na serwerze.
 
 export const maxDuration = 60;
-const ROLES = ["Admin", "Manager", "Zamówienia"];
+const ROLES = ["Admin", "Manager", "Księgowa", "Zamówienia"];
 
 export async function GET(request: Request) {
   const db = admin();

@@ -16,7 +16,7 @@ const iso = (v: unknown): string | null => {
 export async function POST(request: Request) {
   const db = rcpAdmin();
   const me = await rcpCaller(request, db);
-  if (!me || !["Admin", "Manager"].includes(me.role)) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
+  if (!me || !["Admin", "Manager", "Księgowa"].includes(me.role)) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
   const b = await request.json().catch(() => null);
   const reason = typeof b?.reason === "string" ? b.reason.trim() : "";
   if (reason.length < 3) return NextResponse.json({ error: "Podaj uzasadnienie korekty." }, { status: 400 });

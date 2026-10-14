@@ -10,7 +10,7 @@
 -- Admin albo Manager (NIE rola Zamówienia — is_admin_or_manager() z shipping.sql ma historycznie szerszy zakres).
 create or replace function rcp_is_manager() returns boolean
 language sql stable security definer set search_path = public as $$
-  select exists (select 1 from members where user_id = auth.uid() and role in ('Admin', 'Manager'));
+  select exists (select 1 from members where user_id = auth.uid() and role in ('Admin', 'Manager', 'Księgowa'));
 $$;
 
 -- Ustawienia (jeden wiersz): adresy IP komputerów w firmie, z których wolno rejestrować czas. Pusta lista = bez ograniczenia (żeby nikt nie został zablokowany,

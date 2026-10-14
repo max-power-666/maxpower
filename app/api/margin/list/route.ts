@@ -14,7 +14,7 @@ const admin = () => createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.
 
 export async function GET(request: Request) {
   const db = admin();
-  if (!(await requireRole(request, db, ["Admin", "Manager"]))) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
+  if (!(await requireRole(request, db, ["Admin", "Manager", "Księgowa"]))) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
 
   const url = new URL(request.url);
   const page = Math.max(1, Number(url.searchParams.get("page")) || 1);

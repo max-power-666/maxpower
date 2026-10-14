@@ -21,7 +21,7 @@ export async function POST(request: Request) {
   const db = rcpAdmin();
   const me = await rcpCaller(request, db);
   if (!me) return err("Brak uprawnień.", 403);
-  const isManager = me.role === "Admin" || me.role === "Manager";
+  const isManager = me.role === "Admin" || me.role === "Manager" || me.role === "Księgowa";
   const isLead = me.role === "Kierownik serwisu";
   const b = await request.json().catch(() => null);
   const action = typeof b?.action === "string" ? b.action : "";

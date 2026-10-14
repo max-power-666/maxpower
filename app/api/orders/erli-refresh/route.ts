@@ -19,7 +19,7 @@ export const maxDuration = 30;
 
 export async function POST(request: Request) {
   const db = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
-  const uid = await requireRole(request, db, ["Admin", "Manager", "Zamówienia"]);
+  const uid = await requireRole(request, db, ["Admin", "Manager", "Księgowa", "Zamówienia"]);
   if (!uid) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
 
   const b = await request.json().catch(() => null);

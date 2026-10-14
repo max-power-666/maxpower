@@ -55,7 +55,7 @@ async function fetchSegments(month: string, userId?: string): Promise<RcpSegment
 }
 
 export default function RcpView({ session, role, members }: { session: Session; role: string; members: MemberLite[] }) {
-  const isManager = role === "Admin" || role === "Manager";
+  const isManager = role === "Admin" || role === "Manager" || role === "Księgowa";
   const isAdmin = role === "Admin";
   const isLead = role === "Kierownik serwisu"; // widzi i rozpatruje wnioski urlopowe serwisantów (13.10.2026)
   const canSeeRequests = isManager || isLead;

@@ -18,7 +18,7 @@ const admin = () => createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.
 
 export async function POST(request: Request) {
   const db = admin();
-  const uid = await requireRole(request, db, ["Admin", "Manager", "Zamówienia"]);
+  const uid = await requireRole(request, db, ["Admin", "Manager", "Księgowa", "Zamówienia"]);
   if (!uid) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
   const cfg = dhlExpressConfigFromEnv();
   if (!cfg) return NextResponse.json({ error: "Brak konfiguracji DHL Express (zmienne środowiskowe)." }, { status: 400 });

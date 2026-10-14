@@ -11,7 +11,7 @@ import { monoToGfa } from "@/lib/gifToZpl";
 
 export const maxDuration = 30;
 
-const ROLES = ["Admin", "Manager", "Zamówienia"];
+const ROLES = ["Admin", "Manager", "Księgowa", "Zamówienia"];
 const admin = () => createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 
 export async function POST(request: Request) {
