@@ -194,7 +194,42 @@ function chartFamilyOf(variant: string): string {
   return SKU_CHART_FAMILIES.find((f) => f.prefix.test(variant))?.name ?? variant;
 }
 
-type FakturowniaSku = { count: number; categories: FakturowniaCategorySummary[]; none: { count: number; value: number } };
+// Ogólny podział produktów na wykresie "Wg grup produktów" (14.10.2026, na prośbę właściciela): Konsole, Apple Watch, Aparat, Samsung Watch, iPad, iPhone, Samsung,
+// Macbook, Audio (+ "Inne"). Najpierw rozstrzyga kategoria z SKU (prefiks), a gdy jej brak — kategoria z Fakturowni / Towaru oraz nazwa produktu.
+const PRODUCT_GROUPS = ["Konsole", "Apple Watch", "Aparat", "Samsung Watch", "iPad", "iPhone", "Samsung", "Macbook", "Audio"] as const;
+function productGroupOf(skuCategory: string | null, categories: (string | null | undefined)[], name: string | null): string {
+  const s = (skuCategory || "").trim().toUpperCase();
+  const text = (name || "").toLowerCase();
+  if (s) {
+    if (s === "APARAT") return "Aparat";
+    if (/^(AW|APPS)/.test(s)) return "Apple Watch";
+    if (/^SGW/.test(s)) return "Samsung Watch";
+    if (/^(PS|XO|XS|NS|NDS|NNDS|N3DS|ONEX|VSD|VVSD|MOQ|ASA)/.test(s)) return "Konsole";
+    if (/^(IPAD|ID)/.test(s)) return "iPad";
+    if (/^IP/.test(s)) return "iPhone";
+    if (/^MB/.test(s)) return "Macbook";
+    if (/^(APM|AHP|B7|APP|MARSH|QC|BSS|OF)/.test(s)) return "Audio";
+    if (/^(SG|S2\d|GP|A\d)/.test(s)) return "Samsung";
+  }
+  for (const raw of categories) {
+    const c = (raw || "").toLowerCase().replace(/\d+$/, "").trim();
+    if (!c) continue;
+    if (c === "konsola") return "Konsole";
+    if (c === "aparat") return "Aparat";
+    if (c === "ipad") return "iPad";
+    if (c === "iphone") return "iPhone";
+    if (c === "macbook") return "Macbook";
+    if (c === "audio") return "Audio";
+    if (c === "samsung") return /watch/.test(text) ? "Samsung Watch" : "Samsung";
+    if (c === "watch") {
+      if (/samsung|galaxy|sgw/.test(text)) return "Samsung Watch";
+      if (/apple|apps\d|\baw|series|\bse\b|tbg|cpo/.test(text) || !/garmin|fenix|epix|amazfit|fitbit/.test(text)) return "Apple Watch"; // kategoria Watch to głównie Apple Watch
+    }
+  }
+  return "Inne";
+}
+
+type FakturowniaSku = { count: number; categories: FakturowniaCategorySummary[]; none: { count: number; value: number }; groups: FakturowniaCategorySummary[] };
 // costs: koszty dodatkowe sztuk w magazynie (dziś tylko Trade-in; kolejne składniki jako kolejne linie) — patrz lib/stockCosts.ts; null = nie udało się policzyć.
 // goods: wartości dostępnych pozycji z rejestru Towar (14.10.2026) — cena PLN i "cena + koszty (PLN)"; null = brak dostępu do Towaru / brak widoku dostępności.
 // servicePln = kolumna Serwis, commissionPln = Prowizja (10% + logistyka; dla wierszy z arkusza prowizja + PCC − PCC), pccPln = PCC.
@@ -490,11 +525,11 @@ export default function Home() {
   async function fetchSkuBreakdown(): Promise<FakturowniaSku | null> {
     const PAGE = 1000;
     let from = 0;
-    const rows: { name: string | null; sku_category: string | null; purchase_price_gross: number }[] = [];
+    const rows: { name: string | null; sku_category: string | null; category_name: string | null; purchase_price_gross: number }[] = [];
     while (true) {
       const { data, error } = await supabase
         .from("fakturownia_stock_with_sku")
-        .select("name, sku_category, purchase_price_gross")
+        .select("name, sku_category, category_name, purchase_price_gross")
         .range(from, from + PAGE - 1);
       if (error) return null;
       rows.push(...((data as any[]) || []));
@@ -533,12 +568,13 @@ export default function Home() {
     const totals = new Map<string, FakturowniaCategorySummary>();
     const none = { count: 0, value: 0 };
     let count = 0;
+    const groupTotals = new Map<string, FakturowniaCategorySummary>();
     for (const r of rows) {
       const value = Number(r.purchase_price_gross) || 0;
       let category = r.sku_category;
       let hasSku = !!category;
+      const g = goodsBySerial.get((r.name || "").trim().toUpperCase()) ?? [];
       if (!category) {
-        const g = goodsBySerial.get((r.name || "").trim().toUpperCase()) ?? [];
         const skuRow = g.find((x) => looksLikeSku(x.name));
         if (skuRow) {
           category = skuCategoryOf(skuRow.name) || null;
@@ -549,6 +585,12 @@ export default function Home() {
           if (label) category = label;
         }
       }
+      // grupa produktów (wykres ogólny): SKU (z widoku albo z Towaru) > kategoria z Fakturowni > kategoria z Towaru
+      const grp = productGroupOf(category && !category.includes("(Towar)") ? category : null, [r.category_name, ...g.map((x) => x.category)], r.name);
+      const ge = groupTotals.get(grp) || { name: grp, count: 0, value: 0 };
+      ge.count += 1;
+      ge.value += value;
+      groupTotals.set(grp, ge);
       if (!category) {
         none.count += 1;
         none.value += value;
@@ -579,7 +621,9 @@ export default function Home() {
         children: f.variants.length > 1 || f.variants[0].name !== f.name ? [...f.variants].sort((a, b) => b.value - a.value) : undefined,
       }))
       .sort((a, b) => b.value - a.value);
-    return { count, categories, none };
+    const order = [...PRODUCT_GROUPS, "Inne"] as string[];
+    const groups = Array.from(groupTotals.values()).sort((a, b) => b.value - a.value || order.indexOf(a.name) - order.indexOf(b.name));
+    return { count, categories, none, groups };
   }
 
   // Wartości z zakładki Towar (14.10.2026, na prośbę właściciela): suma "Cena PLN" i "Cena + koszty (PLN)" pozycji DOSTĘPNYCH w Fakturowni (widok
@@ -1040,7 +1084,12 @@ function FakturowniaSummaryView({ summary }: { summary: FakturowniaSummary }) {
       ) : (
         // Dwa wykresy obok siebie, każdy na pół szerokości (02.10.2026): kategorie z Fakturowni i kategorie z SKU.
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-          <CategoryBreakdown title="WG KATEGORII Z FAKTUROWNI" categories={summary.categories} totalValue={summary.totalValue} />
+          <CategoryBreakdown
+            title={summary.sku ? "WG GRUP PRODUKTÓW" : "WG KATEGORII Z FAKTUROWNI"}
+            categories={summary.sku ? summary.sku.groups : summary.categories}
+            totalValue={summary.totalValue}
+            note={summary.sku ? "Konsole (NS, PS4, PS5, XOS, XSX…), Apple Watch, Aparat, Samsung Watch, iPad, iPhone, Samsung, Macbook, Audio. Grupa wynika z SKU, a gdy go brak — z kategorii w Fakturowni / Towarze." : undefined}
+          />
           {summary.sku ? (
             <CategoryBreakdown
               title="WG KATEGORII Z SKU"
