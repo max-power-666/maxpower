@@ -13,6 +13,7 @@ import AiView from "./_components/AiView";
 import MarginView from "./_components/MarginView";
 import PointsView from "./_components/PointsView";
 import NbpView from "./_components/NbpView";
+import CostInvoicesView from "./_components/CostInvoicesView";
 import { stockTradeInCosts, type BuybackOrderLite, type CostLine } from "@/lib/stockCosts";
 import type { NbpRate } from "@/lib/nbp";
 import CategoryBreakdown, { FAKTUROWNIA_PALETTE } from "./_components/CategoryBreakdown";
@@ -40,7 +41,7 @@ import { displayNameForEmail } from "@/lib/displayName";
 const ROLES = ["Admin", "Manager", "Księgowa", "Magazyn", "Zamówienia", "Serwis", "Kierownik serwisu", "Testy", "Bidder", "Trade-in", "Kierownik trade-in", "Sklep"];
 
 type ViewKey =
-  | "overview" | "inventory" | "sales" | "team" | "service" | "tests" | "tradein" | "orders" | "backlog" | "shipping" | "invoices" | "margin" | "points" | "nbp" | "ai" | "rcp" | "returns" | "reminders" | "goods" | "listings"
+  | "overview" | "inventory" | "sales" | "team" | "service" | "tests" | "tradein" | "orders" | "backlog" | "shipping" | "invoices" | "margin" | "points" | "nbp" | "costs" | "ai" | "rcp" | "returns" | "reminders" | "goods" | "listings"
   // Recoo Sklep (backoffice sklepu, przełącznik w pasku bocznym):
   | "shop_products" | "shop_stock";
 
@@ -67,6 +68,7 @@ const TABS: { key: ViewKey; label: string; space?: Space }[] = [
   { key: "invoices", label: "Faktury" },
   { key: "margin", label: "Marża" },
   { key: "points", label: "Punktacja" }, // podsumowanie punktacji pracowników wg regulaminu, Admin i Manager (06.10.2026)
+  { key: "costs", label: "Faktury kosztowe" }, // faktury kosztowe z Fakturowni (w tym z KSeF), Admin, Manager i Księgowa (14.10.2026)
   { key: "nbp", label: "NBP" },
   { key: "ai", label: "AI" },
   { key: "rcp", label: "RCP" },
@@ -83,7 +85,7 @@ const NAV_GROUPS: { title: string | null; keys: ViewKey[] }[] = [
   { title: "Magazyn", keys: ["inventory", "goods", "listings"] },
   { title: "Serwis", keys: ["service", "tests"] },
   { title: "Skup", keys: ["orders", "tradein"] },
-  { title: "Finanse", keys: ["invoices", "margin", "nbp"] },
+  { title: "Finanse", keys: ["invoices", "costs", "margin", "nbp"] },
   { title: "Zespół", keys: ["rcp", "points", "team"] },
   { title: "Narzędzia", keys: ["backlog", "reminders", "ai"] },
 ];
@@ -125,9 +127,9 @@ function navSections(space: Space, visible: ViewKey[]): { title: string | null; 
 // twardo zablokowane, tylko inny domyślny zestaw wg roli, jak każda inna zakładka.
 const ROLE_ACCESS: Record<string, ViewKey[]> = {
   // "ai" (asystent AI, 03.10.2026) — na tym etapie TYLKO Admin (także serwer: app/api/ai/ask); Manager go nie ma.
-  Admin: ["overview", "inventory", "goods", "listings", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "margin", "points", "nbp", "ai", "rcp", "returns", "reminders", "shop_products", "shop_stock"],
-  Manager: ["overview", "inventory", "goods", "listings", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "margin", "points", "nbp", "rcp", "returns", "shop_products", "shop_stock"], // wszystko (poza AI); Zespół tylko do odczytu, usuwa tylko Admin
-  Księgowa: ["overview", "inventory", "goods", "listings", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "margin", "points", "nbp", "rcp", "returns", "shop_products", "shop_stock"], // 14.10.2026: na razie dokładnie jak Manager (na prośbę właściciela)
+  Admin: ["overview", "inventory", "goods", "listings", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "costs", "margin", "points", "nbp", "ai", "rcp", "returns", "reminders", "shop_products", "shop_stock"],
+  Manager: ["overview", "inventory", "goods", "listings", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "costs", "margin", "points", "nbp", "rcp", "returns", "shop_products", "shop_stock"], // wszystko (poza AI); Zespół tylko do odczytu, usuwa tylko Admin
+  Księgowa: ["overview", "inventory", "goods", "listings", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "costs", "margin", "points", "nbp", "rcp", "returns", "shop_products", "shop_stock"], // 14.10.2026: na razie dokładnie jak Manager (na prośbę właściciela)
   Magazyn: ["inventory", "backlog", "rcp", "returns"],
   Zamówienia: ["sales", "shipping", "invoices", "backlog", "rcp", "returns"],
   // Serwis i Kierownik serwisu (08.10.2026): dodatkowo "sales" — wgląd w Zamówienia BEZ edycji (readOnly) i Zapotrzebowanie, które serwis przyjmuje.
@@ -905,6 +907,7 @@ export default function Home() {
           {view === "points" && <PointsView session={session} members={members} />}
 
           {view === "nbp" && <NbpView session={session} />}
+          {view === "costs" && <CostInvoicesView session={session} />}
 
           {view === "ai" && <AiView session={session} />}
 

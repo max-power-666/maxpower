@@ -51,6 +51,10 @@
     {
       "path": "/api/goods/sync-buyback",
       "schedule": "7,22,37,52 * * * *"
+    },
+    {
+      "path": "/api/costs/sync",
+      "schedule": "10 */3 * * *"
     }
   ]
 }
