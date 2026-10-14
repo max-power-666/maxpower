@@ -351,7 +351,7 @@ export default function GoodsAddForm({
           <input value={f.name} onChange={(e) => set("name", e.target.value)} placeholder={isTradeIn ? "np. XSS-512-WE-A" : "np. Canon 2000D z obiektywem 18-55"} className={inputCls} />
         </div>
         <div>
-          <label className={labelCls}>Kategoria</label>
+          <label className={labelCls}>{isTradeIn ? "Kategoria produktu (do opłaty logistycznej)" : "Kategoria"}</label>
           <input value={f.category} onChange={(e) => set("category", e.target.value)} list="goods-categories" className={inputCls} />
         </div>
 

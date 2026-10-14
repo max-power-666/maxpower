@@ -1,5 +1,6 @@
 "use client";
 
+import { skuCategoryOf, CAMERA_CATEGORY } from "@/lib/skuParts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { escapeLike } from "@/lib/search";
@@ -119,7 +120,15 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (q: any) => {
       q = scopeFilter(q, tab);
-      if (category) q = category === NONE ? q.is("category", null) : q.eq("category", category);
+      if (category && tab === "skup") {
+        // Skup: kategoria z SKU (pierwszy człon przed myślnikiem, aparaty = APARAT) — jak "Kategoria z SKU" w Magazynie; filtr po kolumnie `name` (SKU)
+        if (category === NONE) q = q.or("name.is.null,name.eq.");
+        else if (category === CAMERA_CATEGORY) q = q.ilike("name", "%(%/%)");
+        else {
+          const c = escapeLike(category).replace(/[,()"]/g, " ").trim();
+          q = q.or(`name.ilike.${c}-%,name.ilike.${c}`);
+        }
+      } else if (category) q = category === NONE ? q.is("category", null) : q.eq("category", category);
       if (supplier) q = supplier === NONE ? q.is("supplier", null) : q.eq("supplier", supplier);
       if (search) {
         const s = escapeLike(search).replace(/[,()"]/g, " ").trim(); // przecinki i nawiasy rozbiłyby składnię .or()
@@ -200,10 +209,10 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
       const f: Facets = { category: new Map(), supplier: new Map() };
       const bump = (m: Map<string, number>, v: string | null) => m.set(v ?? NONE, (m.get(v ?? NONE) ?? 0) + 1);
       for (let from = 0; ; from += 1000) {
-        const { data, error: err } = await scopeFilter(supabase.from("goods_register").select("category, supplier"), tab).order("id").range(from, from + 999);
+        const { data, error: err } = await scopeFilter(supabase.from("goods_register").select("category, supplier, name"), tab).order("id").range(from, from + 999);
         if (cancelled || err) return;
-        for (const r of (data as { category: string | null; supplier: string | null }[]) || []) {
-          bump(f.category, r.category);
+        for (const r of (data as { category: string | null; supplier: string | null; name: string | null }[]) || []) {
+          bump(f.category, tab === "skup" ? skuCategoryOf(r.name) || null : r.category);
           bump(f.supplier, r.supplier);
         }
         if (!data || data.length < 1000) break;
@@ -278,7 +287,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
 
   const headers = useMemo(
     () => isSkup ? [
-      "Numer seryjny", "SKU", "Kanał", "Data zakupu", "Nr zamówienia", "Kategoria", "Cena zakupu", "VAT", "Waluta", "NBP", "Serwis", "Cena + koszty (PLN)", "Cena PLN", "PCC", "Kraj", "Prowizja", "Prowizja + PCC", "",
+      "Numer seryjny", "SKU", "Kanał", "Data zakupu", "Nr zamówienia", "Kategoria z SKU", "Cena zakupu", "VAT", "Waluta", "NBP", "Serwis", "Cena + koszty (PLN)", "Cena PLN", "PCC", "Kraj", "Prowizja", "Prowizja + PCC", "",
     ] : [
       ...(showGroup ? ["Grupa"] : []),
       "Numer seryjny",
@@ -349,11 +358,11 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
         <input
           value={searchInput}
           onChange={(e) => setSearchInput(e.target.value)}
-          placeholder="Szukaj: numer seryjny, nazwa, nr zamówienia, faktura, dostawca"
+          placeholder={isSkup ? "Szukaj: numer seryjny, SKU, nr zamówienia, kanał" : "Szukaj: numer seryjny, nazwa, nr zamówienia, faktura, dostawca"}
           className="w-96 border border-line bg-white px-3 py-2 rounded text-sm"
         />
         <select value={category} onChange={(e) => { setCategory(e.target.value); setPage(1); }} className={selectCls}>
-          <option value="">Kategoria: wszystkie</option>
+          <option value="">{isSkup ? "Kategoria z SKU: wszystkie" : "Kategoria: wszystkie"}</option>
           {options(facets?.category).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
         <select value={supplier} onChange={(e) => { setSupplier(e.target.value); setPage(1); }} className={selectCls}>
@@ -413,7 +422,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
                 {!isSkup && <td className="p-2 whitespace-nowrap">{fmtDate(r.delivered_on)}</td>}
                 <td className="p-2 font-mono whitespace-nowrap">{r.order_no || "—"}</td>
                 {!isSkup && <td className="p-2 whitespace-nowrap">{r.invoice_no || "—"}</td>}
-                <td className="p-2 whitespace-nowrap">{r.category || "—"}</td>
+                <td className="p-2 whitespace-nowrap">{(isSkup ? skuCategoryOf(r.name) : r.category) || "—"}</td>
                 <td className="p-2 whitespace-nowrap text-right">{r.price === null ? "—" : isSkup ? fmtNum(r.price) : `${fmtNum(r.price)} ${r.currency ?? ""}`.trim()}</td>
                 <td className="p-2 whitespace-nowrap">{r.vat || "—"}</td>
                 {isSkup && <td className="p-2 whitespace-nowrap">{r.currency || "—"}</td>}
