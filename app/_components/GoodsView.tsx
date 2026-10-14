@@ -1,5 +1,6 @@
 "use client";
 
+import { productStatusParts } from "@/lib/workLog";
 import { skuCategoryOf, CAMERA_CATEGORY } from "@/lib/skuParts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
@@ -36,6 +37,9 @@ type Row = {
   pcc: number | null;
   country: string | null;
   commission_pcc: number | null;
+  product_status_source?: string | null; // najświeższy status z Serwisu / Testów / Trade-in (widok goods_register_available)
+  product_status?: string | null;
+  product_status_at?: string | null;
   available?: boolean; // numer seryjny jest w magazynie Fakturowni (widok goods_register_available)
   source?: string | null; // 'arkusz' | 'buyback' (wiersz dopisany automatycznie z opłaconego zamówienia Buyback)
   commission?: number | null; // Prowizja (PLN) = 10% + logistyka; dla wierszy z arkusza puste — liczone jako prowizja + PCC − PCC
@@ -84,6 +88,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
   // (supabase/goods-available.sql); bez widoku lista działa jak dotąd, bez kolumny i filtra.
   const [availFilter, setAvailFilter] = useState<"yes" | "all" | "no">("yes");
   const [availView, setAvailView] = useState(true);
+  const [statusCols, setStatusCols] = useState(true); // kolumny product_status_* w widoku (po ponownym uruchomieniu goods-available.sql)
   const listTable = availView ? "goods_register_available" : "goods_register";
   const [serialFilter, setSerialFilter] = useState<"" | "with" | "without">(""); // filtr numeru seryjnego: z numerem / bez numeru (14.10.2026)
   const [rows, setRows] = useState<Row[]>([]);
@@ -159,7 +164,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
     setError("");
     try {
       const from = (page - 1) * pageSize;
-      const { data, error: err, count: total } = await applyFilters(supabase.from(listTable).select(availView ? `${COLUMNS}, available` : COLUMNS, { count: "exact" }))
+      const { data, error: err, count: total } = await applyFilters(supabase.from(listTable).select(availView ? `${COLUMNS}, available${statusCols ? ", product_status_source, product_status, product_status_at" : ""}` : COLUMNS, { count: "exact" }))
         .order("purchased_on", { ascending: false, nullsFirst: false })
         .order("id", { ascending: false })
         .range(from, from + pageSize - 1);
@@ -171,6 +176,10 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
         }
         if (availView && (err.code === "42P01" || err.code === "PGRST205")) {
           setAvailView(false); // brak widoku dostępności (nieuruchomione supabase/goods-available.sql) — lista po staremu
+          return;
+        }
+        if (availView && statusCols && (err.code === "42703" || err.code === "PGRST204") && /product_status/.test(err.message || "")) {
+          setStatusCols(false); // widok bez kolumn statusu (stara wersja goods-available.sql) — ładujemy bez nich
           return;
         }
         if (newCols && (err.code === "42703" || err.code === "PGRST204")) {
@@ -186,7 +195,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
     } finally {
       if (mine === seq.current) setLoading(false);
     }
-  }, [applyFilters, page, pageSize, reloadKey, newCols, availView]);
+  }, [applyFilters, page, pageSize, reloadKey, newCols, availView, statusCols]);
 
   useEffect(() => {
     load();
@@ -300,16 +309,16 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
       .map(([v, n]) => ({ value: v, label: `${v === NONE ? "— (brak)" : v} (${n})` }));
   const anyFilter = !!(search || category || supplier || serialFilter);
   const showGroup = tab === "all"; // w "Wszystkie" pierwsza kolumna mówi, do której pigułki należy wiersz
-  const colSpan = (isSkup ? 18 : (isTradeIn ? 17 : 14) + (showGroup ? 1 : 0) + 1) + (availView ? 1 : 0); // kolumna akcji (Edytuj / Usuń)
+  const colSpan = (isSkup ? 18 : (isTradeIn ? 17 : 14) + (showGroup ? 1 : 0) + 1) + (availView ? (statusCols ? 2 : 1) : 0); // kolumna akcji (Edytuj / Usuń)
   const groupOf = (r: Row) => (r.vat === "V23" ? "V23" : r.kind === "trade_in" ? "Skup" : "VM");
 
   const headers = useMemo(
     () => isSkup ? [
-      "Numer seryjny", ...(availView ? ["Dostępny"] : []), "SKU", "Kanał", "Data zakupu", "Nr zamówienia", "Kategoria z SKU", "Cena zakupu", "VAT", "Waluta", "NBP", "Serwis", "Cena + koszty (PLN)", "Cena PLN", "PCC", "Kraj", "Prowizja", "Prowizja + PCC", "",
+      "Numer seryjny", ...(availView ? ["Dostępny", ...(statusCols ? ["Status"] : [])] : []), "SKU", "Kanał", "Data zakupu", "Nr zamówienia", "Kategoria z SKU", "Cena zakupu", "VAT", "Waluta", "NBP", "Serwis", "Cena + koszty (PLN)", "Cena PLN", "PCC", "Kraj", "Prowizja", "Prowizja + PCC", "",
     ] : [
       ...(showGroup ? ["Grupa"] : []),
       "Numer seryjny",
-      ...(availView ? ["Dostępny"] : []),
+      ...(availView ? ["Dostępny", ...(statusCols ? ["Status"] : [])] : []),
       "Nazwa",
       "Dostawca",
       "Data zakupu",
@@ -326,7 +335,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
       ...(isTradeIn ? ["PCC", "Kraj", "Prowizja + PCC"] : []),
       "", // kolumna akcji
     ],
-    [isTradeIn, showGroup, isSkup, availView]
+    [isTradeIn, showGroup, isSkup, availView, statusCols]
   );
 
   return (
@@ -452,6 +461,18 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
                 {availView && (
                   <td className="p-2 whitespace-nowrap">
                     <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${r.available ? "bg-tealsoft text-teal" : "bg-paper text-inksoft border border-line"}`}>{r.available ? "Tak" : "Nie"}</span>
+                  </td>
+                )}
+                {availView && statusCols && (
+                  <td className="p-2 whitespace-nowrap">
+                    {r.product_status ? (
+                      <span title={r.product_status_at ? `ostatnia zmiana: ${new Date(r.product_status_at).toLocaleString("pl-PL")}` : undefined}>
+                        <span className="text-inksoft">{productStatusParts(r.product_status_source, r.product_status)?.source}: </span>
+                        <span className="font-semibold">{productStatusParts(r.product_status_source, r.product_status)?.status}</span>
+                      </span>
+                    ) : (
+                      "—"
+                    )}
                   </td>
                 )}
                 <td className="p-2 min-w-[12rem]">{r.name || "—"}</td>
