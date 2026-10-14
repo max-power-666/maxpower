@@ -36,6 +36,7 @@ type Row = {
   pcc: number | null;
   country: string | null;
   commission_pcc: number | null;
+  available?: boolean; // numer seryjny jest w magazynie Fakturowni (widok goods_register_available)
   source?: string | null; // 'arkusz' | 'buyback' (wiersz dopisany automatycznie z opłaconego zamówienia Buyback)
   commission?: number | null; // Prowizja (PLN) = 10% + logistyka; dla wierszy z arkusza puste — liczone jako prowizja + PCC − PCC
 };
@@ -79,6 +80,11 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
   const [supplier, setSupplier] = useState("");
+  // Dostępność (14.10.2026): "Dostępny" = numer seryjny jest w magazynie Fakturowni; domyślnie pokazujemy tylko dostępne. Dane z widoku goods_register_available
+  // (supabase/goods-available.sql); bez widoku lista działa jak dotąd, bez kolumny i filtra.
+  const [availFilter, setAvailFilter] = useState<"yes" | "all" | "no">("yes");
+  const [availView, setAvailView] = useState(true);
+  const listTable = availView ? "goods_register_available" : "goods_register";
   const [serialFilter, setSerialFilter] = useState<"" | "with" | "without">(""); // filtr numeru seryjnego: z numerem / bez numeru (14.10.2026)
   const [rows, setRows] = useState<Row[]>([]);
   const [count, setCount] = useState<number | null>(null);
@@ -132,6 +138,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
         }
       } else if (category) q = category === NONE ? q.is("category", null) : q.eq("category", category);
       if (supplier) q = supplier === NONE ? q.is("supplier", null) : q.eq("supplier", supplier);
+      if (availView && availFilter !== "all") q = q.eq("available", availFilter === "yes");
       if (serialFilter === "without") q = q.or("serial.is.null,serial.eq.");
       else if (serialFilter === "with") q = q.not("serial", "is", null).neq("serial", "");
       if (search) {
@@ -140,8 +147,11 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
       }
       return q;
     },
-    [tab, category, supplier, search, serialFilter]
+    [tab, category, supplier, search, serialFilter, availFilter, availView]
   );
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const withAvail = (q: any) => (availView && availFilter !== "all" ? q.eq("available", availFilter === "yes") : q);
 
   const load = useCallback(async () => {
     const mine = ++seq.current;
@@ -149,7 +159,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
     setError("");
     try {
       const from = (page - 1) * pageSize;
-      const { data, error: err, count: total } = await applyFilters(supabase.from("goods_register").select(COLUMNS, { count: "exact" }))
+      const { data, error: err, count: total } = await applyFilters(supabase.from(listTable).select(availView ? `${COLUMNS}, available` : COLUMNS, { count: "exact" }))
         .order("purchased_on", { ascending: false, nullsFirst: false })
         .order("id", { ascending: false })
         .range(from, from + pageSize - 1);
@@ -157,6 +167,10 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
       if (err) {
         if (err.code === "PGRST103" && page > 1) {
           setPage(1);
+          return;
+        }
+        if (availView && (err.code === "42P01" || err.code === "PGRST205")) {
+          setAvailView(false); // brak widoku dostępności (nieuruchomione supabase/goods-available.sql) — lista po staremu
           return;
         }
         if (newCols && (err.code === "42703" || err.code === "PGRST204")) {
@@ -172,7 +186,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
     } finally {
       if (mine === seq.current) setLoading(false);
     }
-  }, [applyFilters, page, pageSize, reloadKey, newCols]);
+  }, [applyFilters, page, pageSize, reloadKey, newCols, availView]);
 
   useEffect(() => {
     load();
@@ -184,7 +198,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
     (async () => {
       const acc: Totals = { price_pln: 0, costs: 0, total_pln: 0, pcc: 0, commission: 0, commission_pcc: 0 };
       for (let from = 0; ; from += 1000) {
-        const { data, error: err } = await applyFilters(supabase.from("goods_register").select(newCols ? "price_pln, costs, total_pln, pcc, commission, commission_pcc" : "price_pln, costs, total_pln, pcc, commission_pcc"))
+        const { data, error: err } = await applyFilters(supabase.from(listTable).select(newCols ? "price_pln, costs, total_pln, pcc, commission, commission_pcc" : "price_pln, costs, total_pln, pcc, commission_pcc"))
           .order("id")
           .range(from, from + 999);
         if (cancelled) return;
@@ -204,7 +218,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
     return () => {
       cancelled = true;
     };
-  }, [applyFilters, reloadKey, newCols]);
+  }, [applyFilters, reloadKey, newCols, listTable]);
 
   // Wartości do list rozwijanych (z licznikami) i liczniki pigułek — raz na rodzaj.
   useEffect(() => {
@@ -213,7 +227,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
       const f: Facets = { category: new Map(), supplier: new Map() };
       const bump = (m: Map<string, number>, v: string | null) => m.set(v ?? NONE, (m.get(v ?? NONE) ?? 0) + 1);
       for (let from = 0; ; from += 1000) {
-        const { data, error: err } = await scopeFilter(supabase.from("goods_register").select("category, supplier, name"), tab).order("id").range(from, from + 999);
+        const { data, error: err } = await withAvail(scopeFilter(supabase.from(listTable).select("category, supplier, name"), tab)).order("id").range(from, from + 999);
         if (cancelled || err) return;
         for (const r of (data as { category: string | null; supplier: string | null; name: string | null }[]) || []) {
           bump(f.category, tab === "skup" ? skuCategoryOf(r.name) || null : r.category);
@@ -226,18 +240,18 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
     return () => {
       cancelled = true;
     };
-  }, [tab, reloadKey]);
+  }, [tab, reloadKey, listTable, availFilter]);
 
   useEffect(() => {
     (async () => {
       const out: Partial<Record<Tab, number>> = {};
       for (const t of TABS) {
-        const { count: c } = await scopeFilter(supabase.from("goods_register").select("id", { count: "exact", head: true }), t.key);
+        const { count: c } = await withAvail(scopeFilter(supabase.from(listTable).select("id", { count: "exact", head: true }), t.key));
         if (c !== null && c !== undefined) out[t.key] = c;
       }
       setTabCounts(out);
     })();
-  }, [reloadKey]);
+  }, [reloadKey, listTable, availFilter]);
 
   async function removeRow(r: Row) {
     if (!confirm(`Usunąć z rejestru pozycję ${r.serial ?? r.name ?? r.id}? Tej operacji nie można cofnąć (zapis zostaje tylko w dzienniku usunięć).`)) return;
@@ -286,15 +300,16 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
       .map(([v, n]) => ({ value: v, label: `${v === NONE ? "— (brak)" : v} (${n})` }));
   const anyFilter = !!(search || category || supplier || serialFilter);
   const showGroup = tab === "all"; // w "Wszystkie" pierwsza kolumna mówi, do której pigułki należy wiersz
-  const colSpan = isSkup ? 18 : (isTradeIn ? 17 : 14) + (showGroup ? 1 : 0) + 1; // kolumna akcji (Edytuj / Usuń)
+  const colSpan = (isSkup ? 18 : (isTradeIn ? 17 : 14) + (showGroup ? 1 : 0) + 1) + (availView ? 1 : 0); // kolumna akcji (Edytuj / Usuń)
   const groupOf = (r: Row) => (r.vat === "V23" ? "V23" : r.kind === "trade_in" ? "Skup" : "VM");
 
   const headers = useMemo(
     () => isSkup ? [
-      "Numer seryjny", "SKU", "Kanał", "Data zakupu", "Nr zamówienia", "Kategoria z SKU", "Cena zakupu", "VAT", "Waluta", "NBP", "Serwis", "Cena + koszty (PLN)", "Cena PLN", "PCC", "Kraj", "Prowizja", "Prowizja + PCC", "",
+      "Numer seryjny", ...(availView ? ["Dostępny"] : []), "SKU", "Kanał", "Data zakupu", "Nr zamówienia", "Kategoria z SKU", "Cena zakupu", "VAT", "Waluta", "NBP", "Serwis", "Cena + koszty (PLN)", "Cena PLN", "PCC", "Kraj", "Prowizja", "Prowizja + PCC", "",
     ] : [
       ...(showGroup ? ["Grupa"] : []),
       "Numer seryjny",
+      ...(availView ? ["Dostępny"] : []),
       "Nazwa",
       "Dostawca",
       "Data zakupu",
@@ -311,7 +326,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
       ...(isTradeIn ? ["PCC", "Kraj", "Prowizja + PCC"] : []),
       "", // kolumna akcji
     ],
-    [isTradeIn, showGroup, isSkup]
+    [isTradeIn, showGroup, isSkup, availView]
   );
 
   return (
@@ -351,6 +366,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
           categories={options(facets?.category).map((o) => o.value).filter((v) => v !== NONE)}
           suppliers={options(facets?.supplier).map((o) => o.value).filter((v) => v !== NONE)}
           onAdded={() => {
+            setAvailFilter("all"); // świeżo dodana pozycja może jeszcze nie być w Fakturowni — pokazujemy wszystkie, żeby było ją widać
             setPage(1);
             setReloadKey((k) => k + 1);
           }}
@@ -378,6 +394,13 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
           <option value="with">Z numerem seryjnym</option>
           <option value="without">Bez numeru seryjnego</option>
         </select>
+        {availView && (
+          <select value={availFilter} onChange={(e) => { setAvailFilter(e.target.value as "yes" | "all" | "no"); setPage(1); }} className={selectCls}>
+            <option value="yes">Dostępność: dostępne</option>
+            <option value="all">Dostępność: wszystkie</option>
+            <option value="no">Dostępność: niedostępne</option>
+          </select>
+        )}
         {anyFilter && (
           <button
             onClick={() => {
@@ -417,7 +440,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
           </thead>
           <tbody>
             {!loading && rows.length === 0 && !error && (
-              <tr><td colSpan={colSpan} className="p-6 text-center text-inksoft text-sm">{anyFilter ? "Nic nie pasuje do filtrów." : "Brak danych — wgraj plik z danymi towaru (patrz supabase/goods.sql)."}</td></tr>
+              <tr><td colSpan={colSpan} className="p-6 text-center text-inksoft text-sm">{anyFilter ? `Nic nie pasuje do filtrów.${availView && availFilter === "yes" ? " Pokazane są tylko dostępne — zmień „Dostępność” na „wszystkie”." : ""}` : availView && availFilter === "yes" ? "Brak dostępnych pozycji — zmień filtr „Dostępność” na „wszystkie”." : "Brak danych — wgraj plik z danymi towaru (patrz supabase/goods.sql)."}</td></tr>
             )}
             {rows.map((r) => (
               <tr key={r.id} className="border-b border-line last:border-b-0 hover:bg-paper align-top">
@@ -426,6 +449,11 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
                   {r.serial ? <button onClick={() => setOpenSerial(r.serial)} className="text-teal hover:underline">{r.serial}</button> : "—"}
                   {r.source === "buyback" && <span className="ml-1.5 text-[9px] font-sans font-semibold text-teal border border-teal rounded px-1" title="Wiersz dopisany automatycznie z opłaconego zamówienia Buyback">auto</span>}
                 </td>
+                {availView && (
+                  <td className="p-2 whitespace-nowrap">
+                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${r.available ? "bg-tealsoft text-teal" : "bg-paper text-inksoft border border-line"}`}>{r.available ? "Tak" : "Nie"}</span>
+                  </td>
+                )}
                 <td className="p-2 min-w-[12rem]">{r.name || "—"}</td>
                 <td className="p-2 whitespace-nowrap">{isSkup || r.supplier === "Buyback" ? (r.supplier ? <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${r.supplier === "Buyback" ? "bg-tealsoft text-teal" : "bg-ambersoft text-amber"}`}>{r.supplier}</span> : "—") : r.supplier || "—"}</td>
                 <td className="p-2 whitespace-nowrap">{fmtDate(r.purchased_on)}</td>
