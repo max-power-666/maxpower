@@ -194,7 +194,9 @@ function chartFamilyOf(variant: string): string {
 
 type FakturowniaSku = { count: number; categories: FakturowniaCategorySummary[]; none: { count: number; value: number } };
 // costs: koszty dodatkowe sztuk w magazynie (dziś tylko Trade-in; kolejne składniki jako kolejne linie) — patrz lib/stockCosts.ts; null = nie udało się policzyć.
-type FakturowniaSummary = { totalCount: number; totalValue: number; sku: FakturowniaSku | null; costs: CostLine[] | null; categories: FakturowniaCategorySummary[] };
+// goods: wartości dostępnych pozycji z rejestru Towar (14.10.2026) — cena PLN i "cena + koszty (PLN)"; null = brak dostępu do Towaru / brak widoku dostępności.
+type GoodsValues = { count: number; pricePln: number; totalPln: number; noPrice: number; noTotal: number };
+type FakturowniaSummary = { totalCount: number; totalValue: number; sku: FakturowniaSku | null; costs: CostLine[] | null; categories: FakturowniaCategorySummary[]; goods: GoodsValues | null };
 
 type Unit = {
   id: string;
@@ -577,6 +579,29 @@ export default function Home() {
     return { count, categories, none };
   }
 
+  // Wartości z zakładki Towar (14.10.2026, na prośbę właściciela): suma "Cena PLN" i "Cena + koszty (PLN)" pozycji DOSTĘPNYCH w Fakturowni (widok
+  // goods_register_available). Dodatek do podsumowania — brak dostępu do Towaru (RLS), brak widoku albo błąd zwraca null i nie blokuje reszty.
+  async function fetchGoodsValues(): Promise<GoodsValues | null> {
+    try {
+      const out: GoodsValues = { count: 0, pricePln: 0, totalPln: 0, noPrice: 0, noTotal: 0 };
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await supabase.from("goods_register_available").select("price_pln, total_pln").eq("available", true).order("id").range(from, from + 999);
+        if (error) return null;
+        for (const r of (data as { price_pln: number | string | null; total_pln: number | string | null }[]) || []) {
+          out.count += 1;
+          if (r.price_pln === null) out.noPrice += 1;
+          else out.pricePln += Number(r.price_pln);
+          if (r.total_pln === null) out.noTotal += 1;
+          else out.totalPln += Number(r.total_pln);
+        }
+        if (!data || data.length < 1000) break;
+      }
+      return out.count > 0 ? out : null;
+    } catch {
+      return null;
+    }
+  }
+
   // Koszty dodatkowe sztuk w magazynie (dziś: Trade-in). Zamówienia BM dopasowujemy po `description` sztuki (numer zamówienia), w paczkach po 60
   // identyfikatorów (limit długości URL); raz pobrane zamówienia zostają w pamięci podręcznej do końca sesji, żeby odświeżenia z realtime
   // nie odpytywały bazy od nowa. Dodatek do podsumowania — błąd zwraca null i nie blokuje reszty.
@@ -646,13 +671,14 @@ export default function Home() {
       totalValue += Number(r.purchase_price_gross) || 0;
     }
 
-    const costs = await fetchStockCosts(rows.map((r) => r.description));
+    const [costs, goods] = await Promise.all([fetchStockCosts(rows.map((r) => r.description)), fetchGoodsValues()]);
     setFakturowniaError("");
     setFakturowniaSummary({
       totalCount,
       totalValue,
       sku,
       costs,
+      goods,
       categories: Array.from(totals.values()).sort((a, b) => b.value - a.value),
     });
     setFakturowniaLastSynced((metaRow?.last_synced_at as string) ?? null);
@@ -912,6 +938,17 @@ function FakturowniaSummaryView({ summary }: { summary: FakturowniaSummary }) {
         <div className="bg-white p-5">
           <div className="text-xs text-inksoft mb-2">ŁĄCZNA WARTOŚĆ (ceny zakupu)</div>
           <div className="text-3xl font-bold font-mono">{fmtPLN(summary.totalValue)}</div>
+          {summary.goods && (
+            <div className="text-xs text-inksoft mt-2">
+              z Towaru (dostępne, {summary.goods.count.toLocaleString("pl-PL")} poz.): cena PLN <span className="font-mono font-semibold text-ink">{fmtPLN(summary.goods.pricePln)}</span>
+              {summary.goods.noPrice > 0 && <span> · {summary.goods.noPrice} bez ceny</span>}
+              {!summary.costs && (
+                <span>
+                  {" · "}cena + koszty <span className="font-mono font-semibold text-ink">{fmtPLN(summary.goods.totalPln)}</span>
+                </span>
+              )}
+            </div>
+          )}
         </div>
         {summary.costs && (
           <>
@@ -938,6 +975,12 @@ function FakturowniaSummaryView({ summary }: { summary: FakturowniaSummary }) {
               <div className="text-xs text-inksoft mt-2">
                 ceny zakupu {fmtPLN(summary.totalValue)} + koszty {fmtPLN(summary.costs.reduce((acc, c) => acc + c.amountPln, 0))}
               </div>
+              {summary.goods && (
+                <div className="text-xs text-inksoft mt-2">
+                  z Towaru (cena + koszty, {summary.goods.count.toLocaleString("pl-PL")} poz.): <span className="font-mono font-semibold text-ink">{fmtPLN(summary.goods.totalPln)}</span>
+                  {summary.goods.noTotal > 0 && <span> · {summary.goods.noTotal} bez sumy</span>}
+                </div>
+              )}
             </div>
           </>
         )}
