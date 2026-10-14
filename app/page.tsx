@@ -195,7 +195,8 @@ function chartFamilyOf(variant: string): string {
 type FakturowniaSku = { count: number; categories: FakturowniaCategorySummary[]; none: { count: number; value: number } };
 // costs: koszty dodatkowe sztuk w magazynie (dziś tylko Trade-in; kolejne składniki jako kolejne linie) — patrz lib/stockCosts.ts; null = nie udało się policzyć.
 // goods: wartości dostępnych pozycji z rejestru Towar (14.10.2026) — cena PLN i "cena + koszty (PLN)"; null = brak dostępu do Towaru / brak widoku dostępności.
-type GoodsValues = { count: number; pricePln: number; totalPln: number; noPrice: number; noTotal: number };
+// servicePln = kolumna Serwis, commissionPln = Prowizja (10% + logistyka; dla wierszy z arkusza prowizja + PCC − PCC), pccPln = PCC.
+type GoodsValues = { count: number; pricePln: number; totalPln: number; noPrice: number; noTotal: number; servicePln: number; commissionPln: number; pccPln: number };
 type FakturowniaSummary = { totalCount: number; totalValue: number; sku: FakturowniaSku | null; costs: CostLine[] | null; categories: FakturowniaCategorySummary[]; goods: GoodsValues | null };
 
 type Unit = {
@@ -583,18 +584,33 @@ export default function Home() {
   // goods_register_available). Dodatek do podsumowania — brak dostępu do Towaru (RLS), brak widoku albo błąd zwraca null i nie blokuje reszty.
   async function fetchGoodsValues(): Promise<GoodsValues | null> {
     try {
-      const out: GoodsValues = { count: 0, pricePln: 0, totalPln: 0, noPrice: 0, noTotal: 0 };
+      const out: GoodsValues = { count: 0, pricePln: 0, totalPln: 0, noPrice: 0, noTotal: 0, servicePln: 0, commissionPln: 0, pccPln: 0 };
+      type R = { price_pln: number | string | null; total_pln: number | string | null; costs: number | string | null; pcc: number | string | null; commission?: number | string | null; commission_pcc: number | string | null };
+      let withCommission = true; // kolumna commission pojawia się po uruchomieniu goods-buyback.sql (+ ponownym goods-available.sql)
       for (let from = 0; ; from += 1000) {
-        const { data, error } = await supabase.from("goods_register_available").select("price_pln, total_pln").eq("available", true).order("id").range(from, from + 999);
-        if (error) return null;
-        for (const r of (data as { price_pln: number | string | null; total_pln: number | string | null }[]) || []) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const run = (cols: string): PromiseLike<{ data: any; error: { message: string } | null }> =>
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (supabase.from("goods_register_available") as any).select(cols).eq("available", true).order("id").range(from, from + 999);
+        let res = await run(withCommission ? "price_pln, total_pln, costs, pcc, commission, commission_pcc" : "price_pln, total_pln, costs, pcc, commission_pcc");
+        if (res.error && withCommission) {
+          withCommission = false;
+          res = await run("price_pln, total_pln, costs, pcc, commission_pcc");
+        }
+        if (res.error) return null;
+        for (const r of ((res.data as unknown) as R[]) || []) {
           out.count += 1;
           if (r.price_pln === null) out.noPrice += 1;
           else out.pricePln += Number(r.price_pln);
           if (r.total_pln === null) out.noTotal += 1;
           else out.totalPln += Number(r.total_pln);
+          out.servicePln += Number(r.costs ?? 0);
+          const pcc = Number(r.pcc ?? 0);
+          out.pccPln += pcc;
+          const comm = r.commission ?? (r.commission_pcc !== null && r.commission_pcc !== undefined ? Number(r.commission_pcc) - pcc : 0);
+          out.commissionPln += Number(comm ?? 0);
         }
-        if (!data || data.length < 1000) break;
+        if (!res.data || res.data.length < 1000) break;
       }
       return out.count > 0 ? out : null;
     } catch {
@@ -803,7 +819,7 @@ export default function Home() {
               <OverviewMarginChart session={session} />
               <div className="grid grid-cols-4 gap-px bg-line border border-line">
                 <div className="bg-white p-5"><div className="text-xs text-inksoft mb-2">URZĄDZENIA</div><div className="text-3xl font-bold font-mono">{(fakturowniaSummary?.totalCount ?? 0).toLocaleString("pl-PL")}</div></div>
-                <div className="bg-white p-5"><div className="text-xs text-inksoft mb-2">WARTOŚĆ MAGAZYNU</div><div className="text-3xl font-bold font-mono">{fmtPLN(fakturowniaSummary?.totalValue ?? 0)}</div></div>
+                <div className="bg-white p-5"><div className="text-xs text-inksoft mb-2">WARTOŚĆ MAGAZYNU</div><div className="text-3xl font-bold font-mono">{fmtPLN(fakturowniaSummary?.goods?.pricePln ?? fakturowniaSummary?.totalValue ?? 0)}</div></div>
                 <div className="bg-white p-5"><div className="text-xs text-inksoft mb-2">GOTOWE DO SPRZEDAŻY</div><div className="text-3xl font-bold font-mono">{ready}</div></div>
                 <div className="bg-white p-5"><div className="text-xs text-inksoft mb-2">W NAPRAWIE</div><div className="text-3xl font-bold font-mono">{units.filter((u) => u.status === "W naprawie").length}</div></div>
               </div>
@@ -935,54 +951,82 @@ function FakturowniaSummaryView({ summary }: { summary: FakturowniaSummary }) {
             </div>
           )}
         </div>
+        {/* Wartości z rejestru Towar (14.10.2026, na prośbę właściciela): to "rzeczywiste" liczby magazynu (cena PLN + serwis + prowizja/logistyka + PCC) dla pozycji
+            dostępnych w Fakturowni. Bez dostępu do Towaru (albo bez widoku) kafelki wracają do liczb z samej Fakturowni. */}
         <div className="bg-white p-5">
           <div className="text-xs text-inksoft mb-2">ŁĄCZNA WARTOŚĆ (ceny zakupu)</div>
-          <div className="text-3xl font-bold font-mono">{fmtPLN(summary.totalValue)}</div>
-          {summary.goods && (
-            <div className="text-xs text-inksoft mt-2">
-              z Towaru (dostępne, {summary.goods.count.toLocaleString("pl-PL")} poz.): cena PLN <span className="font-mono font-semibold text-ink">{fmtPLN(summary.goods.pricePln)}</span>
-              {summary.goods.noPrice > 0 && <span> · {summary.goods.noPrice} bez ceny</span>}
-              {!summary.costs && (
-                <span>
-                  {" · "}cena + koszty <span className="font-mono font-semibold text-ink">{fmtPLN(summary.goods.totalPln)}</span>
-                </span>
-              )}
-            </div>
-          )}
+          <div className="text-3xl font-bold font-mono">{fmtPLN(summary.goods ? summary.goods.pricePln : summary.totalValue)}</div>
+          <div className="text-xs text-inksoft mt-2">
+            {summary.goods ? (
+              <>
+                z Towaru, {summary.goods.count.toLocaleString("pl-PL")} dostępnych pozycji
+                {summary.goods.noPrice > 0 && <span> · {summary.goods.noPrice} bez ceny</span>}
+              </>
+            ) : (
+              "z Fakturowni (stan = 1)"
+            )}
+          </div>
         </div>
-        {summary.costs && (
+        {summary.goods ? (
           <>
             <div className="bg-white p-5">
-              <div className="text-xs text-inksoft mb-2">KOSZTY DODATKOWE (dziś tylko Trade-in)</div>
+              <div className="text-xs text-inksoft mb-2">KOSZTY DODATKOWE</div>
               <div className="text-sm space-y-2">
-                {summary.costs.map((c) => (
-                  <div key={c.key}>
-                    <div className="flex justify-between gap-4">
-                      <span>{c.label}</span>
-                      <span className="font-mono font-semibold">{fmtPLN(c.amountPln)}</span>
-                    </div>
-                    <div className="text-[11px] text-inksoft">{c.detail}</div>
-                  </div>
-                ))}
+                <div className="flex justify-between gap-4">
+                  <span>Serwis (części przypisane do numeru seryjnego)</span>
+                  <span className="font-mono font-semibold">{fmtPLN(summary.goods.servicePln)}</span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span>Prowizja Back Market 10% + logistyka</span>
+                  <span className="font-mono font-semibold">{fmtPLN(summary.goods.commissionPln)}</span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span>PCC (2% od wartości powyżej 1000 zł)</span>
+                  <span className="font-mono font-semibold">{fmtPLN(summary.goods.pccPln)}</span>
+                </div>
               </div>
               <div className="text-[11px] text-inksoft mt-3">
-                Wg regulaminu Back Market (netto, EUR → PLN kursem NBP z dnia poprzedniego). Jeszcze bez kosztów części, podatku PCC i in.
+                Z rejestru Towar (pozycje dostępne). Prowizja i logistyka wg regulaminu Back Market, EUR → PLN kursem NBP z dnia poprzedniego względem płatności — szacunek, nie faktura.
               </div>
             </div>
             <div className="bg-white p-5">
               <div className="text-xs text-inksoft mb-2">ŁĄCZNA WARTOŚĆ + KOSZTY</div>
-              <div className="text-3xl font-bold font-mono">{fmtPLN(summary.totalValue + summary.costs.reduce((acc, c) => acc + c.amountPln, 0))}</div>
+              <div className="text-3xl font-bold font-mono">{fmtPLN(summary.goods.totalPln)}</div>
               <div className="text-xs text-inksoft mt-2">
-                ceny zakupu {fmtPLN(summary.totalValue)} + koszty {fmtPLN(summary.costs.reduce((acc, c) => acc + c.amountPln, 0))}
+                ceny zakupu {fmtPLN(summary.goods.pricePln)} + koszty {fmtPLN(summary.goods.totalPln - summary.goods.pricePln)}
+                {summary.goods.noTotal > 0 && <span> · {summary.goods.noTotal} pozycji bez sumy</span>}
               </div>
-              {summary.goods && (
-                <div className="text-xs text-inksoft mt-2">
-                  z Towaru (cena + koszty, {summary.goods.count.toLocaleString("pl-PL")} poz.): <span className="font-mono font-semibold text-ink">{fmtPLN(summary.goods.totalPln)}</span>
-                  {summary.goods.noTotal > 0 && <span> · {summary.goods.noTotal} bez sumy</span>}
-                </div>
-              )}
             </div>
           </>
+        ) : (
+          summary.costs && (
+            <>
+              <div className="bg-white p-5">
+                <div className="text-xs text-inksoft mb-2">KOSZTY DODATKOWE (dziś tylko Trade-in)</div>
+                <div className="text-sm space-y-2">
+                  {summary.costs.map((c) => (
+                    <div key={c.key}>
+                      <div className="flex justify-between gap-4">
+                        <span>{c.label}</span>
+                        <span className="font-mono font-semibold">{fmtPLN(c.amountPln)}</span>
+                      </div>
+                      <div className="text-[11px] text-inksoft">{c.detail}</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="text-[11px] text-inksoft mt-3">
+                  Wg regulaminu Back Market (netto, EUR → PLN kursem NBP z dnia poprzedniego). Bez kosztów serwisu.
+                </div>
+              </div>
+              <div className="bg-white p-5">
+                <div className="text-xs text-inksoft mb-2">ŁĄCZNA WARTOŚĆ + KOSZTY</div>
+                <div className="text-3xl font-bold font-mono">{fmtPLN(summary.totalValue + summary.costs.reduce((acc, c) => acc + c.amountPln, 0))}</div>
+                <div className="text-xs text-inksoft mt-2">
+                  ceny zakupu {fmtPLN(summary.totalValue)} + koszty {fmtPLN(summary.costs.reduce((acc, c) => acc + c.amountPln, 0))}
+                </div>
+              </div>
+            </>
+          )
         )}
       </div>
 
