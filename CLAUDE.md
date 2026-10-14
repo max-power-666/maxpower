@@ -322,7 +322,7 @@ dla zalogowanych (zapisuje wyłącznie trigger jako security definer; brak polit
 `tradein.sql` — wcześniejszych zmian nie odtworzy (np. dwie zmiany cen PS4P z 02.10.2026, zrobione bezpośrednio w bazie, w nim nie ma). `TradeInView`
 dostaje `members` z `page.tsx` (do skróconych imion).
 
-**Trade-in** (zakładka Trade-in, `TradeInHub.tsx`) — dwa podwidoki:
+**Trade-in** (zakładka Trade-in, `TradeInHub.tsx`) — trzy podwidoki (Wprowadzanie, Raw data, BB_DW):
 - *Raw data* (`TradeInOrdersView.tsx`): podgląd zsynchronizowanych zamówień BuyBack (`buyback_orders`, sync co 15 min
   z `GET /ws/buyback/v1/orders`: pełny skan od 1 stycznia przez `creationDate` w porcjach z kursorem,
   potem przyrostowo przez `modificationDate` — łapie nowe i zmiany statusu). Zapis tylko serwer. Lista jest
@@ -339,6 +339,7 @@ dostaje `members` z `page.tsx` (do skróconych imion).
   Nad listą kafelki **Zamówienia dzisiaj / wczoraj** (`TradeInDaySummary`, po dacie utworzenia, podział na rynek
   DE/ES/FR/IT zamiast marketplace'u — analogiczny wzorzec do `DaySummary` w `SalesOrdersHub.tsx`, ale bez filtrowania
   statusów, bo to skup, nie sprzedaż).
+- *BB_DW* (14.10.2026, na prośbę właściciela; `TradeInPaidView.tsx`): trzecia pigułka — lista OPŁACONYCH zamówień Buyback (status VALIDATED / PAID / MONEY_TRANSFERED, `TRADEIN_PAID_STATUSES`; na dzień wdrożenia ok. 7 tys.) do dokumentów wewnętrznych. **Kolumny:** numer zamówienia (link do karty), data płatności (`payment_date`; gdy BM jej nie podał — data utworzenia z gwiazdką; 9 zamówień), **numer seryjny** (z wpisu pracownika w Wprowadzaniu, `buyback_order_intake.serial_number`; "—", gdy nikt go jeszcze nie przypisał), **cena zakupu** (po kontrofercie, jeśli była — `counter_offer_price ?? original_price`), **koszty** (prowizja BM 10% + opłata logistyczna wg regulaminu i kategorii, `computeTradeInCosts`; pod kwotą rozbicie "prowizja + logistyka") i **suma** = cena + koszty. Kwoty w walucie zamówienia (EUR). **PCC NIE wchodzi do kosztów** (właściciel wymienił tylko prowizję i logistykę; w Magazynie/Marży PCC dalej jest). Zamówienie, dla którego nie da się policzyć logistyki (nierozpoznana kategoria albo waluta inna niż EUR), ma "—" w kosztach i sumie i nie wchodzi do sum na dole. Cała lista wczytywana raz (stronami po 1000) i filtrowana w przeglądarce: lista miesięcy wg daty płatności (czas polski), wyszukiwarka (numer zamówienia / numer seryjny), strona 50/100/200, pasek sum całego wyniku filtra (zamówień, cena zakupu, koszty, suma — osobno dla każdej waluty; liczba bez seryjnego i bez policzonych kosztów) oraz "Pobierz CSV" (średniki, BOM, to co na ekranie). Dostęp jak reszta Trade-in (Admin, Manager, Księgowa, Trade-in). Bez zmian w bazie. Nie klikane z prawdziwym logowaniem (tsc + sprawdzone zapytania na żywej bazie).
 - *Wprowadzanie*: obsługa paczek przez pracowników. Pracownik podaje numer zamówienia LUB
   przesyłki, aplikacja znajduje zamówienie (`buyback_order_intake`, unikalne na
   `order_public_id` — ta sama paczka nie zaliczy się dwa razy). Status:

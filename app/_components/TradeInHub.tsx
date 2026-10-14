@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import TradeInOrdersView from "./TradeInOrdersView";
+import TradeInPaidView from "./TradeInPaidView";
 import InlineEditCell from "./InlineEditCell";
 import PadSerialsCell, { MAX_PADS } from "./PadSerialsCell";
 import DefectsCell from "./DefectsCell";
@@ -161,7 +162,7 @@ export default function TradeInHub({
   isAdmin: boolean;
   isAdminOrManager: boolean;
 }) {
-  const [sub, setSub] = useState<"intake" | "raw">("intake");
+  const [sub, setSub] = useState<"intake" | "raw" | "dw">("intake");
   const [openOrderId, setOpenOrderId] = useState<string | null>(null);
 
   return (
@@ -169,6 +170,7 @@ export default function TradeInHub({
       <div className="flex gap-2 mb-4">
         <button onClick={() => setSub("intake")} className={pill(sub === "intake")}>Wprowadzanie</button>
         <button onClick={() => setSub("raw")} className={pill(sub === "raw")}>Raw data</button>
+        <button onClick={() => setSub("dw")} className={pill(sub === "dw")}>BB_DW</button>
       </div>
 
       {sub === "intake" && <IntakeView
@@ -179,6 +181,7 @@ export default function TradeInHub({
           onOpenOrder={setOpenOrderId}
         />}
       {sub === "raw" && <TradeInOrdersView session={session} onOpenOrder={setOpenOrderId} />}
+      {sub === "dw" && <TradeInPaidView onOpenOrder={setOpenOrderId} />}
 
       {openOrderId && (
         <OrderCardDrawer orderPublicId={openOrderId} session={session} members={members} onClose={() => setOpenOrderId(null)} />
