@@ -2,7 +2,9 @@
 -- Wymaga istniejących tabel margin.sql (bm_invoice_lines itd.) oraz goods_register (goods.sql). Idempotentna.
 set lock_timeout = '5s';
 
-create or replace view margin_items as
+-- widok czyta tylko service_role i nic nie zależy od niego w bazie — można go bezpiecznie przebudować od zera
+drop view if exists margin_items;
+create view margin_items as
 with order_agg as (
   select marketplace, external_id, sum(price) as order_total, count(*) as order_items
   from sales_order_items group by marketplace, external_id
@@ -58,7 +60,7 @@ join order_agg oa on oa.marketplace = it.marketplace and oa.external_id = it.ext
 -- bierzemy zakup sprzed zamówienia, najnowszy. Wiersze V23 mają w Towarze cenę NETTO (kolumna purchase_is_net) — wcześniej Fakturownia podawała brutto.
 -- Numery porównujemy bez zer wiodących (część numerów w Towarze straciła je przy imporcie z arkusza). Fakturownia nie jest już źródłem ceny zakupu w Marży.
 left join lateral (
-  select g.price_pln as purchase_price_gross,
+  select g.price_pln::numeric as purchase_price_gross, -- ::numeric bez precyzji: widok miał kolumnę numeric, a price_pln to numeric(12,2) (create or replace view nie zmienia typu kolumny)
          g.order_no as description,
          nullif(btrim(g.vat), '') as vat,
          (upper(nullif(btrim(g.vat), '')) = 'V23') as is_net

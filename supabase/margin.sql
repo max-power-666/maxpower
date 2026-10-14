@@ -114,7 +114,7 @@ join order_agg oa on oa.marketplace = it.marketplace and oa.external_id = it.ext
 -- bierzemy zakup sprzed zamówienia, najnowszy. Wiersze V23 mają w Towarze cenę NETTO (kolumna purchase_is_net) — wcześniej Fakturownia podawała brutto.
 -- Numery porównujemy bez zer wiodących (część numerów w Towarze straciła je przy imporcie z arkusza). Fakturownia nie jest już źródłem ceny zakupu w Marży.
 left join lateral (
-  select g.price_pln as purchase_price_gross,
+  select g.price_pln::numeric as purchase_price_gross, -- ::numeric bez precyzji: widok miał kolumnę numeric, a price_pln to numeric(12,2) (create or replace view nie zmienia typu kolumny)
          g.order_no as description,
          nullif(btrim(g.vat), '') as vat,
          (upper(nullif(btrim(g.vat), '')) = 'V23') as is_net
