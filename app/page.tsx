@@ -229,7 +229,7 @@ function productGroupOf(skuCategory: string | null, categories: (string | null |
   return "Inne";
 }
 
-type FakturowniaSku = { count: number; categories: FakturowniaCategorySummary[]; none: { count: number; value: number }; groups: FakturowniaCategorySummary[] };
+type FakturowniaSku = { count: number; categories: FakturowniaCategorySummary[]; none: { count: number; value: number }; groups: FakturowniaCategorySummary[]; total: number; totalValue: number; fromTowar: boolean };
 // costs: koszty dodatkowe sztuk w magazynie (dziś tylko Trade-in; kolejne składniki jako kolejne linie) — patrz lib/stockCosts.ts; null = nie udało się policzyć.
 // goods: wartości dostępnych pozycji z rejestru Towar (14.10.2026) — cena PLN i "cena + koszty (PLN)"; null = brak dostępu do Towaru / brak widoku dostępności.
 // servicePln = kolumna Serwis, commissionPln = Prowizja (10% + logistyka; dla wierszy z arkusza prowizja + PCC − PCC), pccPln = PCC.
@@ -557,6 +557,51 @@ export default function Home() {
     } catch {
       /* Towar niedostępny — wykres bez dodatkowych danych */
     }
+    // Populacja wykresów (14.10.2026): gdy jest dostęp do Towaru, wykresy liczą POZYCJE DOSTĘPNE Z TOWARU (cena PLN z rejestru) — te same liczby co kafelki wartości;
+    // klasyfikację (SKU, kategoria z Fakturowni) bierzemy z dopasowanej sztuki magazynowej. Bez Towaru zostaje stary rachunek z cen Fakturowni.
+    type Item = { textName: string | null; skuCategory: string | null; categoryName: string | null; value: number; goods: { name: string | null; category: string | null }[] };
+    const normKey = (t: string) => t.trim().toLowerCase().replace(/^0+/, "");
+    const stockKeys = (nm: string | null): string[] => {
+      const t = (nm || "").trim();
+      const out = new Set<string>([normKey(t)]);
+      out.add(normKey(t.replace(/\s+/g, " ").split(" ")[0] || ""));
+      const par = /\(([A-Za-z0-9]+)\)\s*$/.exec(t);
+      if (par) out.add(normKey(par[1]));
+      const last = /([A-Za-z0-9]+)$/.exec(t);
+      if (last) out.add(normKey(last[1]));
+      return Array.from(out).filter(Boolean);
+    };
+    let towarItems: Item[] | null = null;
+    try {
+      const avail: { serial: string | null; name: string | null; category: string | null; price_pln: number | string | null }[] = [];
+      let okAll = true;
+      for (let aFrom = 0; ; aFrom += PAGE) {
+        const { data: a, error: aErr } = await supabase.from("goods_register_available").select("serial, name, category, price_pln").eq("available", true).order("id").range(aFrom, aFrom + PAGE - 1);
+        if (aErr) {
+          okAll = false;
+          break;
+        }
+        avail.push(...((a as typeof avail) || []));
+        if (!a || a.length < PAGE) break;
+      }
+      if (okAll && avail.length > 0) {
+        const stockIdx = new Map<string, (typeof rows)[number]>();
+        for (const r of rows) for (const k of stockKeys(r.name)) if (!stockIdx.has(k)) stockIdx.set(k, r);
+        towarItems = avail.map((g) => {
+          const st = stockIdx.get(normKey(g.serial || ""));
+          return {
+            textName: g.name || st?.name || null,
+            skuCategory: st?.sku_category ?? null,
+            categoryName: st?.category_name ?? null,
+            value: Number(g.price_pln) || 0,
+            goods: [{ name: g.name, category: g.category }],
+          };
+        });
+      }
+    } catch {
+      towarItems = null;
+    }
+    const items: Item[] = towarItems ?? rows.map((r) => ({ textName: r.name, skuCategory: r.sku_category, categoryName: r.category_name, value: Number(r.purchase_price_gross) || 0, goods: goodsBySerial.get((r.name || "").trim().toUpperCase()) ?? [] }));
     const looksLikeSku = (n: string | null) => !!n && !/\s/.test(n.trim()) && n.includes("-");
     const goodsCategoryLabel = (c: string | null) => {
       const t = (c || "").trim().replace(/\d+$/, "").trim();
@@ -569,11 +614,11 @@ export default function Home() {
     const none = { count: 0, value: 0 };
     let count = 0;
     const groupTotals = new Map<string, FakturowniaCategorySummary>();
-    for (const r of rows) {
-      const value = Number(r.purchase_price_gross) || 0;
-      let category = r.sku_category;
+    for (const r of items) {
+      const value = r.value;
+      let category = r.skuCategory;
       let hasSku = !!category;
-      const g = goodsBySerial.get((r.name || "").trim().toUpperCase()) ?? [];
+      const g = r.goods;
       if (!category) {
         const skuRow = g.find((x) => looksLikeSku(x.name));
         if (skuRow) {
@@ -586,7 +631,7 @@ export default function Home() {
         }
       }
       // grupa produktów (wykres ogólny): SKU (z widoku albo z Towaru) > kategoria z Fakturowni > kategoria z Towaru
-      const grp = productGroupOf(category && !category.includes("(Towar)") ? category : null, [r.category_name, ...g.map((x) => x.category)], r.name);
+      const grp = productGroupOf(category && !category.includes("(Towar)") ? category : null, [r.categoryName, ...g.map((x) => x.category)], r.textName);
       const ge = groupTotals.get(grp) || { name: grp, count: 0, value: 0 };
       ge.count += 1;
       ge.value += value;
@@ -623,7 +668,7 @@ export default function Home() {
       .sort((a, b) => b.value - a.value);
     const order = [...PRODUCT_GROUPS, "Inne"] as string[];
     const groups = Array.from(groupTotals.values()).sort((a, b) => b.value - a.value || order.indexOf(a.name) - order.indexOf(b.name));
-    return { count, categories, none, groups };
+    return { count, categories, none, groups, total: items.length, totalValue: items.reduce((a, i) => a + i.value, 0), fromTowar: towarItems !== null };
   }
 
   // Wartości z zakładki Towar (14.10.2026, na prośbę właściciela): suma "Cena PLN" i "Cena + koszty (PLN)" pozycji DOSTĘPNYCH w Fakturowni (widok
@@ -864,7 +909,7 @@ export default function Home() {
               <OverviewSalesDashboard session={session} />
               <OverviewMarginChart session={session} />
               <div className="grid grid-cols-4 gap-px bg-line border border-line">
-                <div className="bg-white p-5"><div className="text-xs text-inksoft mb-2">URZĄDZENIA</div><div className="text-3xl font-bold font-mono">{(fakturowniaSummary?.totalCount ?? 0).toLocaleString("pl-PL")}</div></div>
+                <div className="bg-white p-5"><div className="text-xs text-inksoft mb-2">URZĄDZENIA</div><div className="text-3xl font-bold font-mono">{(fakturowniaSummary?.goods?.count ?? fakturowniaSummary?.totalCount ?? 0).toLocaleString("pl-PL")}</div></div>
                 <div className="bg-white p-5"><div className="text-xs text-inksoft mb-2">WARTOŚĆ MAGAZYNU</div><div className="text-3xl font-bold font-mono">{fmtPLN(fakturowniaSummary?.goods?.pricePln ?? fakturowniaSummary?.totalValue ?? 0)}</div></div>
                 <div className="bg-white p-5"><div className="text-xs text-inksoft mb-2">GOTOWE DO SPRZEDAŻY</div><div className="text-3xl font-bold font-mono">{ready}</div></div>
                 <div className="bg-white p-5"><div className="text-xs text-inksoft mb-2">W NAPRAWIE</div><div className="text-3xl font-bold font-mono">{units.filter((u) => u.status === "W naprawie").length}</div></div>
@@ -988,13 +1033,13 @@ function FakturowniaSummaryView({ summary }: { summary: FakturowniaSummary }) {
     <div>
       <div className="grid grid-cols-2 gap-px bg-line border border-line mb-6">
         <div className="bg-white p-5">
-          <div className="text-xs text-inksoft mb-2">DOSTĘPNE PRODUKTY (stan = 1)</div>
-          <div className="text-3xl font-bold font-mono">{summary.totalCount.toLocaleString("pl-PL")}</div>
+          <div className="text-xs text-inksoft mb-2">DOSTĘPNE PRODUKTY {summary.goods ? "(z Towaru)" : "(stan = 1)"}</div>
+          <div className="text-3xl font-bold font-mono">{(summary.goods?.count ?? summary.totalCount).toLocaleString("pl-PL")}</div>
           {summary.sku !== null && (
             <div className="text-xs text-inksoft mt-2">
               z SKU: <span className="font-semibold text-ink">{summary.sku.count.toLocaleString("pl-PL")}</span>
-              {summary.totalCount > 0 && ` (${Math.round((summary.sku.count / summary.totalCount) * 100)}%)`}
-              {" · "}bez SKU: <span className="font-semibold text-ink">{(summary.totalCount - summary.sku.count).toLocaleString("pl-PL")}</span>
+              {(summary.sku.total || summary.totalCount) > 0 && ` (${Math.round((summary.sku.count / (summary.sku.total || summary.totalCount)) * 100)}%)`}
+              {" · "}bez SKU: <span className="font-semibold text-ink">{((summary.sku.total || summary.totalCount) - summary.sku.count).toLocaleString("pl-PL")}</span>
             </div>
           )}
         </div>
@@ -1087,14 +1132,14 @@ function FakturowniaSummaryView({ summary }: { summary: FakturowniaSummary }) {
           <CategoryBreakdown
             title={summary.sku ? "WG GRUP PRODUKTÓW" : "WG KATEGORII Z FAKTUROWNI"}
             categories={summary.sku ? summary.sku.groups : summary.categories}
-            totalValue={summary.totalValue}
+            totalValue={summary.sku ? summary.sku.totalValue : summary.totalValue}
             note={summary.sku ? "Konsole (NS, PS4, PS5, XOS, XSX…), Apple Watch, Aparat, Samsung Watch, iPad, iPhone, Samsung, Macbook, Audio. Grupa wynika z SKU, a gdy go brak — z kategorii w Fakturowni / Towarze." : undefined}
           />
           {summary.sku ? (
             <CategoryBreakdown
               title="WG KATEGORII Z SKU"
               categories={summary.sku.categories}
-              totalValue={summary.totalValue}
+              totalValue={summary.sku.totalValue}
               none={summary.sku.none}
               maxRows={FAKTUROWNIA_PALETTE.length * 2}
               pinned={SKU_CHART_PINNED}
