@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Magazyn ERP",
+  title: "Recoo ERP",
   description: "Wewnętrzny system magazynowy",
 };
 
