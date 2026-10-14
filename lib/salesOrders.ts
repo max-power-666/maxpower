@@ -64,6 +64,16 @@ function bucketOrFilter(map: Record<string, string[]>): string {
     .map(([mp, statuses]) => (statuses.length === 1 ? `and(marketplace.eq.${mp},status.eq.${statuses[0]})` : `and(marketplace.eq.${mp},status.in.(${statuses.join(",")}))`))
     .join(",");
 }
+// Zamówienia JESZCZE NIEOPŁACONE (14.10.2026, na prośbę właściciela — "jako nowe pokazujemy tylko opłacone zamówienia"): zostają w "Wszystkie", ale NIE w "Nowe".
+// Amazon: Pending (oczekuje na płatność) i PendingAvailability; Allegro: BOUGHT / FILLED_IN; Back Market: 0 (weryfikacja płatności), 10, 8 (nieopłacone);
+// Erli pending jest ukryte z listy w całości (OrdersList). To samo co części "nieopłacone" w NOT_COUNTED poniżej.
+const UNPAID_STATUS: Record<string, string[]> = {
+  backmarket: ["0", "10", "8"],
+  allegro: ["BOUGHT", "FILLED_IN"],
+  erli: ["pending"],
+  amazon: ["Pending", "PendingAvailability"],
+};
+export const unpaidOrFilter = () => bucketOrFilter(UNPAID_STATUS);
 export const shippedOrFilter = () => bucketOrFilter(SHIPPED_STATUS);
 export const cancelledOrFilter = () => bucketOrFilter(CANCELLED_STATUS);
 
@@ -589,6 +599,7 @@ const NOT_COUNTED: Record<string, string[]> = {
   erli: ["cancelled", "returned", "pending"],
   allegro: ["CANCELLED", "BOUGHT", "FILLED_IN", "RETURNED"],
   octopia: ["Cancelled", "Rejected", "Refused"], // brakujący wpis do 30.09.2026 — te statusy liczyły się jak żywe zamówienia
+  amazon: ["Canceled", "Pending", "PendingAvailability"], // anulowane i jeszcze nieopłacone (14.10.2026; wcześniej Amazon nie miał tu wpisu)
   swopify: ["CANCELLED"],
 };
 

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
-import { MARKETPLACES, STATUS_BUCKETS, shippedOrFilter, cancelledOrFilter, salesStatusLabel, startOfYesterdayIso, summarizeDays, type DayCount, type StatusBucket } from "@/lib/salesOrders";
+import { MARKETPLACES, STATUS_BUCKETS, shippedOrFilter, cancelledOrFilter, unpaidOrFilter, salesStatusLabel, startOfYesterdayIso, summarizeDays, type DayCount, type StatusBucket } from "@/lib/salesOrders";
 import { escapeLike } from "@/lib/search";
 import { type MemberLite } from "@/lib/displayName";
 import type { ShipPrefill } from "@/lib/shipping";
@@ -491,7 +491,7 @@ function OrdersList({
     // biblioteki) — sprawdzone bezpośrednio na żywej bazie, że daje poprawny, zweryfikowany wynik.
     if (statusFilter === "wyslane") q = q.or(shippedOrFilter());
     else if (statusFilter === "anulowane") q = q.or(cancelledOrFilter());
-    else if (statusFilter === "nowe") q = q.or(`${shippedOrFilter()},${cancelledOrFilter()}`, { foreignTable: "not" });
+    else if (statusFilter === "nowe") q = q.or(`${shippedOrFilter()},${cancelledOrFilter()},${unpaidOrFilter()}`, { foreignTable: "not" }); // "Nowe" = tylko opłacone (14.10.2026)
     if (marketplaceFilter !== "wszystkie") q = q.eq("marketplace", marketplaceFilter);
     // Erli: dopóki zamówienie nie jest opłacone (albo za pobraniem), na liście tylko zaśmieca "Nowe" — klient może
     // się jeszcze rozmyślić i nigdy nie zapłacić. Pokazujemy je dopiero, gdy status to "Opłacone"/"Za pobraniem"/

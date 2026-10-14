@@ -59,6 +59,7 @@ language sql immutable as $$
     or (p_marketplace = 'erli' and p_status in ('cancelled', 'returned', 'pending'))
     or (p_marketplace = 'allegro' and p_status in ('CANCELLED', 'BOUGHT', 'FILLED_IN', 'RETURNED'))
     or (p_marketplace = 'octopia' and p_status in ('Cancelled', 'Rejected', 'Refused'))
+    or (p_marketplace = 'amazon' and p_status in ('Canceled', 'Pending', 'PendingAvailability'))
     or (p_marketplace = 'swopify' and p_status in ('CANCELLED'))
   )
 $$;
