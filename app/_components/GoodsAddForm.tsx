@@ -253,7 +253,7 @@ export default function GoodsAddForm({
       name: f.name.trim() || null,
       supplier: f.supplier.trim() || null,
       purchased_on: f.purchased_on,
-      delivered_on: /^\d{4}-\d{2}-\d{2}$/.test(f.delivered_on) ? f.delivered_on : null,
+      delivered_on: !isEdit && isTradeIn ? null : /^\d{4}-\d{2}-\d{2}$/.test(f.delivered_on) ? f.delivered_on : null, // Skup nie ma daty dostawy (14.10.2026)
       order_no: f.order_no.trim() || null,
       invoice_no: f.invoice_no.trim() || null,
       category: f.category.trim() || null,
@@ -270,14 +270,23 @@ export default function GoodsAddForm({
       row.pcc = clean(pcc);
       row.country = country.trim().toUpperCase() || null;
       row.commission_pcc = clean(commissionPcc);
+      // Prowizja (PLN) = prowizja + PCC − PCC (kolumna "Prowizja" w Skupie; zapisywana, żeby suma zawsze się zgadzała z "Prowizja + PCC")
+      const cp = clean(commissionPcc);
+      const pc = clean(pcc);
+      row.commission = cp !== null && pc !== null ? Math.round((cp - pc) * 100) / 100 : null;
     } else if (isEdit) {
       // zmiana grupy ze Skupu na VM/V23: pola tylko-Skupowe wyczyszczone (jak przy przenoszeniu "recykling" wcześniej)
       row.pcc = null;
       row.country = null;
       row.commission_pcc = null;
+      row.commission = null;
     }
     if (edit) {
-      const { data: upd, error: updErr } = await supabase.from("goods_register").update(row).eq("id", edit.id).select("id");
+      let { data: upd, error: updErr } = await supabase.from("goods_register").update(row).eq("id", edit.id).select("id");
+      if (updErr && (updErr.code === "PGRST204" || updErr.code === "42703") && "commission" in row) {
+        delete row.commission; // baza bez kolumny commission (nieuruchomione supabase/goods-buyback.sql) — zapis bez niej
+        ({ data: upd, error: updErr } = await supabase.from("goods_register").update(row).eq("id", edit.id).select("id"));
+      }
       setSaving(false);
       if (updErr) return setError(updErr.code === "PGRST204" || updErr.code === "42703" ? "Baza nie ma jeszcze kolumn edycji — uruchom ponownie supabase/goods.sql w Supabase." : `Nie udało się zapisać: ${updErr.message}`);
       if (!upd || upd.length === 0) return setError("Nie zapisano — brak uprawnień do edycji (potrzebny dostęp do zakładki Towar) albo wiersz już nie istnieje.");
@@ -285,7 +294,11 @@ export default function GoodsAddForm({
       onClose();
       return;
     }
-    const { error: err } = await supabase.from("goods_register").insert(row);
+    let { error: err } = await supabase.from("goods_register").insert(row);
+    if (err && (err.code === "PGRST204" || err.code === "42703") && "commission" in row) {
+      delete row.commission; // baza bez kolumny commission (nieuruchomione supabase/goods-buyback.sql) — zapis bez niej
+      ({ error: err } = await supabase.from("goods_register").insert(row));
+    }
     setSaving(false);
     if (err) {
       setError(err.code === "42501" ? "Brak uprawnień do dodawania towaru (potrzebny dostęp do zakładki Towar)." : err.code === "PGRST204" || err.code === "42703" ? "Baza nie ma jeszcze nowych kolumn — uruchom ponownie supabase/goods.sql w Supabase." : `Nie udało się dodać: ${err.message}`);
@@ -334,7 +347,7 @@ export default function GoodsAddForm({
           <input value={f.serial} onChange={(e) => set("serial", e.target.value)} className={`${inputCls} font-mono`} autoFocus={!isEdit} />
         </div>
         <div className="md:col-span-2">
-          <label className={labelCls}>Nazwa</label>
+          <label className={labelCls}>{isTradeIn ? "SKU" : "Nazwa"}</label>
           <input value={f.name} onChange={(e) => set("name", e.target.value)} placeholder={isTradeIn ? "np. XSS-512-WE-A" : "np. Canon 2000D z obiektywem 18-55"} className={inputCls} />
         </div>
         <div>
@@ -350,10 +363,12 @@ export default function GoodsAddForm({
           <label className={labelCls}>Data zakupu *</label>
           <input type="date" value={f.purchased_on} onChange={(e) => set("purchased_on", e.target.value)} className={inputCls} />
         </div>
-        <div>
-          <label className={labelCls}>Data dostawy</label>
-          <input type="date" value={f.delivered_on} onChange={(e) => set("delivered_on", e.target.value)} className={inputCls} />
-        </div>
+        {!isTradeIn && (
+          <div>
+            <label className={labelCls}>Data dostawy</label>
+            <input type="date" value={f.delivered_on} onChange={(e) => set("delivered_on", e.target.value)} className={inputCls} />
+          </div>
+        )}
         <div>
           {isEdit ? (
             <>
@@ -376,10 +391,12 @@ export default function GoodsAddForm({
           <label className={labelCls}>Nr zamówienia{isTradeIn ? " (Back Market)" : ""}</label>
           <input value={f.order_no} onChange={(e) => set("order_no", e.target.value)} placeholder={isTradeIn ? "np. FR-26412-WXUBA" : ""} className={`${inputCls} font-mono`} />
         </div>
-        <div>
-          <label className={labelCls}>Nr faktury / DW</label>
-          <input value={f.invoice_no} onChange={(e) => set("invoice_no", e.target.value)} placeholder={isTradeIn ? "np. DW 3-04/10/2026" : "np. FM/04/10/2026"} className={inputCls} />
-        </div>
+        {!isTradeIn && (
+          <div>
+            <label className={labelCls}>Nr faktury / DW</label>
+            <input value={f.invoice_no} onChange={(e) => set("invoice_no", e.target.value)} placeholder="np. FM/04/10/2026" className={inputCls} />
+          </div>
+        )}
         <div>
           <label className={labelCls}>Cena zakupu *</label>
           <input value={f.price} onChange={(e) => set("price", e.target.value)} inputMode="decimal" className={inputCls} />
@@ -395,7 +412,7 @@ export default function GoodsAddForm({
         {f.currency && f.currency !== "PLN" && computedInput("nbp_rate", nbp, autoRate ? `z ${fmtDate(autoRate.date)}` : "brak kursu — wpisz")}
         {computedInput("price_pln", pricePln)}
         <div>
-          <label className={labelCls}>Koszty (PLN)</label>
+          <label className={labelCls}>{isTradeIn ? "Serwis (PLN)" : "Koszty (PLN)"}</label>
           <input value={f.costs} onChange={(e) => set("costs", e.target.value)} inputMode="decimal" className={inputCls} />
         </div>
         {isTradeIn && computedInput("pcc", pcc, "2% powyżej 1000 zł")}

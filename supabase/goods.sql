@@ -129,3 +129,14 @@ create trigger goods_register_before_update before update on goods_register
 drop policy if exists "admin update goods_register" on goods_register;
 drop policy if exists "goods access update goods_register" on goods_register;
 create policy "goods access update goods_register" on goods_register for update using (goods_can_read()) with check (goods_can_read());
+
+-- ===== Skup: automatyczne wiersze z opłaconych zamówień Buyback (14.10.2026) =====
+-- `source`: skąd jest wiersz — 'arkusz' (import z arkusza, WSZYSTKIE dotychczasowe wiersze; wartości zamrożone) albo 'buyback' (dopisany automatycznie przez
+-- app/api/goods/sync-buyback z opłaconego zamówienia Buyback + wpisu pracownika w Trade-in). `commission` = "Prowizja" w PLN (10% ceny + opłata logistyczna wg regulaminu);
+-- "Prowizja + PCC" (commission_pcc) to dalej prowizja + PCC. Dla wierszy z arkusza commission jest puste (widok wylicza je jako commission_pcc - pcc).
+alter table goods_register add column if not exists source text not null default 'arkusz';
+alter table goods_register drop constraint if exists goods_register_source_check;
+alter table goods_register add constraint goods_register_source_check check (source in ('arkusz', 'buyback'));
+alter table goods_register add column if not exists commission numeric(12,2);
+-- jedno zamówienie = najwyżej jeden wiersz automatyczny (idempotencja synchronizacji)
+create unique index if not exists goods_register_buyback_order_idx on goods_register (order_no) where source = 'buyback';

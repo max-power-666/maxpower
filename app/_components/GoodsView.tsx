@@ -35,9 +35,11 @@ type Row = {
   pcc: number | null;
   country: string | null;
   commission_pcc: number | null;
+  source?: string | null; // 'arkusz' | 'buyback' (wiersz dopisany automatycznie z opłaconego zamówienia Buyback)
+  commission?: number | null; // Prowizja (PLN) = 10% + logistyka; dla wierszy z arkusza puste — liczone jako prowizja + PCC − PCC
 };
 
-type Totals = { price_pln: number; costs: number; total_pln: number; pcc: number; commission_pcc: number };
+type Totals = { price_pln: number; costs: number; total_pln: number; pcc: number; commission: number; commission_pcc: number };
 
 // Trzy pigułki (10.10.2026): VM i V23 to podział wg VAT, Skup (dawniej "Trade-in") to zakupy ze skupu Back Market.
 // V23 = każdy wiersz z VAT V23 (niezależnie od arkusza), VM i Skup = reszta swojego rodzaju (VAT VM albo pusty).
@@ -56,7 +58,7 @@ function scopeFilter(q: any, tab: Tab) {
 }
 const PAGE_SIZES = [50, 100, 200];
 const NONE = "__brak__"; // w filtrach: wiersze z pustą wartością
-const COLUMNS = "id, kind, serial, name, supplier, purchased_on, delivered_on, order_no, invoice_no, category, price, vat, currency, nbp_rate, costs, total_pln, price_pln, pcc, country, commission_pcc";
+const COLUMNS_OLD = "id, kind, serial, name, supplier, purchased_on, delivered_on, order_no, invoice_no, category, price, vat, currency, nbp_rate, costs, total_pln, price_pln, pcc, country, commission_pcc";
 
 const pill = (active: boolean) => `px-3 py-1.5 rounded-full text-sm font-semibold border ${active ? "bg-ink text-paper border-ink" : "bg-white border-line"}`;
 const selectCls = "border border-line bg-white px-2 py-2 rounded text-sm";
@@ -79,6 +81,9 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
   const [rows, setRows] = useState<Row[]>([]);
   const [count, setCount] = useState<number | null>(null);
   const [totals, setTotals] = useState<Totals | null>(null);
+  // Nowe kolumny Skupu (source, commission) pojawiają się po uruchomieniu supabase/goods-buyback.sql; bez nich widok działa jak dotąd (bez prowizji i znacznika automatu).
+  const [newCols, setNewCols] = useState(true);
+  const COLUMNS = newCols ? `${COLUMNS_OLD}, source, commission` : COLUMNS_OLD;
   const [facets, setFacets] = useState<Facets | null>(null);
   const [tabCounts, setTabCounts] = useState<Partial<Record<Tab, number>>>({});
   const [loading, setLoading] = useState(false);
@@ -86,6 +91,8 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
   const [openSerial, setOpenSerial] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [editRow, setEditRow] = useState<GoodsEditRow | null>(null); // edycja wiersza (każdy z dostępem do zakładki)
+  const [syncing, setSyncing] = useState(false);
+  const [syncNote, setSyncNote] = useState("");
   const [reloadKey, setReloadKey] = useState(0); // rośnie po dodaniu/usunięciu wiersza — odświeża listę, sumy i listy filtrów
   const seq = useRef(0);
 
@@ -139,6 +146,10 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
           setPage(1);
           return;
         }
+        if (newCols && (err.code === "42703" || err.code === "PGRST204")) {
+          setNewCols(false); // brak kolumn source/commission — przełączamy się na starszy zestaw i ładujemy ponownie
+          return;
+        }
         throw new Error(err.code === "42P01" || err.code === "PGRST205" ? "Brak tabeli towaru — uruchom supabase/goods.sql (i plik z danymi) w Supabase." : err.message);
       }
       setRows(((data as Row[]) || []).map((r) => ({ ...r })));
@@ -148,7 +159,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
     } finally {
       if (mine === seq.current) setLoading(false);
     }
-  }, [applyFilters, page, pageSize, reloadKey]);
+  }, [applyFilters, page, pageSize, reloadKey, newCols]);
 
   useEffect(() => {
     load();
@@ -158,19 +169,20 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const acc: Totals = { price_pln: 0, costs: 0, total_pln: 0, pcc: 0, commission_pcc: 0 };
+      const acc: Totals = { price_pln: 0, costs: 0, total_pln: 0, pcc: 0, commission: 0, commission_pcc: 0 };
       for (let from = 0; ; from += 1000) {
-        const { data, error: err } = await applyFilters(supabase.from("goods_register").select("price_pln, costs, total_pln, pcc, commission_pcc"))
+        const { data, error: err } = await applyFilters(supabase.from("goods_register").select(newCols ? "price_pln, costs, total_pln, pcc, commission, commission_pcc" : "price_pln, costs, total_pln, pcc, commission_pcc"))
           .order("id")
           .range(from, from + 999);
         if (cancelled) return;
         if (err) return setTotals(null);
-        for (const r of (data as Partial<Totals>[]) || []) {
+        for (const r of (data as (Partial<Totals> & { commission?: number | null })[]) || []) {
           acc.price_pln += Number(r.price_pln ?? 0);
           acc.costs += Number(r.costs ?? 0);
           acc.total_pln += Number(r.total_pln ?? 0);
           acc.pcc += Number(r.pcc ?? 0);
           acc.commission_pcc += Number(r.commission_pcc ?? 0);
+          acc.commission += Number(r.commission ?? (r.commission_pcc !== null && r.commission_pcc !== undefined ? Number(r.commission_pcc) - Number(r.pcc ?? 0) : 0));
         }
         if (!data || data.length < 1000) break;
       }
@@ -179,7 +191,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
     return () => {
       cancelled = true;
     };
-  }, [applyFilters, reloadKey]);
+  }, [applyFilters, reloadKey, newCols]);
 
   // Wartości do list rozwijanych (z licznikami) i liczniki pigułek — raz na rodzaj.
   useEffect(() => {
@@ -222,6 +234,24 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
     setReloadKey((k) => k + 1);
   }
 
+  // Skup: ręczne uruchomienie tej samej synchronizacji, którą co 15 min robi cron (opłacone zamówienia Buyback -> wiersze Skupu).
+  async function syncBuyback() {
+    setSyncing(true);
+    setSyncNote("");
+    setError("");
+    try {
+      const res = await fetch("/api/goods/sync-buyback", { headers: { Authorization: `Bearer ${session.access_token}` } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Błąd synchronizacji.");
+      setSyncNote(`Dodano ${data.created}, uzupełniono ${data.updated} (opłaconych od ${data.from}: ${data.candidates}${data.skippedSheet ? `, ${data.skippedSheet} już w arkuszu` : ""}${data.noSerial ? `, ${data.noSerial} bez numeru seryjnego` : ""}).`);
+      setReloadKey((k) => k + 1);
+    } catch (e: any) {
+      setError(e.message || String(e));
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   // Edycja: dociągamy cały wiersz razem z historią zmian (lista jej nie niesie; bez kolumny history — sam wiersz).
   async function startEdit(r: Row) {
     setError("");
@@ -234,6 +264,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
   }
 
   const totalPages = Math.max(1, Math.ceil((count ?? 0) / pageSize));
+  const isSkup = tab === "skup"; // pigułka Skup ma własny układ kolumn (14.10.2026): SKU, Waluta, Serwis, Prowizja; bez daty dostawy i nr faktury/DW
   const isTradeIn = tab === "skup" || tab === "all"; // kolumny PCC / Kraj / Prowizja + PCC (w "Wszystkie" puste dla VM i V23)
   const kind: Kind = tab === "skup" ? "trade_in" : "vm_v23"; // rodzaj wiersza zapisywany z formularza (arkusz źródłowy)
   const options = (m: Map<string, number> | undefined) =>
@@ -242,11 +273,13 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
       .map(([v, n]) => ({ value: v, label: `${v === NONE ? "— (brak)" : v} (${n})` }));
   const anyFilter = !!(search || category || supplier);
   const showGroup = tab === "all"; // w "Wszystkie" pierwsza kolumna mówi, do której pigułki należy wiersz
-  const colSpan = (isTradeIn ? 17 : 14) + (showGroup ? 1 : 0) + 1; // kolumna akcji (Edytuj / Usuń)
+  const colSpan = isSkup ? 18 : (isTradeIn ? 17 : 14) + (showGroup ? 1 : 0) + 1; // kolumna akcji (Edytuj / Usuń)
   const groupOf = (r: Row) => (r.vat === "V23" ? "V23" : r.kind === "trade_in" ? "Skup" : "VM");
 
   const headers = useMemo(
-    () => [
+    () => isSkup ? [
+      "Numer seryjny", "SKU", "Dostawca", "Data zakupu", "Nr zamówienia", "Kategoria", "Cena zakupu", "VAT", "Waluta", "NBP", "Serwis", "Cena + koszty (PLN)", "Cena PLN", "PCC", "Kraj", "Prowizja", "Prowizja + PCC", "",
+    ] : [
       ...(showGroup ? ["Grupa"] : []),
       "Numer seryjny",
       "Nazwa",
@@ -265,7 +298,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
       ...(isTradeIn ? ["PCC", "Kraj", "Prowizja + PCC"] : []),
       "", // kolumna akcji
     ],
-    [isTradeIn, showGroup]
+    [isTradeIn, showGroup, isSkup]
   );
 
   return (
@@ -277,7 +310,8 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
             {tabCounts[t.key] !== undefined && <span className="ml-1.5 text-xs font-normal opacity-70">{tabCounts[t.key]}</span>}
           </button>
         ))}
-        {tab !== "all" && <button onClick={() => { setEditRow(null); setAdding((a) => !a); }} className="ml-auto bg-ink text-paper px-4 py-1.5 rounded text-sm font-semibold">{adding ? "Zamknij formularz" : "+ Dodaj towar"}</button>}
+        {tab === "skup" && <button onClick={syncBuyback} disabled={syncing} className="ml-auto border border-line bg-white px-3 py-1.5 rounded text-sm font-semibold disabled:opacity-50" title="Dopisz opłacone zamówienia Buyback (to samo robi automat co 15 min)">{syncing ? "Synchronizacja…" : "Odśwież z Buyback"}</button>}
+        {tab !== "all" && <button onClick={() => { setEditRow(null); setAdding((a) => !a); }} className={`${tab === "skup" ? "" : "ml-auto"} bg-ink text-paper px-4 py-1.5 rounded text-sm font-semibold`}>{adding ? "Zamknij formularz" : "+ Dodaj towar"}</button>}
       </div>
 
       {editRow && (
@@ -353,6 +387,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
       </div>
 
       {error && <p className="text-rust text-xs mb-3">{error}</p>}
+      {syncNote && <p className="text-teal text-xs mb-3">{syncNote}</p>}
 
       <div className="border border-line bg-white overflow-x-auto">
         <table className="w-full text-xs">
@@ -370,21 +405,39 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
                 {showGroup && <td className="p-2 whitespace-nowrap font-semibold">{groupOf(r)}</td>}
                 <td className="p-2 font-mono whitespace-nowrap">
                   {r.serial ? <button onClick={() => setOpenSerial(r.serial)} className="text-teal hover:underline">{r.serial}</button> : "—"}
+                  {r.source === "buyback" && <span className="ml-1.5 text-[9px] font-sans font-semibold text-teal border border-teal rounded px-1" title="Wiersz dopisany automatycznie z opłaconego zamówienia Buyback">auto</span>}
                 </td>
                 <td className="p-2 min-w-[12rem]">{r.name || "—"}</td>
                 <td className="p-2 whitespace-nowrap">{r.supplier || "—"}</td>
                 <td className="p-2 whitespace-nowrap">{fmtDate(r.purchased_on)}</td>
-                <td className="p-2 whitespace-nowrap">{fmtDate(r.delivered_on)}</td>
+                {!isSkup && <td className="p-2 whitespace-nowrap">{fmtDate(r.delivered_on)}</td>}
                 <td className="p-2 font-mono whitespace-nowrap">{r.order_no || "—"}</td>
-                <td className="p-2 whitespace-nowrap">{r.invoice_no || "—"}</td>
+                {!isSkup && <td className="p-2 whitespace-nowrap">{r.invoice_no || "—"}</td>}
                 <td className="p-2 whitespace-nowrap">{r.category || "—"}</td>
-                <td className="p-2 whitespace-nowrap text-right">{r.price === null ? "—" : `${fmtNum(r.price)} ${r.currency ?? ""}`.trim()}</td>
+                <td className="p-2 whitespace-nowrap text-right">{r.price === null ? "—" : isSkup ? fmtNum(r.price) : `${fmtNum(r.price)} ${r.currency ?? ""}`.trim()}</td>
                 <td className="p-2 whitespace-nowrap">{r.vat || "—"}</td>
+                {isSkup && <td className="p-2 whitespace-nowrap">{r.currency || "—"}</td>}
                 <td className="p-2 whitespace-nowrap text-right">{fmtNum(r.nbp_rate, 4)}</td>
-                <td className="p-2 whitespace-nowrap text-right">{fmtNum(r.costs)}</td>
-                <td className="p-2 whitespace-nowrap text-right">{fmtNum(r.total_pln)}</td>
-                <td className="p-2 whitespace-nowrap text-right font-semibold">{fmtNum(r.price_pln)}</td>
-                {isTradeIn && (
+                {isSkup ? (
+                  <>
+                    <td className="p-2 whitespace-nowrap text-right">{fmtNum(r.costs)}</td>
+                    <td className="p-2 whitespace-nowrap text-right">{fmtNum(r.total_pln)}</td>
+                    <td className="p-2 whitespace-nowrap text-right font-semibold">{fmtNum(r.price_pln)}</td>
+                    <td className="p-2 whitespace-nowrap text-right">{fmtNum(r.pcc)}</td>
+                    <td className="p-2 whitespace-nowrap">{r.country || "—"}</td>
+                    <td className="p-2 whitespace-nowrap text-right" title={r.commission === null || r.commission === undefined ? "Wiersz z arkusza: prowizja wyliczona jako „Prowizja + PCC” − PCC" : undefined}>
+                      {fmtNum(r.commission ?? (r.commission_pcc !== null ? Number(r.commission_pcc) - Number(r.pcc ?? 0) : null))}
+                    </td>
+                    <td className="p-2 whitespace-nowrap text-right">{fmtNum(r.commission_pcc)}</td>
+                  </>
+                ) : (
+                  <>
+                    <td className="p-2 whitespace-nowrap text-right">{fmtNum(r.costs)}</td>
+                    <td className="p-2 whitespace-nowrap text-right">{fmtNum(r.total_pln)}</td>
+                    <td className="p-2 whitespace-nowrap text-right font-semibold">{fmtNum(r.price_pln)}</td>
+                  </>
+                )}
+                {isTradeIn && !isSkup && (
                   <>
                     <td className="p-2 whitespace-nowrap text-right">{fmtNum(r.pcc)}</td>
                     <td className="p-2 whitespace-nowrap">{r.country || "—"}</td>
@@ -406,9 +459,10 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
         <span className="font-semibold text-inksoft text-xs self-center">PODSUMOWANIE WYNIKU</span>
         <span>Pozycji: <span className="font-semibold">{count ?? "—"}</span></span>
         <span>Cena PLN: <span className="font-semibold">{fmtPln(totals?.price_pln)}</span></span>
-        <span>Koszty: <span className="font-semibold">{fmtPln(totals?.costs)}</span></span>
-        <span>Cena PLN + koszty: <span className="font-semibold">{fmtPln(totals?.total_pln)}</span></span>
+        <span>{isSkup ? "Serwis" : "Koszty"}: <span className="font-semibold">{fmtPln(totals?.costs)}</span></span>
+        <span>{isSkup ? "Cena + koszty (PLN)" : "Cena PLN + koszty"}: <span className="font-semibold">{fmtPln(totals?.total_pln)}</span></span>
         {isTradeIn && <span>PCC: <span className="font-semibold">{fmtPln(totals?.pcc)}</span></span>}
+        {isSkup && <span>Prowizja: <span className="font-semibold">{fmtPln(totals?.commission)}</span></span>}
         {isTradeIn && <span>Prowizja + PCC: <span className="font-semibold">{fmtPln(totals?.commission_pcc)}</span></span>}
       </div>
       <p className="text-[11px] text-inksoft mt-2 max-w-3xl">Dane z arkusza Towar.numbers i dopisane formularzem „Dodaj towar”; edytować może każdy, kto ma zakładkę Towar (każda edycja zapisuje się w historii zmian: kto, kiedy, co), a usuwać tylko Admin. Kwoty „Cena PLN”, „Koszty”, „Cena PLN + koszty” i „Prowizja + PCC” to wartości z arkusza, nie przeliczenia aplikacji; sumy dotyczą całego wyniku filtrów.</p>
