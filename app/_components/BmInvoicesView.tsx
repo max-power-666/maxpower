@@ -44,6 +44,14 @@ export default function BmInvoicesView({ session, members, bmRates, invoiceCount
   useEffect(() => {
     load();
   }, [load]);
+  // lista odświeża się też po powrocie do karty (np. po wgraniu faktury w innym oknie) — wcześniej zostawała nieaktualna do przeładowania strony
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") load();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [load]);
 
   async function upload(files: FileList | null) {
     if (!files || files.length === 0) return;
@@ -95,7 +103,10 @@ export default function BmInvoicesView({ session, members, bmRates, invoiceCount
       {uploadMsg && <p className="text-xs text-teal font-semibold mb-3">{uploadMsg}</p>}
       {error && <p className="text-rust text-xs mb-3">{error}</p>}
 
-      <h2 className="text-xs font-semibold text-inksoft mb-2">ZAIMPORTOWANE FAKTURY ({invoices.length})</h2>
+      <h2 className="text-xs font-semibold text-inksoft mb-2 flex items-center gap-3">
+        ZAIMPORTOWANE FAKTURY ({invoices.length})
+        <button onClick={load} disabled={loading} className="text-[11px] font-semibold text-teal hover:underline disabled:opacity-50">{loading ? "Odświeżanie…" : "Odśwież listę"}</button>
+      </h2>
       <div className="border border-line bg-white overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
