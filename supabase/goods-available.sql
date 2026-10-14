@@ -21,6 +21,12 @@ select g.*,
           ) k(key)
           where k.key is not null and k.key <> ''
             and ltrim(k.key, '0') = ltrim(lower(btrim(g.serial)), '0')
+        )
+        -- ten sam numer seryjny w Towarze wielokrotnie (np. sztuka sprzedana i odkupiona): dostępny jest tylko NAJNOWSZY zakup (data zakupu, a przy równych id)
+        and not exists (
+          select 1 from goods_register g2
+          where ltrim(lower(btrim(g2.serial)), '0') = ltrim(lower(btrim(g.serial)), '0')
+            and (coalesce(g2.purchased_on, date '0001-01-01'), g2.id) > (coalesce(g.purchased_on, date '0001-01-01'), g.id)
         )) as available,
        (select ps.source from product_status_for(g.serial) ps) as product_status_source,
        (select ps.status from product_status_for(g.serial) ps) as product_status,
