@@ -43,8 +43,8 @@ export async function loadMarginResults(db: SupabaseClient<any, any, any>): Prom
     fetchAll<{ currency: string; rate_date: string; mid: number | string }>((from, to) => db.from("nbp_rates").select("currency, rate_date, mid").in("currency", ["EUR", "DKK"]).range(from, to)),
     fetchAll<BmLine & { invoice_ref: string }>((from, to) => db.from("bm_invoice_lines").select("invoice_ref, invoice_key, order_id, amount, sku, designation").order("id").range(from, to)).catch(() => [] as (BmLine & { invoice_ref: string })[]),
   ]);
-  // ile produktów z Fakturowni (historia zakupów) mamy w bazie — gdy 0, zakładka podpowiada pełną synchronizację
-  const { count: purchasesCount } = await db.from("fakturownia_purchases").select("id", { count: "exact", head: true });
+  // ile pozycji ma rejestr Towar (źródło cen zakupu od 14.10.2026) — gdy 0, zakładka podpowiada, że ceny zakupu są puste
+  const { count: purchasesCount } = await db.from("goods_register").select("id", { count: "exact", head: true });
   const toRates = (cur: string): NbpRate[] => rateRows.filter((r) => r.currency === cur).map((r) => ({ currency: r.currency, rateDate: r.rate_date, mid: Number(r.mid) }));
   const bmRates = deriveBmRates(lines);
   const ctx = { eurRates: toRates("EUR"), dkkRates: toRates("DKK"), bmRates, partsBySerial: parts.available ? parts.map : undefined };

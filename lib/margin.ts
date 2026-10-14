@@ -93,7 +93,8 @@ export type MarginDbRow = {
   shipping_manual: number | string | null;
   refurbed_commission: number | string | null;
   refurbed_commission_currency: string | null;
-  purchase_vat?: string | null; // stawka VAT zakupu wpisana ręcznie (np. "V23"); puste = VAT-marża
+  purchase_vat?: string | null; // stawka VAT zakupu z Towaru (np. "V23"); puste = VAT-marża
+  purchase_is_net?: boolean | null; // cena zakupu z Towaru dla V23 jest już NETTO (14.10.2026) — nie dzielimy przez 1,23
   octopia_commission?: number | string | null; // prowizja Octopii na sztukę (z danych zamówienia), waluta zamówienia
   octopia_commission_currency?: string | null;
   shipping_revenue?: number | string | null; // dostawa opłacona przez KLIENTA na sztukę (Octopia offerPrice.shippingCost, Back Market orderline.shipping_price), waluta zamówienia
@@ -271,7 +272,9 @@ export function computeMargin(row: MarginDbRow, ctx: MarginContext): MarginResul
   // a od sprzedaży odprowadzamy VAT należny 23% od PEŁNEJ ceny — marża = sprzedaż/1,23 − zakup netto − koszty. Pozostałe sztuki: VAT-marża jak dotąd.
   const isV23 = (row.purchase_vat || "").trim().toUpperCase() === "V23";
   const purchaseGross = num(row.purchase_price_gross);
-  const purchase = purchaseGross === null ? null : isV23 ? round2(purchaseGross / (1 + MARGIN_VAT_RATE / 100)) : purchaseGross;
+  // Cena z Towaru dla V23 jest już netto (purchase_is_net); ścieżka "brutto / 1,23" zostaje dla wierszy bez tej flagi (np. dane sprzed zmiany widoku).
+  const alreadyNet = row.purchase_is_net === true;
+  const purchase = purchaseGross === null ? null : isV23 && !alreadyNet ? round2(purchaseGross / (1 + MARGIN_VAT_RATE / 100)) : purchaseGross;
   if (purchase === null) flags.push("brak ceny zakupu");
   details.push({
     key: "purchase",
@@ -280,8 +283,8 @@ export function computeMargin(row: MarginDbRow, ctx: MarginContext): MarginResul
     amountPln: purchase,
     note:
       purchase === null
-        ? "Brak ceny zakupu tej sztuki w historii zakupów z Fakturowni (pobierz ją przyciskiem „Pobierz z Fakturowni”)."
-        : `Z Fakturowni, wg numeru seryjnego${row.purchase_ref ? ` (zamówienie/dokument: ${row.purchase_ref.trim()})` : ""}.${isV23 ? ` Towar na V23: cena brutto ${f2(purchaseGross!)} zł → netto ${f2(purchase)} zł (VAT zakupu jest odliczany, nie jest kosztem).` : ""}`,
+        ? "Brak ceny zakupu tej sztuki w rejestrze Towar (po numerze seryjnym) — dopisz ją w zakładce Towar."
+        : `Z Towaru, wg numeru seryjnego${row.purchase_ref ? ` (zamówienie/dokument: ${row.purchase_ref.trim()})` : ""}.${isV23 ? ` Towar na V23: cena brutto ${f2(purchaseGross!)} zł → netto ${f2(purchase)} zł (VAT zakupu jest odliczany, nie jest kosztem).` : ""}`,
   });
 
   // --- VAT: VAT-marża (po cenie sprzedaży i zakupu, bez kosztów dodatkowych) albo, dla V23, VAT należny od pełnej ceny sprzedaży

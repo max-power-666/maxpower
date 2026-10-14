@@ -103,17 +103,25 @@ select
   p.vat as purchase_vat,
   -- dostawa opłacona przez klienta (09.10.2026) — NA KOŃCU widoku, bo create or replace view nie pozwala wstawiać kolumn w środku
   coalesce(oct.shipping_revenue, bm.shipping_revenue) as shipping_revenue,
-  coalesce(oct.currency, bm.currency) as shipping_revenue_currency
+  coalesce(oct.currency, bm.currency) as shipping_revenue_currency,
+  -- cena zakupu z Towaru dla V23 jest już NETTO (14.10.2026) — NA KOŃCU widoku (create or replace view)
+  coalesce(p.is_net, false) as purchase_is_net
 from sales_order_items it
 join sales_orders o on o.marketplace = it.marketplace and o.external_id = it.external_id
 join order_agg oa on oa.marketplace = it.marketplace and oa.external_id = it.external_id
--- zakup: sztuka o tym numerze seryjnym w Fakturowni; gdy numer wystąpił kilka razy (odkup), bierzemy zakup sprzed zamówienia, najnowszy
+-- zakup (14.10.2026, na prośbę właściciela — "ceny zakupu bierzmy z Towaru"): pozycja rejestru Towar (goods_register) o tym numerze seryjnym; cena = "Cena PLN" z Towaru,
+-- numer zamówienia/dokumentu = order_no (dla Skupu numer zamówienia Buyback — z niego liczone są koszty Trade-in), VAT = vat z Towaru. Gdy numer wystąpił kilka razy (odkup),
+-- bierzemy zakup sprzed zamówienia, najnowszy. Wiersze V23 mają w Towarze cenę NETTO (kolumna purchase_is_net) — wcześniej Fakturownia podawała brutto.
+-- Numery porównujemy bez zer wiodących (część numerów w Towarze straciła je przy imporcie z arkusza). Fakturownia nie jest już źródłem ceny zakupu w Marży.
 left join lateral (
-  select fp.purchase_price_gross, fp.description,
-         coalesce(nullif(btrim(fp.vat), ''), (select nullif(btrim(c.vat), '') from fakturownia_stock_cache c where c.id = fp.id)) as vat
-  from fakturownia_purchases fp
-  where lower(btrim(fp.name)) = lower(btrim(it.serial_number))
-  order by (fp.product_created_at <= o.order_date) desc nulls last, fp.product_created_at desc nulls last
+  select g.price_pln as purchase_price_gross,
+         g.order_no as description,
+         nullif(btrim(g.vat), '') as vat,
+         (upper(nullif(btrim(g.vat), '')) = 'V23') as is_net
+  from goods_register g
+  where nullif(btrim(g.serial), '') is not null
+    and ltrim(lower(btrim(g.serial)), '0') = ltrim(lower(btrim(it.serial_number)), '0')
+  order by (g.purchased_on <= o.order_date::date) desc nulls last, g.purchased_on desc nulls last, g.id desc
   limit 1
 ) p on true
 left join buyback_orders bo on bo.order_public_id = btrim(p.description)

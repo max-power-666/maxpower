@@ -43,8 +43,6 @@ export default function MarginView({ session, members }: { session: Session; mem
   const [bmRates, setBmRates] = useState<BmRates | null>(null);
   const [invoiceCount, setInvoiceCount] = useState(0);
   const [purchasesCount, setPurchasesCount] = useState<number | null>(null);
-  const [syncing, setSyncing] = useState(false);
-  const [syncMsg, setSyncMsg] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [marketplace, setMarketplace] = useState("");
@@ -99,24 +97,6 @@ export default function MarginView({ session, members }: { session: Session; mem
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, pageSize, search, marketplace, period, skuCategory]);
 
-  // Pełna synchronizacja z Fakturownią (ten sam route co "Odśwież" w Magazynie): zapisuje też produkty sprzedane (stan 0), od 01.01.2025 — to z nich
-  // bierze się cena zakupu w tej zakładce. Pierwszy raz trwa ok. minuty (cały katalog).
-  async function syncPurchases() {
-    setSyncing(true);
-    setSyncMsg("");
-    try {
-      const res = await fetch(`/api/fakturownia/sync${purchasesCount === 0 ? "?full=1" : ""}`, { headers: auth });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.error || `Błąd serwera (${res.status}).`);
-      setSyncMsg(`Pobrano z Fakturowni: ${data.processed} produktów przeanalizowano, ${data.purchasesSaved} zapisano w historii zakupów${data.incremental ? " (zmiany od ostatniej synchronizacji)" : " (pełny skan)"}.`);
-    } catch (e: any) {
-      setSyncMsg(`Synchronizacja nie powiodła się: ${e.message || e}`);
-    } finally {
-      setSyncing(false);
-      load();
-    }
-  }
-
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const marginCls = (n: number | null) => (n === null ? "" : n < 0 ? "text-rust" : "text-teal");
 
@@ -130,21 +110,20 @@ export default function MarginView({ session, members }: { session: Session; mem
         <BmInvoicesView session={session} members={members} bmRates={bmRates} invoiceCount={invoiceCount} onUploaded={load} />
       ) : (
       <>
-      <div className="border border-line bg-white p-4 mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="border border-line bg-white p-4 mb-4">
         <div className="text-sm">
-          <div className="text-xs font-semibold text-inksoft mb-1">CENY ZAKUPU (z Fakturowni, produkty od 01.01.2025, także sprzedane)</div>
+          <div className="text-xs font-semibold text-inksoft mb-1">CENY ZAKUPU (z rejestru Towar)</div>
           {purchasesCount === null ? (
             <span className="text-inksoft">Wczytywanie…</span>
           ) : purchasesCount === 0 ? (
-            <span className="text-rust font-semibold">Brak historii zakupów w bazie — kolumna „Cena zakupu” jest pusta. Kliknij „Pobierz z Fakturowni” (pełna synchronizacja trwa około minuty).</span>
+            <span className="text-rust font-semibold">Rejestr Towar jest pusty — kolumna „Cena zakupu” jest pusta.</span>
           ) : (
-            <span>W bazie: <span className="font-mono font-semibold">{purchasesCount.toLocaleString("pl-PL")}</span> produktów z Fakturowni. Nowe zakupy dochodzą przy każdej synchronizacji magazynu.</span>
+            <span>
+              W rejestrze Towar: <span className="font-mono font-semibold">{purchasesCount.toLocaleString("pl-PL")}</span> pozycji. Sprzedana sztuka bez wiersza w Towarze (po numerze seryjnym) nie ma ceny zakupu
+              i nie wchodzi do sum marży — dopisz ją w zakładce Towar.
+            </span>
           )}
-          {syncMsg && <div className={`text-xs mt-1 font-semibold ${syncMsg.startsWith("Synchronizacja nie") ? "text-rust" : "text-teal"}`}>{syncMsg}</div>}
         </div>
-        <button onClick={syncPurchases} disabled={syncing} className="bg-ink text-paper px-4 py-2 rounded text-sm font-semibold disabled:opacity-50 shrink-0">
-          {syncing ? "Pobieranie… (do kilku minut)" : "Pobierz z Fakturowni"}
-        </button>
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
