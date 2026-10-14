@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
+import { escapeLike } from "@/lib/search";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { colorForUser } from "@/lib/userColors";
 import InlineEditCell from "./InlineEditCell";
@@ -73,6 +74,13 @@ export default function TestsView({
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
   const [openSerial, setOpenSerial] = useState<string | null>(null);
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState(""); // wyszukiwarka po numerze seryjnym / SKU (debounce 300 ms), jak w Serwisie i Trade-in
+
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(searchInput.trim()), 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
 
   useEffect(() => {
     load();
@@ -84,7 +92,7 @@ export default function TestsView({
       supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [interval]);
+  }, [interval, search]);
 
   async function load() {
     setLoading(true);
@@ -95,11 +103,17 @@ export default function TestsView({
       const rangeQuery = (col: string) => supabase.from("test_log").select("employee_email, points").eq("status", "przetestowane").gte(col, rangeStart(interval));
       const [rangeRes, { data: recentData, error: recentErr }] = await Promise.all([
         rangeQuery("points_awarded_at"),
-        supabase
-          .from("test_log")
-          .select("id, employee_email, serial_number, sku, status, test_kind, result, notes, started_at, finished_at, points")
-          .order("started_at", { ascending: false })
-          .limit(50),
+        (() => {
+          let q = supabase
+            .from("test_log")
+            .select("id, employee_email, serial_number, sku, status, test_kind, result, notes, started_at, finished_at, points");
+          // wyszukiwanie po numerze seryjnym albo SKU (fragment, bez rozróżniania wielkości liter); szuka w całej historii, a limit rośnie, bo szukany wpis mógł wypaść poza najświeższe 50
+          if (search) {
+            const pat = `"%${escapeLike(search).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}%"`;
+            q = q.or(`serial_number.ilike.${pat},sku.ilike.${pat}`);
+          }
+          return q.order("started_at", { ascending: false }).limit(search ? 200 : 50);
+        })(),
       ]);
       let { data: rangeData, error: rangeErr } = rangeRes;
       if (rangeErr && rangeErr.code === "42703") ({ data: rangeData, error: rangeErr } = await rangeQuery("finished_at"));
@@ -285,7 +299,16 @@ export default function TestsView({
         </button>
       </div>
 
-      <h2 className="text-xs font-semibold text-inksoft mb-2">OSTATNIE TESTY</h2>
+      <div className="flex flex-wrap items-center gap-3 mb-2">
+        <h2 className="text-xs font-semibold text-inksoft">OSTATNIE TESTY</h2>
+        <input
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          placeholder="Szukaj po numerze seryjnym lub SKU…"
+          className="border border-line bg-white px-3 py-1.5 rounded text-sm w-72 font-normal"
+        />
+        {search && <span className="text-xs text-inksoft">wyniki z całej historii (max 200)</span>}
+      </div>
       <div className="border border-line bg-white overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -305,7 +328,7 @@ export default function TestsView({
           </thead>
           <tbody>
             {!loading && recent.length === 0 && (
-              <tr><td colSpan={9 + (isAdminOrManager ? 1 : 0) + (isAdmin ? 1 : 0)} className="p-6 text-center text-inksoft text-sm">Brak testów — rozpocznij pierwszy powyżej.</td></tr>
+              <tr><td colSpan={9 + (isAdminOrManager ? 1 : 0) + (isAdmin ? 1 : 0)} className="p-6 text-center text-inksoft text-sm">{search ? "Brak wyników." : "Brak testów — rozpocznij pierwszy powyżej."}</td></tr>
             )}
             {recent.map((r) => (
               <tr key={r.id} className="border-b border-line last:border-b-0 hover:bg-paper">
