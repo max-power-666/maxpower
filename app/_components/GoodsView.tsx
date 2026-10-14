@@ -79,6 +79,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
   const [supplier, setSupplier] = useState("");
+  const [serialFilter, setSerialFilter] = useState<"" | "with" | "without">(""); // filtr numeru seryjnego: z numerem / bez numeru (14.10.2026)
   const [rows, setRows] = useState<Row[]>([]);
   const [count, setCount] = useState<number | null>(null);
   const [totals, setTotals] = useState<Totals | null>(null);
@@ -112,6 +113,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
     setTab(t);
     setCategory("");
     setSupplier("");
+    setSerialFilter("");
     setPage(1);
   }
 
@@ -130,13 +132,15 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
         }
       } else if (category) q = category === NONE ? q.is("category", null) : q.eq("category", category);
       if (supplier) q = supplier === NONE ? q.is("supplier", null) : q.eq("supplier", supplier);
+      if (serialFilter === "without") q = q.or("serial.is.null,serial.eq.");
+      else if (serialFilter === "with") q = q.not("serial", "is", null).neq("serial", "");
       if (search) {
         const s = escapeLike(search).replace(/[,()"]/g, " ").trim(); // przecinki i nawiasy rozbiłyby składnię .or()
         if (s) q = q.or(["serial", "name", "order_no", "invoice_no", "supplier"].map((c) => `${c}.ilike.%${s}%`).join(","));
       }
       return q;
     },
-    [tab, category, supplier, search]
+    [tab, category, supplier, search, serialFilter]
   );
 
   const load = useCallback(async () => {
@@ -280,7 +284,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
     Array.from(m?.entries() ?? [])
       .sort((a, b) => (a[0] === NONE ? 1 : b[0] === NONE ? -1 : a[0].localeCompare(b[0], "pl")))
       .map(([v, n]) => ({ value: v, label: `${v === NONE ? "— (brak)" : v} (${n})` }));
-  const anyFilter = !!(search || category || supplier);
+  const anyFilter = !!(search || category || supplier || serialFilter);
   const showGroup = tab === "all"; // w "Wszystkie" pierwsza kolumna mówi, do której pigułki należy wiersz
   const colSpan = isSkup ? 18 : (isTradeIn ? 17 : 14) + (showGroup ? 1 : 0) + 1; // kolumna akcji (Edytuj / Usuń)
   const groupOf = (r: Row) => (r.vat === "V23" ? "V23" : r.kind === "trade_in" ? "Skup" : "VM");
@@ -369,6 +373,11 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
           <option value="">{isSkup ? "Kanał: wszystkie" : "Dostawca: wszyscy"}</option>
           {options(facets?.supplier).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
+        <select value={serialFilter} onChange={(e) => { setSerialFilter(e.target.value as "" | "with" | "without"); setPage(1); }} className={selectCls}>
+          <option value="">Numer seryjny: wszystkie</option>
+          <option value="with">Z numerem seryjnym</option>
+          <option value="without">Bez numeru seryjnego</option>
+        </select>
         {anyFilter && (
           <button
             onClick={() => {
@@ -376,6 +385,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
               setSearch("");
               setCategory("");
               setSupplier("");
+              setSerialFilter("");
               setPage(1);
             }}
             className="text-xs font-semibold text-teal hover:underline"
