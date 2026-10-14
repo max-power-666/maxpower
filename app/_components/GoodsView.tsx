@@ -278,7 +278,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
 
   const headers = useMemo(
     () => isSkup ? [
-      "Numer seryjny", "SKU", "Dostawca", "Data zakupu", "Nr zamówienia", "Kategoria", "Cena zakupu", "VAT", "Waluta", "NBP", "Serwis", "Cena + koszty (PLN)", "Cena PLN", "PCC", "Kraj", "Prowizja", "Prowizja + PCC", "",
+      "Numer seryjny", "SKU", "Kanał", "Data zakupu", "Nr zamówienia", "Kategoria", "Cena zakupu", "VAT", "Waluta", "NBP", "Serwis", "Cena + koszty (PLN)", "Cena PLN", "PCC", "Kraj", "Prowizja", "Prowizja + PCC", "",
     ] : [
       ...(showGroup ? ["Grupa"] : []),
       "Numer seryjny",
@@ -357,7 +357,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
           {options(facets?.category).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
         <select value={supplier} onChange={(e) => { setSupplier(e.target.value); setPage(1); }} className={selectCls}>
-          <option value="">Dostawca: wszyscy</option>
+          <option value="">{isSkup ? "Kanał: wszystkie" : "Dostawca: wszyscy"}</option>
           {options(facets?.supplier).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
         {anyFilter && (
@@ -408,7 +408,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
                   {r.source === "buyback" && <span className="ml-1.5 text-[9px] font-sans font-semibold text-teal border border-teal rounded px-1" title="Wiersz dopisany automatycznie z opłaconego zamówienia Buyback">auto</span>}
                 </td>
                 <td className="p-2 min-w-[12rem]">{r.name || "—"}</td>
-                <td className="p-2 whitespace-nowrap">{r.supplier || "—"}</td>
+                <td className="p-2 whitespace-nowrap">{isSkup || r.supplier === "Buyback" ? (r.supplier ? <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${r.supplier === "Buyback" ? "bg-tealsoft text-teal" : "bg-ambersoft text-amber"}`}>{r.supplier}</span> : "—") : r.supplier || "—"}</td>
                 <td className="p-2 whitespace-nowrap">{fmtDate(r.purchased_on)}</td>
                 {!isSkup && <td className="p-2 whitespace-nowrap">{fmtDate(r.delivered_on)}</td>}
                 <td className="p-2 font-mono whitespace-nowrap">{r.order_no || "—"}</td>

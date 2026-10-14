@@ -27,7 +27,7 @@ export type BbIntake = { serial_number: string | null; sku: string | null } | nu
 export type BuiltGoods = {
   serial: string | null;
   name: string | null; // w Skupie to SKU nadane przez pracownika
-  supplier: string;
+  supplier: string; // kanał zakupu: "Buyback"
   purchased_on: string;
   order_no: string;
   category: string | null;
@@ -86,7 +86,7 @@ export function buildBuybackGoods(o: BbOrder, intake: BbIntake, ratesByCurrency:
   return {
     serial,
     name: sku,
-    supplier: "BB",
+    supplier: "Buyback", // kanał zakupu (kolumna "Kanał" w Skupie) — ta sama nazwa co kanał w Trade-in
     purchased_on: date,
     order_no: o.order_public_id,
     category: goodsCategoryFromSku(sku),

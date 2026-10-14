@@ -91,7 +91,7 @@ const initial = (kind: Kind, vat: string): Form => {
   return {
     serial: "",
     name: "",
-    supplier: kind === "trade_in" ? "BB" : "",
+    supplier: kind === "trade_in" ? "Buyback" : "",
     purchased_on: today,
     delivered_on: today,
     order_no: "",
@@ -356,7 +356,7 @@ export default function GoodsAddForm({
         </div>
 
         <div>
-          <label className={labelCls}>Dostawca</label>
+          <label className={labelCls}>{isTradeIn ? "Kanał" : "Dostawca"}</label>
           <input value={f.supplier} onChange={(e) => set("supplier", e.target.value)} list="goods-suppliers" className={inputCls} />
         </div>
         <div>
