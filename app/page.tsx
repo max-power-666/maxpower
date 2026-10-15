@@ -991,7 +991,7 @@ export default function Home() {
           {view === "invoices" && <InvoicesView session={session} members={members} />}
 
           {view === "margin" && <MarginView session={session} members={members} />}
-          {view === "goods" && <GoodsView session={session} members={members} isAdmin={role === "Admin"} />}
+          {view === "goods" && <GoodsView session={session} members={members} isAdmin={role === "Admin"} canSend={role === "Admin" || role === "Manager" || role === "Księgowa"} />}
           {view === "listings" && <ListingsView session={session} />}
           {view === "points" && <PointsView session={session} members={members} />}
 

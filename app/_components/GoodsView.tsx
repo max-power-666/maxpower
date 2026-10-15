@@ -5,7 +5,7 @@ import { skuCategoryOf, CAMERA_CATEGORY } from "@/lib/skuParts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { escapeLike } from "@/lib/search";
-import type { MemberLite } from "@/lib/displayName";
+import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import type { Session } from "@supabase/supabase-js";
 import ProductCardDrawer from "./ProductCardDrawer";
 import GoodsAddForm, { type GoodsEditRow } from "./GoodsAddForm";
@@ -44,6 +44,9 @@ type Row = {
   pending?: boolean; // opłacony zakup z Buyback jeszcze nie w magazynie Fakturowni (widok goods_register_available)
   source?: string | null; // 'arkusz' | 'buyback' (wiersz dopisany automatycznie z opłaconego zamówienia Buyback)
   commission?: number | null; // Prowizja (PLN) = 10% + logistyka; dla wierszy z arkusza puste — liczone jako prowizja + PCC − PCC
+  fakturownia_product_id?: number | null; // wysłano do Fakturowni z aplikacji (supabase/goods-fakturownia.sql)
+  fakturownia_sent_at?: string | null;
+  fakturownia_sent_by?: string | null;
 };
 
 type Totals = { price_pln: number; costs: number; total_pln: number; pcc: number; commission: number; commission_pcc: number };
@@ -81,7 +84,7 @@ const fmtPln = (n: number | null | undefined) => (n === null || n === undefined 
 
 type Facets = { category: Map<string, number>; supplier: Map<string, number> };
 
-export default function GoodsView({ session, members, isAdmin }: { session: Session; members: MemberLite[]; isAdmin: boolean }) {
+export default function GoodsView({ session, members, isAdmin, canSend = false }: { session: Session; members: MemberLite[]; isAdmin: boolean; canSend?: boolean }) {
   const [tab, setTab] = useState<Tab>("all");
   const [pageSize, setPageSize] = useState(50);
   const [page, setPage] = useState(1);
@@ -111,6 +114,11 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
   const [openSerial, setOpenSerial] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [editRow, setEditRow] = useState<GoodsEditRow | null>(null); // edycja wiersza (każdy z dostępem do zakładki)
+  // Wysyłanie do Fakturowni (15.10.2026): kolumny fakturownia_* pojawiają się po uruchomieniu goods-fakturownia.sql i ponownym goods-available.sql; bez nich przyciski się nie pokazują.
+  const [fakCols, setFakCols] = useState(true);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [sending, setSending] = useState(false);
+  const [sendNote, setSendNote] = useState<{ ok: boolean; lines: string[] } | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncNote, setSyncNote] = useState("");
   const [reloadKey, setReloadKey] = useState(0); // rośnie po dodaniu/usunięciu wiersza — odświeża listę, sumy i listy filtrów
@@ -177,7 +185,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
     setError("");
     try {
       const from = (page - 1) * pageSize;
-      const { data, error: err, count: total } = await applyFilters(supabase.from(listTable).select(availView ? `${COLUMNS}, available${pendingCol ? ", pending" : ""}${statusCols ? ", product_status_source, product_status, product_status_at" : ""}` : COLUMNS, { count: "exact" }))
+      const { data, error: err, count: total } = await applyFilters(supabase.from(listTable).select(availView ? `${COLUMNS}, available${pendingCol ? ", pending" : ""}${fakCols ? ", fakturownia_product_id, fakturownia_sent_at, fakturownia_sent_by" : ""}${statusCols ? ", product_status_source, product_status, product_status_at" : ""}` : COLUMNS, { count: "exact" }))
         .order("purchased_on", { ascending: false, nullsFirst: false })
         .order("id", { ascending: false })
         .range(from, from + pageSize - 1);
@@ -189,6 +197,10 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
         }
         if (availView && (err.code === "42P01" || err.code === "PGRST205")) {
           setAvailView(false); // brak widoku dostępności (nieuruchomione supabase/goods-available.sql) — lista po staremu
+          return;
+        }
+        if (availView && fakCols && (err.code === "42703" || err.code === "PGRST204") && /fakturownia_/.test(err.message || "")) {
+          setFakCols(false); // brak kolumn wysyłki do Fakturowni (nie uruchomiono goods-fakturownia.sql / goods-available.sql) — lista bez przycisków
           return;
         }
         if (availView && pendingCol && (err.code === "42703" || err.code === "PGRST204" || err.code === "PGRST100") && /pending/.test(err.message || "")) {
@@ -212,7 +224,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
     } finally {
       if (mine === seq.current) setLoading(false);
     }
-  }, [applyFilters, page, pageSize, reloadKey, newCols, availView, statusCols, pendingCol]);
+  }, [applyFilters, page, pageSize, reloadKey, newCols, availView, statusCols, pendingCol, fakCols]);
 
   useEffect(() => {
     load();
@@ -305,6 +317,52 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
     }
   }
 
+  // Wysyłka do Fakturowni (jedna pozycja albo zaznaczone): najpierw podgląd (dryRun — nic nie tworzy), potem potwierdzenie i właściwe wysłanie.
+  async function sendToFakturownia(ids: number[]) {
+    if (ids.length === 0 || sending) return;
+    setSending(true);
+    setError("");
+    setSendNote(null);
+    const call = async (dryRun: boolean) => {
+      const res = await fetch("/api/fakturownia/push-goods", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ ids, dryRun }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Błąd wysyłania do Fakturowni.");
+      return data as { ready: number; sent: number; skipped: number; errors: number; results: { id: number; serial: string | null; status: string; message: string; payload?: any }[] };
+    };
+    try {
+      const preview = await call(true);
+      const skipped = preview.results.filter((r) => r.status !== "ready");
+      if (preview.ready === 0) {
+        setSendNote({ ok: false, lines: ["Nic do wysłania:", ...skipped.map((r) => `${r.serial || `#${r.id}`} — ${r.message}`)] });
+        return;
+      }
+      const first = preview.results.find((r) => r.status === "ready")!;
+      const pl = first.payload as { name: string; description: string; purchase_price_gross: string; category_id?: number };
+      const ok = confirm(
+        `Wysłać do Fakturowni ${preview.ready} ${preview.ready === 1 ? "produkt" : "produktów"} (stan 1, cena zakupu brutto, kategoria wg nazwy)?\n\n` +
+          `Przykład: nazwa ${pl.name}, opis „${pl.description || "—"}”, cena zakupu brutto ${pl.purchase_price_gross} zł${pl.category_id ? "" : ", bez kategorii"}.` +
+          (skipped.length ? `\n\nPominięte (${skipped.length}):\n${skipped.slice(0, 8).map((r) => `• ${r.serial || `#${r.id}`}: ${r.message}`).join("\n")}${skipped.length > 8 ? "\n…" : ""}` : "") +
+          `\n\nTo tworzy produkty w Twoim koncie Fakturowni.`
+      );
+      if (!ok) return;
+      const done = await call(false);
+      setSendNote({
+        ok: done.errors === 0,
+        lines: [`Wysłano ${done.sent}, pominięto ${done.skipped}, błędy ${done.errors}.`, ...done.results.filter((r) => r.status !== "sent").map((r) => `${r.serial || `#${r.id}`} — ${r.message}`)],
+      });
+      setSelected(new Set());
+      setReloadKey((k) => k + 1);
+    } catch (e: any) {
+      setError(e.message || String(e));
+    } finally {
+      setSending(false);
+    }
+  }
+
   // Edycja: dociągamy cały wiersz razem z historią zmian (lista jej nie niesie; bez kolumny history — sam wiersz).
   async function startEdit(r: Row) {
     setError("");
@@ -326,7 +384,9 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
       .map(([v, n]) => ({ value: v, label: `${v === NONE ? "— (brak)" : v} (${n})` }));
   const anyFilter = !!(search || category || supplier || serialFilter);
   const showGroup = tab === "all"; // w "Wszystkie" pierwsza kolumna mówi, do której pigułki należy wiersz
-  const colSpan = (isSkup ? 18 : (isTradeIn ? 17 : 14) + (showGroup ? 1 : 0) + 1) + (availView ? (statusCols ? 2 : 1) : 0); // kolumna akcji (Edytuj / Usuń)
+  const canPush = canSend && fakCols && availView; // przyciski wysyłki do Fakturowni (potrzebują kolumn z goods-fakturownia.sql w widoku)
+  const pushable = (r: Row) => !!r.serial && !r.fakturownia_product_id && !r.available; // ma numer, nie wysłano i nie ma go w magazynie Fakturowni
+  const colSpan = (canPush ? 1 : 0) + (isSkup ? 18 : (isTradeIn ? 17 : 14) + (showGroup ? 1 : 0) + 1) + (availView ? (statusCols ? 2 : 1) : 0); // kolumna akcji (Edytuj / Usuń)
   const groupOf = (r: Row) => (r.vat === "V23" ? "V23" : r.kind === "trade_in" ? "Skup" : "VM");
 
   const headers = useMemo(
@@ -456,12 +516,38 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
 
       {error && <p className="text-rust text-xs mb-3">{error}</p>}
       {syncNote && <p className="text-teal text-xs mb-3">{syncNote}</p>}
+      {canPush && selected.size > 0 && (
+        <div className="flex flex-wrap items-center gap-3 mb-3 border border-line bg-white px-4 py-2 text-sm">
+          <span className="font-semibold">Zaznaczono: {selected.size}</span>
+          <button onClick={() => sendToFakturownia([...selected])} disabled={sending} className="bg-ink text-paper px-3 py-1.5 rounded text-sm font-semibold disabled:opacity-50">
+            {sending ? "Wysyłanie…" : `Wyślij do Fakturowni (${selected.size})`}
+          </button>
+          <button onClick={() => setSelected(new Set())} disabled={sending} className="text-inksoft hover:underline text-sm">Odznacz</button>
+        </div>
+      )}
+      {sendNote && (
+        <div className={`mb-3 border px-4 py-2 text-xs ${sendNote.ok ? "border-teal text-teal" : "border-rust text-rust"}`}>
+          {sendNote.lines.slice(0, 12).map((l, i) => <div key={i} className={i === 0 ? "font-semibold" : ""}>{l}</div>)}
+          {sendNote.lines.length > 12 && <div>… i {sendNote.lines.length - 12} więcej</div>}
+        </div>
+      )}
 
       <div className="border border-line bg-white overflow-x-auto">
         <table className="w-full text-xs">
           <thead>
             <tr className="text-left text-inksoft border-b border-line">
-              {headers.map((h) => <th key={h} className="p-2 whitespace-nowrap font-semibold">{h}</th>)}
+              {canPush && (
+                <th className="p-2 w-6">
+                  <input
+                    type="checkbox"
+                    aria-label="Zaznacz wszystkie możliwe do wysłania"
+                    title="Zaznacz / odznacz wszystkie widoczne pozycje, które można wysłać do Fakturowni"
+                    checked={rows.some(pushable) && rows.filter(pushable).every((r) => selected.has(r.id))}
+                    onChange={(e) => setSelected(e.target.checked ? new Set(rows.filter(pushable).map((r) => r.id)) : new Set())}
+                  />
+                </th>
+              )}
+              {headers.map((h, i) => <th key={`${h}-${i}`} className="p-2 whitespace-nowrap font-semibold">{h}</th>)}
             </tr>
           </thead>
           <tbody>
@@ -470,6 +556,18 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
             )}
             {rows.map((r) => (
               <tr key={r.id} className="border-b border-line last:border-b-0 hover:bg-paper align-top">
+                {canPush && (
+                  <td className="p-2">
+                    {pushable(r) && (
+                      <input
+                        type="checkbox"
+                        aria-label={`Zaznacz ${r.serial}`}
+                        checked={selected.has(r.id)}
+                        onChange={(e) => setSelected((prev) => { const n = new Set(prev); if (e.target.checked) n.add(r.id); else n.delete(r.id); return n; })}
+                      />
+                    )}
+                  </td>
+                )}
                 {showGroup && <td className="p-2 whitespace-nowrap font-semibold">{groupOf(r)}</td>}
                 <td className="p-2 font-mono whitespace-nowrap">
                   {r.serial ? <button onClick={() => setOpenSerial(r.serial)} className="text-teal hover:underline">{r.serial}</button> : "—"}
@@ -534,6 +632,15 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
                   </>
                 )}
                 <td className="p-2 whitespace-nowrap text-right">
+                  {canPush && (
+                    r.fakturownia_product_id ? (
+                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-tealsoft text-teal mr-3" title={`Wysłano do Fakturowni${r.fakturownia_sent_at ? ` ${new Date(r.fakturownia_sent_at).toLocaleString("pl-PL")}` : ""}${r.fakturownia_sent_by ? ` (${displayNameForEmail(r.fakturownia_sent_by, members)})` : ""}, produkt ${r.fakturownia_product_id}`}>W Fakturowni ✓</span>
+                    ) : r.available ? (
+                      <span className="text-[10px] text-inksoft mr-3" title="Numer jest już w magazynie Fakturowni">jest w magazynie</span>
+                    ) : r.serial ? (
+                      <button onClick={() => sendToFakturownia([r.id])} disabled={sending} className="text-teal hover:underline mr-3 disabled:opacity-50" title="Utwórz produkt w Fakturowni (najpierw podgląd i potwierdzenie)">Do Fakturowni</button>
+                    ) : null
+                  )}
                   <button onClick={() => startEdit(r)} className="text-teal hover:underline">Edytuj</button>
                   {isAdmin && <button onClick={() => removeRow(r)} className="text-rust hover:underline ml-3">Usuń</button>}
                 </td>
