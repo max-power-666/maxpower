@@ -45,9 +45,9 @@ export async function GET(request: Request) {
     const orders = await fetchAll<BbOrder & { status: string }>((a, b) =>
       db
         .from("buyback_orders")
-        .select("order_public_id, status, payment_date, creation_date, market, sku, product_title, original_price, original_price_currency, counter_offer_price")
+        .select("order_public_id, status, payment_date, creation_date, modification_date, market, sku, product_title, original_price, original_price_currency, counter_offer_price")
         .in("status", BUYBACK_PAID_STATUSES)
-        .or(`payment_date.gte.${fromIso},and(payment_date.is.null,creation_date.gte.${fromIso})`)
+        .or(`payment_date.gte.${fromIso},and(payment_date.is.null,or(creation_date.gte.${fromIso},modification_date.gte.${fromIso}))`)
         .order("order_public_id")
         .range(a, b)
     );
