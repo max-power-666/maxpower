@@ -23,7 +23,7 @@ export type FakturowniaProduct = {
   description: string;
   category_id?: number;
   purchase_price_net: string;
-  purchase_price_gross: string;
+  purchase_price_gross?: string; // tylko dla VM (bez VAT netto = brutto); dla V23 brutto liczy Fakturownia ze stawki 23
   purchase_tax?: string;
   currency: "PLN";
   quantity_unit: "szt";
@@ -34,11 +34,17 @@ export type FakturowniaProduct = {
 
 const money = (n: number) => (Math.round(n * 100) / 100).toFixed(2);
 
-// Towar V23 ma cenę zakupu w "Cena PLN" jako NETTO (VAT odliczalny); Fakturownia przechowuje cenę zakupu BRUTTO, więc doliczamy 23%.
-export function purchaseGrossFromGoods(g: Pick<GoodsForFakturownia, "vat" | "price_pln">): number | null {
+// Cena zakupu: wysyłamy NETTO (decyzja właściciela 15.10.2026). Towar V23 ma w "Cena PLN" cenę NETTO (VAT odliczalny) — idzie 1:1 jako cena zakupu netto ze stawką 23, a brutto
+// liczy Fakturownia; w VM (bez VAT) cena netto = brutto = "Cena PLN".
+export function purchaseNetFromGoods(g: Pick<GoodsForFakturownia, "price_pln">): number | null {
   const p = g.price_pln === null || g.price_pln === undefined || g.price_pln === "" ? null : Number(g.price_pln);
   if (p === null || !Number.isFinite(p) || p <= 0) return null;
-  return g.vat === "V23" ? Math.round(p * 1.23 * 100) / 100 : p;
+  return Math.round(p * 100) / 100;
+}
+// Brutto do lokalnego cache (podgląd "Dostępny" przed synchronizacją): V23 netto × 1,23, VM = netto.
+export function purchaseGrossForCache(p: Pick<FakturowniaProduct, "purchase_price_net" | "purchase_tax" | "purchase_price_gross">): number {
+  if (p.purchase_price_gross !== undefined) return Number(p.purchase_price_gross);
+  return Math.round(Number(p.purchase_price_net) * (1 + Number(p.purchase_tax || 0) / 100) * 100) / 100;
 }
 
 export function fakturowniaDescription(g: Pick<GoodsForFakturownia, "kind" | "name" | "order_no" | "invoice_no">): string {
@@ -50,17 +56,16 @@ export function fakturowniaDescription(g: Pick<GoodsForFakturownia, "kind" | "na
 
 export function buildFakturowniaProduct(g: GoodsForFakturownia, categoryId: number | null): FakturowniaProduct | null {
   const serial = (g.serial || "").trim();
-  const gross = purchaseGrossFromGoods(g);
-  if (!serial || gross === null) return null;
+  const net = purchaseNetFromGoods(g);
+  if (!serial || net === null) return null;
   return {
     name: serial,
     code: serial,
     description: fakturowniaDescription(g),
     ...(categoryId !== null ? { category_id: categoryId } : {}),
-    // jak przy wpisywaniu ręcznym (15.10.2026, zrzut formularza): bez stawki VAT cena zakupu netto = brutto; V23 — netto z Towaru, brutto ×1,23 i stawka 23
-    purchase_price_net: money(g.vat === "V23" ? gross / 1.23 : gross),
-    purchase_price_gross: money(gross),
-    ...(g.vat === "V23" ? { purchase_tax: "23" } : {}),
+    // jak przy wpisywaniu ręcznym (zrzut formularza): VM — bez stawki VAT, cena zakupu netto = brutto; V23 — netto ze stawką 23 (brutto liczy Fakturownia)
+    purchase_price_net: money(net),
+    ...(g.vat === "V23" ? { purchase_tax: "23" } : { purchase_price_gross: money(net) }),
     currency: "PLN",
     quantity_unit: "szt",
     service: "0",

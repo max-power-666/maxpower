@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { admin } from "@/lib/parcelServer";
 import { requireRole } from "@/lib/serverAuth";
-import { buildFakturowniaProduct, nameKeys, serialKey, type GoodsForFakturownia } from "@/lib/fakturowniaGoods";
+import { buildFakturowniaProduct, nameKeys, purchaseGrossForCache, serialKey, type GoodsForFakturownia } from "@/lib/fakturowniaGoods";
 
 // Towar -> Fakturownia (15.10.2026): wysyła wybrane pozycje Towaru do magazynu Fakturowni jako produkty (POST /products.json). Półautomat: przycisk w zakładce Towar
 // (jeden wiersz albo zaznaczone), z podglądem ("dryRun") przed wysyłką. Nie tworzy duplikatów: pomija pozycje bez numeru seryjnego/ceny, już wysłane z aplikacji oraz
@@ -132,8 +132,8 @@ export async function POST(request: Request) {
       // zapis w Towarze (znacznik "wysłano") + od razu do cache/historii Fakturowni, żeby "Dostępny" przeskoczył na Tak bez czekania na synchronizację
       const { error: ue } = await db.from("goods_register").update({ fakturownia_product_id: productId, fakturownia_sent_at: nowIso, fakturownia_sent_by: who }).eq("id", g.id);
       const catName = cat ? cat.name : "Bez kategorii";
-      await db.from("fakturownia_stock_cache").upsert({ id: productId, category_id: cat ? cat.id : null, category_name: catName, purchase_price_gross: Number(payload.purchase_price_gross), name: payload.name, description: payload.description, product_created_at: nowIso, updated_at: nowIso });
-      await db.from("fakturownia_purchases").upsert({ id: productId, name: payload.name, description: payload.description, purchase_price_gross: Number(payload.purchase_price_gross), category_name: catName, stock_level: 1, product_created_at: nowIso, updated_at: nowIso });
+      await db.from("fakturownia_stock_cache").upsert({ id: productId, category_id: cat ? cat.id : null, category_name: catName, purchase_price_gross: purchaseGrossForCache(payload), name: payload.name, description: payload.description, product_created_at: nowIso, updated_at: nowIso });
+      await db.from("fakturownia_purchases").upsert({ id: productId, name: payload.name, description: payload.description, purchase_price_gross: purchaseGrossForCache(payload), category_name: catName, stock_level: 1, product_created_at: nowIso, updated_at: nowIso });
       res("sent", ue ? `Wysłano (produkt ${productId}), ale nie zapisano znacznika w Towarze: ${ue.message}` : `Wysłano (produkt ${productId})${warn}.`, { productId });
       await new Promise((r) => setTimeout(r, 150));
     }
