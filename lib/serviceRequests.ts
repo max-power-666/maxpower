@@ -23,8 +23,9 @@ export const requestCode = (id: number) => `ZAP-${id}`;
 export const SERVICE_STAFF_ROLES = ["Admin", "Manager", "Księgowa", "Serwis", "Kierownik serwisu"];
 // Edycja treści i priorytetu (13.10.2026) — lustro service_requests_guard w bazie: Admin i Manager zawsze; autor własnego zlecenia, dopóki jest aktywne;
 // role realizujące zlecenia (Serwis, Kierownik serwisu) nie edytują, nawet własnych.
-// Usuwanie zleceń (13.10.2026, także hurtowe) — lustro polityki delete w bazie: is_admin() or is_service_lead(); usunięcie zapisuje audit_delete w deleted_records.
-export const REQUEST_DELETE_ROLES = ["Admin", "Kierownik serwisu"];
+// Usuwanie zleceń (13.10.2026 hurtowe; od 15.10.2026 "miękkie" — widok "Usunięte" z możliwością przywrócenia) — lustro can_delete_service_requests() w bazie:
+// Admin, Kierownik serwisu i Zamówienia. Wiersz dostaje deleted_at/deleted_by_email (ustawia trigger), nie jest kasowany.
+export const REQUEST_DELETE_ROLES = ["Admin", "Kierownik serwisu", "Zamówienia"];
 export const REQUEST_EDITOR_ROLES = ["Admin", "Manager", "Księgowa"];
 export const REQUEST_NO_EDIT_ROLES = ["Serwis", "Kierownik serwisu"];
 export function canEditRequest(role: string, isAuthor: boolean, status: RequestStatus): boolean {

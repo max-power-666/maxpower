@@ -6,7 +6,10 @@
 -- Edycja (13.10.2026): TREŚĆ i PRIORYTET zmienia Admin albo Manager (zawsze) oraz autor zlecenia, dopóki zlecenie jest aktywne (nowe / przyjęte / w realizacji) — z WYJĄTKIEM serwisantów:
 -- role Serwis i Kierownik serwisu (strona realizująca zlecenia) nie edytują treści ani priorytetu, nawet własnych zleceń; dalej przyjmują zlecenia i zmieniają status.
 -- Każda zmiana treści/priorytetu trafia do historii (action 'edited', changes: [{field, from, to}]) razem ze zmianami statusu — log na karcie zlecenia.
--- Usuwanie: Admin i Kierownik serwisu (z zapisem w deleted_records). Numer zlecenia to id (w UI "ZAP-123").
+-- Usuwanie (15.10.2026): "miękkie" — zlecenie dostaje deleted_at / deleted_by_email i znika z list, ale zostaje w widoku "Usunięte" (można je przywrócić). Usuwają i przywracają: Admin,
+-- Kierownik serwisu i rola Zamówienia (can_delete_service_requests()); kto i kiedy — ustawia trigger (zegar serwera), wpis trafia też do historii (action deleted / restored).
+-- Trwałe usunięcie wiersza (DELETE) zostaje tylko dla Admina i Kierownika serwisu, z zapisem w deleted_records — z aplikacji nie jest już używane.
+-- Numer zlecenia to id (w UI "ZAP-123").
 
 create table if not exists service_requests (
   id bigint generated always as identity primary key,
@@ -23,6 +26,8 @@ create table if not exists service_requests (
 );
 -- Priorytet (08.10.2026): wysoki / sredni / niski — wybierany przy dodawaniu zlecenia. Dodany osobno, żeby plik działał też na tabeli założonej wcześniej bez tej kolumny.
 alter table service_requests add column if not exists priority text not null default 'sredni' check (priority in ('wysoki', 'sredni', 'niski'));
+alter table service_requests add column if not exists deleted_at timestamptz;
+alter table service_requests add column if not exists deleted_by_email text;
 create index if not exists service_requests_status_idx on service_requests (status, created_at desc);
 
 -- is_service_lead() zdefiniowane też w service.sql — tu powtórzone (create or replace, ta sama treść), żeby ten plik działał nawet bez ponownego uruchomienia service.sql.
@@ -35,6 +40,12 @@ $$;
 create or replace function is_service_staff() returns boolean
 language sql stable security definer set search_path = public as $$
   select exists (select 1 from members where user_id = auth.uid() and role in ('Admin', 'Manager', 'Księgowa', 'Serwis', 'Kierownik serwisu'));
+$$;
+
+-- Kto może usuwać (i przywracać) zlecenia — "miękkie" usunięcie z widoku "Usunięte". SECURITY DEFINER jak is_admin().
+create or replace function can_delete_service_requests() returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from members where user_id = auth.uid() and role in ('Admin', 'Kierownik serwisu', 'Zamówienia'));
 $$;
 
 create or replace function service_requests_guard() returns trigger
@@ -52,6 +63,7 @@ begin
       new.created_at := now();
       new.status := 'nowe';
       new.accepted_by_email := null; new.accepted_at := null; new.status_changed_by_email := null; new.status_changed_at := null;
+      new.deleted_at := null; new.deleted_by_email := null;
     end if;
     new.history := jsonb_build_array(jsonb_build_object('at', now(), 'by_email', coalesce(new.created_by_email, who), 'action', 'created'));
     return new;
@@ -86,6 +98,23 @@ begin
     new.history := coalesce(new.history, '[]'::jsonb) || jsonb_build_array(jsonb_build_object('at', now(), 'by_email', who, 'action', 'edited', 'changes', changes));
   end if;
 
+  -- Usunięcie / przywrócenie: tylko can_delete_service_requests(); autora i czas ustawia serwer, nie żądanie.
+  if new.deleted_at is distinct from old.deleted_at then
+    if client and not can_delete_service_requests() then
+      raise exception 'Zlecenia usuwają i przywracają tylko Admin, Kierownik serwisu i Zamówienia.' using errcode = 'P0001';
+    end if;
+    if new.deleted_at is not null then
+      new.deleted_at := now();
+      new.deleted_by_email := who;
+      new.history := coalesce(new.history, '[]'::jsonb) || jsonb_build_array(jsonb_build_object('at', now(), 'by_email', who, 'action', 'deleted'));
+    else
+      new.deleted_by_email := null;
+      new.history := coalesce(new.history, '[]'::jsonb) || jsonb_build_array(jsonb_build_object('at', now(), 'by_email', who, 'action', 'restored'));
+    end if;
+  elsif client then
+    new.deleted_by_email := old.deleted_by_email;
+  end if;
+
   if new.status is distinct from old.status then
     if client and not is_service_staff() then
       raise exception 'Status zlecenia zmieniają tylko serwisanci.' using errcode = 'P0001';
@@ -112,8 +141,8 @@ create policy "authenticated insert service_requests" on service_requests for in
 drop policy if exists "service staff update service_requests" on service_requests;
 drop policy if exists "staff or author update service_requests" on service_requests;
 create policy "staff or author update service_requests" on service_requests for update
-  using (is_service_staff() or (created_by_user_id = auth.uid() and status in ('nowe', 'przyjete', 'w_realizacji')))
-  with check (is_service_staff() or (created_by_user_id = auth.uid() and status in ('nowe', 'przyjete', 'w_realizacji')));
+  using (is_service_staff() or can_delete_service_requests() or (created_by_user_id = auth.uid() and status in ('nowe', 'przyjete', 'w_realizacji')))
+  with check (is_service_staff() or can_delete_service_requests() or (created_by_user_id = auth.uid() and status in ('nowe', 'przyjete', 'w_realizacji')));
 drop policy if exists "admin or service lead delete service_requests" on service_requests;
 create policy "admin or service lead delete service_requests" on service_requests for delete using (is_admin() or is_service_lead());
 drop trigger if exists service_requests_audit_delete on service_requests;

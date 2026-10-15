@@ -34,8 +34,13 @@ export default function ReminderBanners({ session, role, onOpen }: { session: Se
         return q;
       })(),
       !isAdmin ? Promise.resolve(none) : supabase.from("backlog_items").select("id", { count: "exact", head: true }).neq("status", "done"),
-      !isService ? Promise.resolve(none) : supabase.from("service_requests").select("id", { count: "exact", head: true }).eq("status", "nowe"),
+      !isService ? Promise.resolve(none) : supabase.from("service_requests").select("id", { count: "exact", head: true }).eq("status", "nowe").is("deleted_at", null),
     ]);
+    if (isService && reqs.error) {
+      // brak kolumny deleted_at (nie uruchomiono service-requests.sql z 15.10.2026) — liczymy jak dotąd, bez usuniętych
+      const old = await supabase.from("service_requests").select("id", { count: "exact", head: true }).eq("status", "nowe");
+      Object.assign(reqs, { count: old.count, error: old.error });
+    }
     let remRows = rem.error ? [] : ((rem.data as Active[]) || []);
     if (rem.error?.code === "42703") {
       // brak kolumny lead_days (nie uruchomiono reminders.sql) — działamy jak dotąd: baner dopiero w dniu terminu

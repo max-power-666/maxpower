@@ -11,7 +11,7 @@ import { ACTIVE_REQUEST_STATUSES, canEditRequest, REQUEST_DELETE_ROLES, REQUEST_
 // Kto może zmieniać status, pilnuje baza (trigger service_requests_guard); tu przyciski i lista statusu pokazują się tylko serwisantom (canHandle).
 // Karta zlecenia (13.10.2026): klik w ID otwiera panel z edycją treści i priorytetu (autor, dopóki zlecenie jest aktywne, albo serwisant), przyciskiem "Duplikuj" i logiem zmian (kolumna history, wypełniana triggerem).
 
-type HistoryEntry = { at: string; by_email: string | null; action: "created" | "status" | "edited"; from?: string; to?: string; changes?: { field: string; from: string | null; to: string | null }[] };
+type HistoryEntry = { at: string; by_email: string | null; action: "created" | "status" | "edited" | "deleted" | "restored"; from?: string; to?: string; changes?: { field: string; from: string | null; to: string | null }[] };
 type Req = {
   id: number;
   message: string;
@@ -25,8 +25,11 @@ type Req = {
   status_changed_by_email: string | null;
   status_changed_at: string | null;
   history: HistoryEntry[] | null;
+  deleted_at?: string | null;
+  deleted_by_email?: string | null;
 };
-const COLS = "id, message, created_by_user_id, created_by_email, created_at, status, priority, accepted_by_email, accepted_at, status_changed_by_email, status_changed_at, history";
+const COLS_OLD = "id, message, created_by_user_id, created_by_email, created_at, status, priority, accepted_by_email, accepted_at, status_changed_by_email, status_changed_at, history";
+const COLS = `${COLS_OLD}, deleted_at, deleted_by_email`;
 const STATUS_STYLE: Record<RequestStatus, string> = {
   nowe: "bg-ambersoft text-amber",
   przyjete: "bg-[#e3ecf9] text-[#2a6bb5]",
@@ -54,7 +57,9 @@ export default function ServiceRequestsView({ session, members, role, canHandle 
   const [message, setMessage] = useState("");
   const [priority, setPriority] = useState<RequestPriority>("sredni");
   const [saving, setSaving] = useState(false);
-  const [filter, setFilter] = useState<"active" | "all" | RequestStatus>("active");
+  const [filter, setFilter] = useState<"active" | "all" | "deleted" | RequestStatus>("active");
+  // "Miękkie" usuwanie (15.10.2026): kolumny deleted_at / deleted_by_email pojawiają się po ponownym uruchomieniu supabase/service-requests.sql; bez nich działa stare, trwałe usuwanie.
+  const [softDelete, setSoftDelete] = useState(true);
   const [searchInput, setSearchInput] = useState("");
   const [openId, setOpenId] = useState<number | null>(null);
   // Hurtowe usuwanie (13.10.2026): checkboxy po lewej widzą tylko role z prawem usuwania (Admin, Kierownik serwisu — jak polityka delete w bazie).
@@ -64,7 +69,12 @@ export default function ServiceRequestsView({ session, members, role, canHandle 
   const headerCb = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
-    const { data, error: err } = await supabase.from("service_requests").select(COLS).order("id", { ascending: false }).limit(500);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let { data, error: err }: { data: any; error: any } = await supabase.from("service_requests").select(COLS).order("id", { ascending: false }).limit(500);
+    if (err && (err.code === "42703" || err.code === "PGRST204") && /deleted_/.test(err.message || "")) {
+      setSoftDelete(false);
+      ({ data, error: err } = await supabase.from("service_requests").select(COLS_OLD).order("id", { ascending: false }).limit(500));
+    }
     if (err) setError(err.code === "42P01" ? "Brak tabeli zleceń — uruchom supabase/service-requests.sql w Supabase." : `Nie udało się wczytać zleceń: ${err.message}`);
     else {
       setError("");
@@ -146,7 +156,8 @@ export default function ServiceRequestsView({ session, members, role, canHandle 
     () =>
       rows
         .filter((r) => {
-        if (filter === "active" ? !ACTIVE_REQUEST_STATUSES.includes(r.status) : filter !== "all" && r.status !== filter) return false;
+        if (filter === "deleted" ? !r.deleted_at : !!r.deleted_at) return false; // usunięte tylko w widoku "Usunięte"
+        if (filter === "active" ? !ACTIVE_REQUEST_STATUSES.includes(r.status) : filter !== "all" && filter !== "deleted" && r.status !== filter) return false;
         if (!search) return true;
         return r.message.toLowerCase().includes(search) || requestCode(r.id).toLowerCase().includes(search) || name(r.created_by_email).toLowerCase().includes(search);
         })
@@ -155,7 +166,9 @@ export default function ServiceRequestsView({ session, members, role, canHandle 
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [rows, filter, search, members]
   );
-  const count = (f: (r: Req) => boolean) => rows.filter(f).length;
+  const live = rows.filter((r) => !r.deleted_at);
+  const count = (f: (r: Req) => boolean) => live.filter(f).length;
+  const deletedCount = rows.length - live.length;
 
   // Zaznaczenie dotyczy tylko widocznych wierszy: zmiana filtra/wyszukiwania i przeładowanie listy zdejmują zaznaczenie wierszy, których już nie widać.
   useEffect(() => {
@@ -178,29 +191,41 @@ export default function ServiceRequestsView({ session, members, role, canHandle 
     });
   const toggleAll = () => setSelected(allVisibleSelected ? new Set() : new Set(visible.map((r) => r.id)));
 
-  async function deleteSelected() {
-    const ids = [...selected];
+  const plural = (n: number) => (n === 1 ? "zlecenie" : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? "zlecenia" : "zleceń");
+
+  // Usunięcie "miękkie": ustawiamy deleted_at (baza dopisuje autora i wpis do logu); zlecenie trafia do widoku "Usunięte" i można je przywrócić.
+  // Bez kolumn z service-requests.sql (stara baza) — dawne trwałe usuwanie.
+  async function removeIds(ids: number[], restore: boolean) {
     if (ids.length === 0) return;
     const codes = ids.slice().sort((a, b) => a - b).map(requestCode);
     const preview = codes.length > 8 ? `${codes.slice(0, 8).join(", ")} … (+${codes.length - 8})` : codes.join(", ");
-    if (!confirm(`Usunąć ${ids.length} ${ids.length === 1 ? "zlecenie" : ids.length % 10 >= 2 && ids.length % 10 <= 4 && (ids.length % 100 < 12 || ids.length % 100 > 14) ? "zlecenia" : "zleceń"} (${preview})?\n\nOperacji nie da się cofnąć w aplikacji — wiersze trafią do dziennika usunięć (tylko Admin w Supabase).`)) return;
+    const msg = restore
+      ? `Przywrócić ${ids.length} ${plural(ids.length)} (${preview})?`
+      : softDelete
+        ? `Usunąć ${ids.length} ${plural(ids.length)} (${preview})?\n\nZlecenia trafią do widoku „Usunięte” — stamtąd można je przywrócić.`
+        : `Usunąć ${ids.length} ${plural(ids.length)} (${preview})?\n\nOperacji nie da się cofnąć w aplikacji — wiersze trafią do dziennika usunięć (tylko Admin w Supabase).`;
+    if (!confirm(msg)) return;
     setDeleting(true);
     setError("");
-    let removed = 0;
+    let done = 0;
     for (let i = 0; i < ids.length; i += 100) {
       const chunk = ids.slice(i, i + 100);
-      const { data, error: err } = await supabase.from("service_requests").delete().in("id", chunk).select("id");
+      const q = softDelete
+        ? supabase.from("service_requests").update({ deleted_at: restore ? null : new Date().toISOString() }).in("id", chunk).select("id")
+        : supabase.from("service_requests").delete().in("id", chunk).select("id");
+      const { data, error: err } = await q;
       if (err) {
-        setError(`Usunięto ${removed} z ${ids.length}. Błąd: ${err.message}`);
+        setError(`${restore ? "Przywrócono" : "Usunięto"} ${done} z ${ids.length}. Błąd: ${err.message}`);
         break;
       }
-      removed += data?.length ?? 0;
+      done += data?.length ?? 0;
     }
-    if (removed < ids.length && !error) setError(`Usunięto ${removed} z ${ids.length} — pozostałych nie wolno Ci usunąć (usuwa Admin i Kierownik serwisu) albo już ich nie ma.`);
+    if (done < ids.length && !error) setError(`${restore ? "Przywrócono" : "Usunięto"} ${done} z ${ids.length} — pozostałych nie wolno Ci ${restore ? "przywrócić" : "usunąć"} (Admin, Kierownik serwisu i Zamówienia) albo już ich nie ma.`);
     setSelected(new Set());
     setDeleting(false);
     await load();
   }
+  const deleteSelected = () => removeIds([...selected], filter === "deleted");
 
   return (
     <div>
@@ -233,14 +258,15 @@ export default function ServiceRequestsView({ session, members, role, canHandle 
         {REQUEST_STATUSES.filter((s) => s.key === "zrobione" || s.key === "odrzucone").map((s) => (
           <button key={s.key} onClick={() => setFilter(s.key)} className={pill(filter === s.key)}>{s.label} ({count((r) => r.status === s.key)})</button>
         ))}
-        <button onClick={() => setFilter("all")} className={pill(filter === "all")}>Wszystkie ({rows.length})</button>
+        <button onClick={() => setFilter("all")} className={pill(filter === "all")}>Wszystkie ({live.length})</button>
+        {softDelete && <button onClick={() => setFilter("deleted")} className={pill(filter === "deleted")}>Usunięte ({deletedCount})</button>}
         <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="Szukaj: treść, ZAP-nr, osoba" className="ml-auto border border-line bg-white px-3 py-1.5 rounded text-sm w-64" />
       </div>
 
       {canDelete && selected.size > 0 && (
         <div className="flex flex-wrap items-center gap-3 mb-3 border border-line bg-white px-4 py-2 text-sm">
           <span className="font-semibold">Zaznaczono: {selected.size}</span>
-          <button onClick={deleteSelected} disabled={deleting} className="bg-rust text-paper px-3 py-1.5 rounded text-sm font-semibold disabled:opacity-50">{deleting ? "Usuwanie…" : `Usuń zaznaczone (${selected.size})`}</button>
+          <button onClick={deleteSelected} disabled={deleting} className={`${filter === "deleted" ? "bg-teal" : "bg-rust"} text-paper px-3 py-1.5 rounded text-sm font-semibold disabled:opacity-50`}>{deleting ? (filter === "deleted" ? "Przywracanie…" : "Usuwanie…") : filter === "deleted" ? `Przywróć zaznaczone (${selected.size})` : `Usuń zaznaczone (${selected.size})`}</button>
           <button onClick={() => setSelected(new Set())} disabled={deleting} className="text-inksoft hover:underline text-sm">Odznacz</button>
         </div>
       )}
@@ -267,7 +293,7 @@ export default function ServiceRequestsView({ session, members, role, canHandle 
             </tr>
           </thead>
           <tbody>
-            {!loading && visible.length === 0 && !error && <tr><td colSpan={(canHandle ? 10 : 9) + (canDelete ? 1 : 0)} className="p-6 text-center text-inksoft text-sm">{rows.length === 0 ? "Brak zleceń — dodaj pierwsze powyżej." : "Brak zleceń w tym widoku."}</td></tr>}
+            {!loading && visible.length === 0 && !error && <tr><td colSpan={(canHandle ? 10 : 9) + (canDelete ? 1 : 0)} className="p-6 text-center text-inksoft text-sm">{rows.length === 0 ? "Brak zleceń — dodaj pierwsze powyżej." : filter === "deleted" ? "Brak usuniętych zleceń." : "Brak zleceń w tym widoku."}</td></tr>}
             {visible.map((r) => (
               <tr key={r.id} className={`border-b border-line last:border-b-0 align-top ${selected.has(r.id) ? "bg-tealsoft" : ""}`}>
                 {canDelete && (
@@ -290,19 +316,20 @@ export default function ServiceRequestsView({ session, members, role, canHandle 
                   })()}
                 </td>
                 <td className="p-3 whitespace-nowrap">
-                  {canHandle ? (
+                  {canHandle && !r.deleted_at ? (
                     <select value={r.status} onChange={(e) => setStatus(r.id, e.target.value as RequestStatus)} className={`text-xs font-semibold px-2 py-1 rounded border border-line ${STATUS_STYLE[r.status]}`}>
                       {REQUEST_STATUSES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
                     </select>
                   ) : (
                     <span className={`text-xs font-semibold px-2 py-1 rounded ${STATUS_STYLE[r.status]}`}>{REQUEST_STATUS_LABEL[r.status]}</span>
                   )}
+                  {r.deleted_at && <div className="text-[10px] text-rust mt-1">Usunięto: {name(r.deleted_by_email ?? null)}, {fmtDT(r.deleted_at)}</div>}
                   {r.status_changed_at && <div className="text-[10px] text-inksoft mt-1">{fmtDT(r.status_changed_at)}</div>}
                 </td>
                 <td className="p-3 text-xs whitespace-nowrap">{r.accepted_at ? <>{name(r.accepted_by_email)}<div className="text-[10px] text-inksoft">{fmtDT(r.accepted_at)}</div></> : <span className="text-inksoft">—</span>}</td>
                 {canHandle && (
                   <td className="p-3 whitespace-nowrap">
-                    {r.status === "nowe" && <button onClick={() => setStatus(r.id, "przyjete")} className="bg-teal text-paper px-3 py-1 rounded text-xs font-semibold">Przyjmij</button>}
+                    {r.status === "nowe" && !r.deleted_at && <button onClick={() => setStatus(r.id, "przyjete")} className="bg-teal text-paper px-3 py-1 rounded text-xs font-semibold">Przyjmij</button>}
                   </td>
                 )}
                 <td className="p-3 whitespace-nowrap">
@@ -323,8 +350,10 @@ export default function ServiceRequestsView({ session, members, role, canHandle 
           <RequestCard
             key={r.id}
             r={r}
-            canEdit={canEdit}
-            canHandle={canHandle}
+            canEdit={canEdit && !r.deleted_at}
+            canHandle={canHandle && !r.deleted_at}
+            canDelete={canDelete && softDelete}
+            onRemove={(restore) => removeIds([r.id], restore)}
             name={name}
             skuHits={skuHits}
             onClose={() => setOpenId(null)}
@@ -342,11 +371,13 @@ export default function ServiceRequestsView({ session, members, role, canHandle 
 const CARD_BTN = "px-3 py-1.5 rounded text-sm font-semibold border border-line bg-white disabled:opacity-50";
 
 function RequestCard({
-  r, canEdit, canHandle, name, skuHits, onClose, onSave, onSetStatus, onDuplicate,
+  r, canEdit, canHandle, canDelete, onRemove, name, skuHits, onClose, onSave, onSetStatus, onDuplicate,
 }: {
   r: Req;
   canEdit: boolean;
   canHandle: boolean;
+  canDelete: boolean;
+  onRemove: (restore: boolean) => void;
   name: (email: string | null) => string;
   skuHits: { t: string; o: OrderSku }[];
   onClose: () => void;
@@ -395,6 +426,7 @@ function RequestCard({
           <button onClick={onClose} className="text-inksoft text-lg" aria-label="Zamknij">✕</button>
         </div>
 
+        {r.deleted_at && <div className="border border-rust bg-rustsoft text-rust text-xs font-semibold px-3 py-2 mb-3">Usunięte — {name(r.deleted_by_email ?? null)}, {fmtDT(r.deleted_at)}</div>}
         <div className="text-xs font-semibold text-inksoft mb-1">TREŚĆ</div>
         {canEdit ? (
           <textarea
@@ -447,6 +479,9 @@ function RequestCard({
           {canEdit && <button onClick={save} disabled={saving || !dirty || !message.trim()} className="bg-ink text-paper px-4 py-1.5 rounded text-sm font-semibold disabled:opacity-50">{saving ? "Zapisywanie…" : "Zapisz zmiany"}</button>}
           {canEdit && dirty && <button onClick={() => { setMessage(r.message); setPriority(r.priority); setErr(""); }} className={CARD_BTN}>Cofnij zmiany</button>}
           <button onClick={onDuplicate} title="Utwórz nowe zlecenie z tą samą treścią i priorytetem" className={CARD_BTN}>Duplikuj</button>
+          {canDelete && (r.deleted_at
+            ? <button onClick={() => onRemove(true)} className={`${CARD_BTN} text-teal`}>Przywróć</button>
+            : <button onClick={() => onRemove(false)} className={`${CARD_BTN} text-rust`}>Usuń</button>)}
           {savedAt && <span className="text-xs text-teal font-semibold">Zapisano ✓</span>}
         </div>
         {err && <p className="text-rust text-xs mb-2">{err}</p>}
@@ -462,6 +497,8 @@ function RequestCard({
                 {h.action === "created" && <>Utworzono</>}
                 {h.action === "status" && <>Status: <span className="font-semibold">{REQUEST_STATUS_LABEL[h.from as RequestStatus] ?? h.from}</span> → <span className="font-semibold">{REQUEST_STATUS_LABEL[h.to as RequestStatus] ?? h.to}</span></>}
                 {h.action === "edited" && <>Edytowano</>}
+                {h.action === "deleted" && <>Usunięto</>}
+                {h.action === "restored" && <>Przywrócono</>}
                 {" — "}<span className="font-semibold">{h.by_email ? name(h.by_email) : "system"}</span>, {fmtDT(h.at)}
               </div>
               {!!h.changes?.length && (
