@@ -42,6 +42,9 @@ type FilterKey = (typeof FILTERS)[number]["key"];
 const pill = (active: boolean) => `px-3 py-1.5 rounded-full text-sm font-semibold border ${active ? "bg-ink text-paper border-ink" : "bg-white border-line"}`;
 const fmt = (n: number | null, d = 2) => (n === null ? "—" : n.toLocaleString("pl-PL", { minimumFractionDigits: d, maximumFractionDigits: d }));
 const fmtDate = (iso: string | null) => (iso ? new Date(iso + "T12:00:00").toLocaleDateString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—");
+// Statusy części do wyboru w liście (15.10.2026, ZAD-5): "Dotarło" jest domyślne, "Reklamacja" i "Uszkodzony" serwis ustawia sam; "Demontaż" (część wyjęta z innego
+// urządzenia — nie wchodzi do kosztu serwisu w Marży) i "Zareklamowane" zostają, bo występują w danych z arkusza. Nieznana wartość z bazy też jest widoczna na liście.
+const STATUS_OPTIONS = ["Dotarło", "Reklamacja", "Zareklamowane", "Uszkodzony", "Demontaż"];
 const STATUS_STYLE: Record<string, string> = {
   "Dotarło": "bg-tealsoft text-teal",
   "Demontaż": "bg-[#e3ecf9] text-[#2a6bb5]",
@@ -148,7 +151,7 @@ export default function PartsView({ members, session }: { members: MemberLite[];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, filter, reload]);
 
-  async function saveField(id: number, patch: Partial<Pick<Part, "usage_notes">>) {
+  async function saveField(id: number, patch: Partial<Pick<Part, "usage_notes" | "status">>) {
     setError("");
     const { error: err } = await supabase.from("service_parts").update(patch).eq("id", id);
     if (err) setError(`Nie udało się zapisać: ${err.message}`);
@@ -214,7 +217,16 @@ export default function PartsView({ members, session }: { members: MemberLite[];
                 <td className="p-3 text-right font-mono whitespace-nowrap">{r.price_net === null ? "—" : `${fmt(Number(r.price_net))} ${r.currency || ""}`}</td>
                 <td className="p-3 text-right font-mono font-semibold whitespace-nowrap">{fmt(r.price_pln === null ? null : Number(r.price_pln))}</td>
                 <td className="p-3">
-                  {r.status ? <span className={`px-2 py-0.5 rounded text-xs font-semibold ${STATUS_STYLE[r.status] || "bg-paper text-inksoft"}`}>{r.status}</span> : <span className="text-inksoft">—</span>}
+                  <select
+                    value={r.status ?? ""}
+                    onChange={(e) => saveField(r.id, { status: e.target.value || null })}
+                    title="Status części — zmiana zapisuje się od razu"
+                    className={`px-2 py-1 rounded text-xs font-semibold border border-line ${r.status ? STATUS_STYLE[r.status] || "bg-paper text-inksoft" : "bg-paper text-inksoft"}`}
+                  >
+                    {!r.status && <option value="">—</option>}
+                    {r.status && !STATUS_OPTIONS.includes(r.status) && <option value={r.status}>{r.status}</option>}
+                    {STATUS_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
+                  </select>
                 </td>
                 <td className="p-3">
                   <div className="flex items-center gap-1">
@@ -247,7 +259,7 @@ export default function PartsView({ members, session }: { members: MemberLite[];
       </div>
       <p className="text-[11px] text-inksoft mt-3 max-w-4xl">
         Cena netto PLN to cena jednostkowa części. Części przypisane do numeru seryjnego wchodzą do kosztu serwisu w zakładce Marża (części przyjęte do dnia zamówienia, bez wierszy „Demontaż”).
-        Dane zakupowe (z arkusza albo z importu faktury) są tylko do odczytu. Numer seryjny/IMEI urządzenia pojawia się automatycznie, gdy serwisant wpisze kod części w naprawie (Naprawy → kolumna „Części”) — dotyczy części z unikalnym kodem; zmieniasz tu tylko uwagi.
+        Dane zakupowe (z arkusza albo z importu faktury) są tylko do odczytu. Numer seryjny/IMEI urządzenia pojawia się automatycznie, gdy serwisant wpisze kod części w naprawie (Naprawy → kolumna „Części”) — dotyczy części z unikalnym kodem; zmieniasz tu status części i uwagi.
       </p>
 
       {importing && <PartsImportDialog session={session} onClose={() => setImporting(false)} onSaved={() => { setPage(1); setReload((n) => n + 1); }} />}
