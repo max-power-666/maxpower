@@ -111,18 +111,42 @@ const near = (a: unknown, b: number | null) => (a === null || a === undefined ? 
 // Poprawka istniejącego wiersza automatycznego: UZUPEŁNIA tylko puste pola (numer seryjny/SKU wpisane przez pracownika później, kurs, kategoria…) —
 // niczego niepustego nie nadpisuje (ręczne zmiany są bezpieczne). Jedyna wartość odświeżana na bieżąco to Serwis (koszty części przypisanych po zakupie);
 // po jego zmianie albo uzupełnieniu składników przeliczana jest "Cena + koszty". Zwraca same zmienione pola (pusty obiekt = nic do zrobienia).
-export function refreshPatch(existing: Existing, built: BuiltGoods): Partial<BuiltGoods> {
+// WYJĄTEK — data płatności (15.10.2026): Back Market potrafi oznaczyć zamówienie jako opłacone (status PAID) chwilę PRZED wpisaniem daty płatności. Wiersz powstaje wtedy
+// z datą utworzenia zamówienia (fallback), a kurs NBP, ceny w PLN, PCC i prowizja są liczone od niej — przez co świeży zakup lądował w Skupie ze starą datą (np. 01.10 zamiast
+// 15.10) i z kursem z innego dnia. Gdy data płatności jest już znana, a data zakupu wiersza to dokładnie data utworzenia zamówienia (czyli wiersz powstał z fallbacku) i różni
+// się od daty płatności, poprawiamy datę i wszystkie wartości od niej zależne. Data zakupu zmieniona ręcznie na inną niż utworzenie zamówienia nie jest ruszana.
+export function paymentDateFix(existing: Existing, order: { payment_date: string | null; creation_date: string }, built: BuiltGoods): Partial<BuiltGoods> | null {
+  if (!order.payment_date) return null;
+  const paid = warsawDate(order.payment_date);
+  const created = warsawDate(order.creation_date);
+  const cur = String(existing.purchased_on ?? "");
+  if (!cur || cur === paid || cur !== created) return null;
+  if (built.price_pln === null) return null; // brak kursu dla nowej daty — nie psujemy istniejących wartości
+  return {
+    purchased_on: built.purchased_on,
+    nbp_rate: built.nbp_rate,
+    price_pln: built.price_pln,
+    pcc: built.pcc,
+    commission: built.commission,
+    commission_pcc: built.commission_pcc,
+  };
+}
+
+export function refreshPatch(existing: Existing, built: BuiltGoods, order?: { payment_date: string | null; creation_date: string }): Partial<BuiltGoods> {
   const patch: Record<string, unknown> = {};
+  const fix = order ? paymentDateFix(existing, order, built) : null;
+  if (fix) Object.assign(patch, fix);
   const fillKeys: (keyof BuiltGoods)[] = ["serial", "name", "category", "country", "nbp_rate", "price_pln", "pcc", "commission", "commission_pcc"];
   for (const k of fillKeys) if (empty(existing[k]) && !empty(built[k])) patch[k] = built[k];
   if (built.costs !== null && !near(existing.costs, built.costs)) patch.costs = built.costs;
   const merged = { ...existing, ...patch } as Existing;
+  if (fix) merged.total_pln = null; // wartości od daty płatności zmieniły się — "Cena + koszty" liczymy od nowa poniżej
   const pricePln = num(merged.price_pln as number | null);
   const commissionPcc = num(merged.commission_pcc as number | null);
   const costs = num(merged.costs as number | null);
   if (pricePln !== null && commissionPcc !== null) {
     const total = r2(pricePln + (costs ?? 0) + commissionPcc);
-    if (!near(existing.total_pln, total)) patch.total_pln = total;
+    if (fix || !near(existing.total_pln, total)) patch.total_pln = total;
   }
   return patch as Partial<BuiltGoods>;
 }

@@ -58,7 +58,7 @@ export async function GET(request: Request) {
     for (const part of chunks(ids, 100)) {
       const { data: g, error: ge } = await db
         .from("goods_register")
-        .select("id, order_no, source, serial, name, category, country, nbp_rate, price_pln, pcc, commission, commission_pcc, costs, total_pln")
+        .select("id, order_no, source, purchased_on, serial, name, category, country, nbp_rate, price_pln, pcc, commission, commission_pcc, costs, total_pln")
         .eq("kind", "trade_in")
         .in("order_no", part);
       if (ge) throw new Error(ge.message);
@@ -104,7 +104,7 @@ export async function GET(request: Request) {
         skippedSheet++; // zamówienie jest już w arkuszu — wiersz zamrożony
         continue;
       }
-      const patch = refreshPatch(ex, built);
+      const patch = refreshPatch(ex, built, o);
       if (Object.keys(patch).length === 0) {
         unchanged++;
         continue;

@@ -55,7 +55,13 @@ const pageBtn = "px-3 py-1.5 rounded border border-line text-sm bg-white disable
 async function fetchAll<T>(build: (from: number, to: number) => PromiseLike<{ data: unknown; error: { message: string } | null }>): Promise<T[]> {
   const out: T[] = [];
   for (let from = 0; ; from += 1000) {
-    const { data, error } = await build(from, from + 999);
+    // chwilowe "statement timeout" (obciążona baza) nie przerywa całej listy — każdą stronę próbujemy do 3 razy z krótką przerwą
+    let res = await build(from, from + 999);
+    for (let attempt = 1; res.error && attempt < 3; attempt++) {
+      await new Promise((r) => setTimeout(r, 800 * attempt));
+      res = await build(from, from + 999);
+    }
+    const { data, error } = res;
     if (error) throw new Error(error.message);
     const chunk = (data as T[]) || [];
     out.push(...chunk);
