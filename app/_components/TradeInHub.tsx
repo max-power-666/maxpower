@@ -255,6 +255,12 @@ function IntakeView({
     try {
       let listQuery = supabase.from("buyback_order_intake").select(intakeColumns(), { count: "exact" }).order("entered_at", { ascending: false });
       if (search) listQuery = listQuery.or(`order_public_id.ilike.%${escapeLike(search)}%,serial_number.ilike.%${escapeLike(search)}%`);
+      else {
+        // Okres (Dziś / 7 / 30 dni) zawęża też listę paczek (15.10.2026, jak w Serwisie): paczki rozpoczęte lub zakończone w okresie oraz wciąż trwające (bez daty
+        // zakończenia). Wyszukiwanie po numerze szuka w całej historii, więc okresu wtedy nie stosujemy.
+        const since = rangeStart(interval);
+        listQuery = listQuery.or(`entered_at.gte.${since},finished_at.gte.${since},finished_at.is.null`);
+      }
       const from = (page - 1) * pageSize;
       listQuery = listQuery.range(from, from + pageSize - 1);
       // Punkty liczymy po points_awarded_at (pierwsze zaliczenie paczki, ustawiane triggerem w bazie) — zmiana statusu między statusami
@@ -554,7 +560,7 @@ function IntakeView({
       <h2 className="text-xs font-semibold text-inksoft mb-2">PODSUMOWANIE PUNKTACJI (obsłużone, kontroferty, ok. dok. i problemy)</h2>
       <div className="flex gap-2 mb-2">
         {INTERVALS.map((i) => (
-          <button key={i.key} onClick={() => setInterval(i.key)} className={pill(interval === i.key)}>{i.label}</button>
+          <button key={i.key} onClick={() => { setInterval(i.key); setPage(1); }} className={pill(interval === i.key)} title="Okres punktacji i listy paczek poniżej">{i.label}</button>
         ))}
       </div>
       <div className="border border-line bg-white mb-6">
@@ -663,7 +669,7 @@ function IntakeView({
           </thead>
           <tbody>
             {!loading && entries.length === 0 && (
-              <tr><td colSpan={14 + (hasDefects ? 1 : 0) + (hasChannel ? 1 : 0) + (isAdminOrManager ? 1 : 0) + (isAdmin ? 1 : 0)} className="p-6 text-center text-inksoft text-sm">{search ? "Nic nie znaleziono dla tego numeru." : "Brak paczek — rozpocznij pierwszą powyżej."}</td></tr>
+              <tr><td colSpan={14 + (hasDefects ? 1 : 0) + (hasChannel ? 1 : 0) + (isAdminOrManager ? 1 : 0) + (isAdmin ? 1 : 0)} className="p-6 text-center text-inksoft text-sm">{search ? "Nic nie znaleziono dla tego numeru." : "Brak paczek w wybranym okresie — rozpocznij pierwszą powyżej albo wybierz dłuższy okres."}</td></tr>
             )}
             {entries.map((e) => (
               <tr key={e.id} className="border-b border-line last:border-b-0" style={{ backgroundColor: rowColorForUser(e.entered_by_email) }}>
