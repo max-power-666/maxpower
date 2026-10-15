@@ -41,6 +41,7 @@ type Row = {
   product_status?: string | null;
   product_status_at?: string | null;
   available?: boolean; // numer seryjny jest w magazynie Fakturowni (widok goods_register_available)
+  pending?: boolean; // opłacony zakup z Buyback jeszcze nie w magazynie Fakturowni (widok goods_register_available)
   source?: string | null; // 'arkusz' | 'buyback' (wiersz dopisany automatycznie z opłaconego zamówienia Buyback)
   commission?: number | null; // Prowizja (PLN) = 10% + logistyka; dla wierszy z arkusza puste — liczone jako prowizja + PCC − PCC
 };
@@ -89,6 +90,8 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
   const [availFilter, setAvailFilter] = useState<"yes" | "all" | "no">("yes");
   const [availView, setAvailView] = useState(true);
   const [statusCols, setStatusCols] = useState(true); // kolumny product_status_* w widoku (po ponownym uruchomieniu goods-available.sql)
+  // Kolumna `pending` (15.10.2026): opłacony zakup z Buyback, który jeszcze nie dotarł do magazynu Fakturowni — liczy się jako "dostępne" w filtrze, żeby nowe zakupy były widoczne od razu.
+  const [pendingCol, setPendingCol] = useState(true);
   const listTable = availView ? "goods_register_available" : "goods_register";
   const [serialFilter, setSerialFilter] = useState<"" | "with" | "without">(""); // filtr numeru seryjnego: z numerem / bez numeru (14.10.2026)
   const [rows, setRows] = useState<Row[]>([]);
@@ -128,6 +131,14 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
     setPage(1);
   }
 
+  // Filtr dostępności: "dostępne" = jest w magazynie ALBO oczekuje na magazyn (świeży zakup z Buyback); "niedostępne" = żadne z tych dwóch.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const withAvail = (q: any) => {
+    if (!availView || availFilter === "all") return q;
+    if (!pendingCol) return q.eq("available", availFilter === "yes");
+    return availFilter === "yes" ? q.or("available.eq.true,pending.eq.true") : q.eq("available", false).eq("pending", false);
+  };
+
   // Wspólne filtry zapytania (wyszukiwarka i trzy listy).
   const applyFilters = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -143,7 +154,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
         }
       } else if (category) q = category === NONE ? q.is("category", null) : q.eq("category", category);
       if (supplier) q = supplier === NONE ? q.is("supplier", null) : q.eq("supplier", supplier);
-      if (availView && availFilter !== "all") q = q.eq("available", availFilter === "yes");
+      q = withAvail(q);
       if (serialFilter === "without") q = q.or("serial.is.null,serial.eq.");
       else if (serialFilter === "with") q = q.not("serial", "is", null).neq("serial", "");
       if (search) {
@@ -152,11 +163,9 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
       }
       return q;
     },
-    [tab, category, supplier, search, serialFilter, availFilter, availView]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tab, category, supplier, search, serialFilter, availFilter, availView, pendingCol]
   );
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const withAvail = (q: any) => (availView && availFilter !== "all" ? q.eq("available", availFilter === "yes") : q);
 
   const load = useCallback(async () => {
     const mine = ++seq.current;
@@ -164,7 +173,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
     setError("");
     try {
       const from = (page - 1) * pageSize;
-      const { data, error: err, count: total } = await applyFilters(supabase.from(listTable).select(availView ? `${COLUMNS}, available${statusCols ? ", product_status_source, product_status, product_status_at" : ""}` : COLUMNS, { count: "exact" }))
+      const { data, error: err, count: total } = await applyFilters(supabase.from(listTable).select(availView ? `${COLUMNS}, available${pendingCol ? ", pending" : ""}${statusCols ? ", product_status_source, product_status, product_status_at" : ""}` : COLUMNS, { count: "exact" }))
         .order("purchased_on", { ascending: false, nullsFirst: false })
         .order("id", { ascending: false })
         .range(from, from + pageSize - 1);
@@ -176,6 +185,10 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
         }
         if (availView && (err.code === "42P01" || err.code === "PGRST205")) {
           setAvailView(false); // brak widoku dostępności (nieuruchomione supabase/goods-available.sql) — lista po staremu
+          return;
+        }
+        if (availView && pendingCol && (err.code === "42703" || err.code === "PGRST204" || err.code === "PGRST100") && /pending/.test(err.message || "")) {
+          setPendingCol(false); // widok bez kolumny pending (stara wersja goods-available.sql) — filtr dostępności po staremu
           return;
         }
         if (availView && statusCols && (err.code === "42703" || err.code === "PGRST204") && /product_status/.test(err.message || "")) {
@@ -195,7 +208,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
     } finally {
       if (mine === seq.current) setLoading(false);
     }
-  }, [applyFilters, page, pageSize, reloadKey, newCols, availView, statusCols]);
+  }, [applyFilters, page, pageSize, reloadKey, newCols, availView, statusCols, pendingCol]);
 
   useEffect(() => {
     load();
@@ -249,7 +262,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
     return () => {
       cancelled = true;
     };
-  }, [tab, reloadKey, listTable, availFilter]);
+  }, [tab, reloadKey, listTable, availFilter, pendingCol]);
 
   useEffect(() => {
     (async () => {
@@ -260,7 +273,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
       }
       setTabCounts(out);
     })();
-  }, [reloadKey, listTable, availFilter]);
+  }, [reloadKey, listTable, availFilter, pendingCol]);
 
   async function removeRow(r: Row) {
     if (!confirm(`Usunąć z rejestru pozycję ${r.serial ?? r.name ?? r.id}? Tej operacji nie można cofnąć (zapis zostaje tylko w dzienniku usunięć).`)) return;
@@ -460,7 +473,11 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
                 </td>
                 {availView && (
                   <td className="p-2 whitespace-nowrap">
-                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${r.available ? "bg-tealsoft text-teal" : "bg-paper text-inksoft border border-line"}`}>{r.available ? "Tak" : "Nie"}</span>
+                    {!r.available && r.pending ? (
+                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-ambersoft text-amber" title="Opłacony zakup z Buyback — paczka jeszcze nie jest w magazynie Fakturowni (nie wprowadzona albo w drodze)">Oczekuje</span>
+                    ) : (
+                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${r.available ? "bg-tealsoft text-teal" : "bg-paper text-inksoft border border-line"}`}>{r.available ? "Tak" : "Nie"}</span>
+                    )}
                   </td>
                 )}
                 {availView && statusCols && (

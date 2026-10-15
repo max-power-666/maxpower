@@ -8,6 +8,18 @@
 set lock_timeout = '5s';
 drop view if exists goods_register_available;
 create view goods_register_available with (security_invoker = true) as
+select b.*,
+       -- "Oczekuje": opłacony zakup z Buyback (auto), który nie jest jeszcze w magazynie i nigdy w nim nie był (brak numeru w historii zakupów Fakturowni) — paczka jeszcze nie dotarła/nie została wprowadzona.
+       -- Tylko 30 dni od zakupu, żeby porzucone wpisy nie wisiały wiecznie. Odróżnia je od sztuk już sprzedanych (te są w historii Fakturowni).
+       (b.source = 'buyback'
+        and not b.available
+        and b.purchased_on >= current_date - 30
+        and not exists (
+          select 1 from fakturownia_purchases fp
+          where btrim(coalesce(b.serial, '')) <> ''
+            and lower(btrim(fp.name)) = lower(btrim(b.serial))
+        )) as pending
+from (
 select g.*,
        (btrim(coalesce(g.serial, '')) <> ''
         and exists (
@@ -31,5 +43,6 @@ select g.*,
        (select ps.source from product_status_for(g.serial) ps) as product_status_source,
        (select ps.status from product_status_for(g.serial) ps) as product_status,
        (select ps.at from product_status_for(g.serial) ps) as product_status_at
-from goods_register g;
+from goods_register g
+) b;
 grant select on goods_register_available to authenticated;
