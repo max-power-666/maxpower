@@ -50,6 +50,10 @@ type Totals = { price_pln: number; costs: number; total_pln: number; pcc: number
 
 // Trzy pigułki (10.10.2026): VM i V23 to podział wg VAT, Skup (dawniej "Trade-in") to zakupy ze skupu Back Market.
 // V23 = każdy wiersz z VAT V23 (niezależnie od arkusza), VM i Skup = reszta swojego rodzaju (VAT VM albo pusty).
+// Kanały skupu (jak w Trade-in: Buyback, Allegro, Vinted, OLX, Umowa) są pokazywane plakietką we wszystkich pigułkach — Buyback na teal, pozostałe na amber, tak jak w Trade-in.
+// Zwykli dostawcy z arkusza VM/V23 (PCS, AAR, LW…) zostają tekstem.
+const CHANNEL_NAMES = ["buyback", "allegro", "vinted", "olx", "umowa"];
+const isChannelName = (v: string | null | undefined) => !!v && CHANNEL_NAMES.includes(v.trim().toLowerCase());
 type Tab = "vm" | "v23" | "skup" | "all";
 const TABS: { key: Tab; label: string }[] = [
   { key: "all", label: "Wszystkie" }, // wszystkie wiersze razem (10.10.2026); od 15.10.2026 pierwsza pigułka i widok domyślny
@@ -493,7 +497,7 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
                   </td>
                 )}
                 <td className="p-2 min-w-[12rem]">{r.name || "—"}</td>
-                <td className="p-2 whitespace-nowrap">{isSkup || r.supplier === "Buyback" ? (r.supplier ? <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${r.supplier === "Buyback" ? "bg-tealsoft text-teal" : "bg-ambersoft text-amber"}`}>{r.supplier}</span> : "—") : r.supplier || "—"}</td>
+                <td className="p-2 whitespace-nowrap">{isSkup || isChannelName(r.supplier) ? (r.supplier ? <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${r.supplier === "Buyback" ? "bg-tealsoft text-teal" : "bg-ambersoft text-amber"}`}>{r.supplier}</span> : "—") : r.supplier || "—"}</td>
                 <td className="p-2 whitespace-nowrap">{fmtDate(r.purchased_on)}</td>
                 {!isSkup && <td className="p-2 whitespace-nowrap">{fmtDate(r.delivered_on)}</td>}
                 <td className="p-2 font-mono whitespace-nowrap">{r.order_no || "—"}</td>
