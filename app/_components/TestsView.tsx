@@ -333,9 +333,9 @@ export default function TestsView({
             {recent.map((r) => (
               <tr key={r.id} className="border-b border-line last:border-b-0 hover:bg-paper">
                 <td className="p-3 text-xs text-inksoft whitespace-nowrap">{fmtDateTime(r.started_at)}</td>
-                <td className="p-3">
+                <td className="p-3 whitespace-nowrap">
                   <span
-                    className="inline-block text-xs font-semibold px-2 py-1 rounded-full bg-paper text-ink"
+                    className="inline-block whitespace-nowrap text-xs font-semibold px-2 py-1 rounded-full bg-paper text-ink"
                     style={{ backgroundColor: colorForUser(r.employee_email), color: colorForUser(r.employee_email) ? "#1f2937" : undefined }}
                   >
                     {displayNameForEmail(r.employee_email, members)}
