@@ -351,8 +351,8 @@ export default function GoodsView({ session, members, isAdmin, canSend = false }
       if (!ok) return;
       const done = await call(false);
       setSendNote({
-        ok: done.errors === 0,
-        lines: [`Wysłano ${done.sent}, pominięto ${done.skipped}, błędy ${done.errors}.`, ...done.results.filter((r) => r.status !== "sent").map((r) => `${r.serial || `#${r.id}`} — ${r.message}`)],
+        ok: done.errors === 0 && !done.results.some((r) => /UWAGA/.test(r.message)),
+        lines: [`Wysłano ${done.sent}, pominięto ${done.skipped}, błędy ${done.errors}.`, ...done.results.filter((r) => r.status !== "sent" || /UWAGA/.test(r.message)).map((r) => `${r.serial || `#${r.id}`} — ${r.message}`)],
       });
       setSelected(new Set());
       setReloadKey((k) => k + 1);

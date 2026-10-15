@@ -161,9 +161,14 @@ export async function POST(request: Request) {
       // zapis w Towarze (znacznik "wysłano") + od razu do cache/historii Fakturowni, żeby "Dostępny" przeskoczył na Tak bez czekania na synchronizację
       const { error: ue } = await db.from("goods_register").update({ fakturownia_product_id: productId, fakturownia_sent_at: nowIso, fakturownia_sent_by: who }).eq("id", g.id);
       const catName = cat ? cat.name : "Bez kategorii";
-      await db.from("fakturownia_stock_cache").upsert({ id: productId, category_id: cat ? cat.id : null, category_name: catName, purchase_price_gross: purchaseGrossForCache(payload), name: payload.name, description: payload.description, product_created_at: nowIso, updated_at: nowIso });
-      await db.from("fakturownia_purchases").upsert({ id: productId, name: payload.name, description: payload.description, purchase_price_gross: purchaseGrossForCache(payload), category_name: catName, stock_level: 1, product_created_at: nowIso, updated_at: nowIso });
-      res("sent", ue ? `Wysłano (produkt ${productId}), ale nie zapisano znacznika w Towarze: ${ue.message}` : `Wysłano (produkt ${productId})${warn}.`, { productId });
+      // Stan magazynowy bierzemy z ODPOWIEDZI Fakturowni (nie zakładamy 1): przy włączonym module magazynowym stan zmieniają dokumenty PZ i pole stock_level z API bywa ignorowane.
+      const stock = json.stock_level === undefined || json.stock_level === null ? null : Number(json.stock_level);
+      await db.from("fakturownia_purchases").upsert({ id: productId, name: payload.name, description: payload.description, purchase_price_gross: purchaseGrossForCache(payload), category_name: catName, stock_level: stock, product_created_at: nowIso, updated_at: nowIso });
+      if (stock === 1) {
+        await db.from("fakturownia_stock_cache").upsert({ id: productId, category_id: cat ? cat.id : null, category_name: catName, purchase_price_gross: purchaseGrossForCache(payload), name: payload.name, description: payload.description, product_created_at: nowIso, updated_at: nowIso });
+      }
+      const stockWarn = stock === 1 ? "" : ` UWAGA: stan magazynowy w Fakturowni = ${stock === null ? "nieznany" : stock} — wystaw dokument PZ (przyjęcie), żeby stan wynosił 1.`;
+      res("sent", ue ? `Wysłano (produkt ${productId}), ale nie zapisano znacznika w Towarze: ${ue.message}${stockWarn}` : `Wysłano (produkt ${productId})${warn}.${stockWarn}`, { productId });
       await new Promise((r) => setTimeout(r, 150));
     }
     for (const id of ids) if (!goods.some((g) => g.id === id)) results.push({ id, serial: null, status: "skipped", message: "Pozycja nie istnieje." });
