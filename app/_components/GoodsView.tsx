@@ -2,6 +2,7 @@
 
 import { productStatusParts } from "@/lib/workLog";
 import { skuCategoryOf, CAMERA_CATEGORY } from "@/lib/skuParts";
+import { exportVat } from "@/lib/fakturowniaGoods";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { escapeLike } from "@/lib/search";
@@ -386,7 +387,8 @@ export default function GoodsView({ session, members, isAdmin, canSend = false }
   const anyFilter = !!(search || category || supplier || serialFilter);
   const showGroup = tab === "all"; // w "Wszystkie" pierwsza kolumna mówi, do której pigułki należy wiersz
   const canPush = canSend && fakCols && availView; // przyciski wysyłki do Fakturowni (potrzebują kolumn z goods-fakturownia.sql w widoku)
-  const pushable = (r: Row) => !!r.serial && !(r.fakturownia_product_id && r.fakturownia_pz_id) && !r.available; // ma numer, nie ma kompletu (produkt + PZ) i nie ma go w magazynie Fakturowni
+  const hasExportVat = (r: Row) => exportVat(r.vat) !== null; // tylko VM / V23 — bez VAT eksport do Fakturowni jest zablokowany (konsekwencje podatkowe)
+  const pushable = (r: Row) => !!r.serial && hasExportVat(r) && !(r.fakturownia_product_id && r.fakturownia_pz_id) && !r.available; // ma numer i VAT, nie ma kompletu (produkt + PZ) i nie ma go w magazynie Fakturowni
   const colSpan = (canPush ? 1 : 0) + (isSkup ? 18 : (isTradeIn ? 17 : 14) + (showGroup ? 1 : 0) + 1) + (availView ? (statusCols ? 2 : 1) : 0); // kolumna akcji (Edytuj / Usuń)
   const groupOf = (r: Row) => (r.vat === "V23" ? "V23" : r.kind === "trade_in" ? "Skup" : "VM");
 
@@ -638,6 +640,8 @@ export default function GoodsView({ session, members, isAdmin, canSend = false }
                       <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-tealsoft text-teal mr-3" title={`Wysłano do Fakturowni${r.fakturownia_sent_at ? ` ${new Date(r.fakturownia_sent_at).toLocaleString("pl-PL")}` : ""}${r.fakturownia_sent_by ? ` (${displayNameForEmail(r.fakturownia_sent_by, members)})` : ""}, produkt ${r.fakturownia_product_id}, PZ ${r.fakturownia_pz_id}`}>W Fakturowni ✓</span>
                     ) : r.available ? (
                       <span className="text-[10px] text-inksoft mr-3" title="Numer jest już w magazynie Fakturowni">jest w magazynie</span>
+                    ) : r.serial && !hasExportVat(r) ? (
+                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-rustsoft text-rust mr-3" title="Wysyłka do Fakturowni zablokowana: brak VAT (VM albo V23). Uzupełnij VAT w edycji pozycji — to decyduje o magazynie i stawce zakupu.">brak VAT — eksport zablokowany</span>
                     ) : r.serial ? (
                       <button onClick={() => sendToFakturownia([r.id])} disabled={sending} className="text-teal hover:underline mr-3 disabled:opacity-50" title={r.fakturownia_product_id ? "Produkt jest już w Fakturowni, ale bez stanu — wystaw dokument PZ (najpierw podgląd i potwierdzenie)" : "Utwórz produkt w Fakturowni i przyjmij go na stan dokumentem PZ (najpierw podgląd i potwierdzenie)"}>{r.fakturownia_product_id ? "Wystaw PZ" : "Do Fakturowni"}</button>
                     ) : null

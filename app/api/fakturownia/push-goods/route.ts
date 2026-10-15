@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { admin } from "@/lib/parcelServer";
 import { requireRole } from "@/lib/serverAuth";
-import { buildFakturowniaProduct, buildPzDocument, looksLikeSku, nameKeys, purchaseGrossForCache, serialKey, warehouseNameFor, type GoodsForFakturownia } from "@/lib/fakturowniaGoods";
+import { buildFakturowniaProduct, buildPzDocument, exportVat, looksLikeSku, nameKeys, purchaseGrossForCache, serialKey, VAT_BLOCK_MESSAGE, type GoodsForFakturownia } from "@/lib/fakturowniaGoods";
 import { warsawYmd } from "@/lib/warsawDate";
 
 // Towar -> Fakturownia (15.10.2026): wysyła wybrane pozycje Towaru do magazynu Fakturowni jako produkty (POST /products.json). Półautomat: przycisk w zakładce Towar
@@ -123,6 +123,12 @@ export async function POST(request: Request) {
         res("skipped", `Już wysłano do Fakturowni (produkt ${g.fakturownia_product_id}, PZ ${g.fakturownia_pz_id}).`);
         continue;
       }
+      // BLOKADA: bez jednoznacznego VAT (VM / V23) nic nie idzie do Fakturowni — VAT wyznacza magazyn i stawkę zakupu (konsekwencje podatkowe). Sprawdzane przed wszystkim innym.
+      const vat = exportVat(g.vat);
+      if (vat === null) {
+        res("skipped", VAT_BLOCK_MESSAGE);
+        continue;
+      }
       if (!serial) {
         res("skipped", "Brak numeru seryjnego — uzupełnij go przed wysłaniem.");
         continue;
@@ -133,7 +139,7 @@ export async function POST(request: Request) {
         res("skipped", "Ten numer jest już w Fakturowni (albo powtarza się w zaznaczonych).");
         continue;
       }
-      const whName = warehouseNameFor(g.vat);
+      const whName: string = vat;
       const warehouseId = whByName.get(whName.toLowerCase());
       if (warehouseId === undefined) {
         res("skipped", `W Fakturowni nie ma magazynu „${whName}” — nie tworzę produktu bez możliwości przyjęcia na stan.`);
@@ -198,6 +204,10 @@ export async function POST(request: Request) {
 
       // PZ (przyjęcie na stan): magazyn wg VAT, dostawca z Towaru, 1 szt. po cenie zakupu netto
       const doc = buildPzDocument(g, payload, productId, warehouseId, today);
+      if (!doc) {
+        res("error", `Produkt ${productId} jest w Fakturowni, ale nie zbudowano PZ (brak VAT) — uzupełnij VAT i kliknij „Wystaw PZ”.`, { productId });
+        continue;
+      }
       const zr = await fetch(`${base}/warehouse_documents.json`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },

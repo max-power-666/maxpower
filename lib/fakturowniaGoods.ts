@@ -63,7 +63,17 @@ export const looksLikeSku = (v: string | null | undefined): boolean => {
   return /^[A-Za-z0-9][A-Za-z0-9./]*(-[A-Za-z0-9./]+)+$/.test(t) || /^\d{3,}\s*\(\d\/\d\)$/.test(t);
 };
 
+// VAT pozycji decyduje o magazynie i stawce zakupu, a przez to o konsekwencjach podatkowych (VAT-marża vs VAT odliczalny) — dlatego do Fakturowni wysyłamy WYŁĄCZNIE
+// pozycje z jednoznacznym VAT: "VM" albo "V23". Puste, nieznane lub niejednoznaczne = blokada (decyzja właściciela 15.10.2026), bez domyślnego "VM".
+export type ExportVat = "VM" | "V23";
+export function exportVat(vat: string | null | undefined): ExportVat | null {
+  const v = (vat || "").trim().toUpperCase();
+  return v === "VM" || v === "V23" ? v : null;
+}
+export const VAT_BLOCK_MESSAGE = "Brak VAT (wymagane VM albo V23) — uzupełnij VAT w edycji pozycji; bez niego nie wysyłam do Fakturowni (konsekwencje podatkowe).";
+
 export function buildFakturowniaProduct(g: GoodsForFakturownia, categoryId: number | null): FakturowniaProduct | null {
+  if (exportVat(g.vat) === null) return null;
   const serial = (g.serial || "").trim();
   const net = purchaseNetFromGoods(g);
   if (!serial || net === null) return null;
@@ -100,7 +110,7 @@ export function nameKeys(name: string | null | undefined): string[] {
 export const serialKey = (serial: string | null | undefined) => (serial || "").trim().toLowerCase().replace(/^0+/, "");
 
 // Magazyn Fakturowni wg VAT pozycji (decyzja właściciela 15.10.2026): V23 -> magazyn "V23", wszystko inne (VM, Skup, brak VAT) -> magazyn "VM".
-export const warehouseNameFor = (vat: string | null | undefined) => ((vat || "").trim().toUpperCase() === "V23" ? "V23" : "VM");
+export const warehouseNameFor = (vat: string | null | undefined): ExportVat | null => exportVat(vat);
 
 export type PzDocument = {
   kind: "pz";
@@ -112,7 +122,9 @@ export type PzDocument = {
 };
 // Dokument PZ (przyjęcie na stan) dla jednego produktu: 1 szt., cena zakupu netto z payloadu produktu, stawka 23 dla V23 i 0 dla VM (cena netto = brutto);
 // "klient" = dostawca z Towaru (Buyback, Allegro…). Format wg dokumentacji API ("Dodanie dokumentu magazynowego PZ dla istniejącego produktu").
-export function buildPzDocument(g: Pick<GoodsForFakturownia, "vat" | "supplier">, product: Pick<FakturowniaProduct, "purchase_price_net">, productId: number, warehouseId: number, issueDate: string): PzDocument {
+export function buildPzDocument(g: Pick<GoodsForFakturownia, "vat" | "supplier">, product: Pick<FakturowniaProduct, "purchase_price_net">, productId: number, warehouseId: number, issueDate: string): PzDocument | null {
+  const vat = exportVat(g.vat);
+  if (vat === null) return null;
   const supplier = (g.supplier || "").trim();
   return {
     kind: "pz",
@@ -120,6 +132,6 @@ export function buildPzDocument(g: Pick<GoodsForFakturownia, "vat" | "supplier">
     warehouse_id: String(warehouseId),
     issue_date: issueDate,
     ...(supplier ? { client_name: supplier } : {}),
-    warehouse_actions: [{ product_id: String(productId), purchase_tax: warehouseNameFor(g.vat) === "V23" ? 23 : 0, price_net: Number(product.purchase_price_net), quantity: 1 }],
+    warehouse_actions: [{ product_id: String(productId), purchase_tax: vat === "V23" ? 23 : 0, price_net: Number(product.purchase_price_net), quantity: 1 }],
   };
 }
