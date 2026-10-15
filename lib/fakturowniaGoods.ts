@@ -22,6 +22,7 @@ export type FakturowniaProduct = {
   code: string;
   description: string;
   category_id?: number;
+  purchase_price_net: string;
   purchase_price_gross: string;
   purchase_tax?: string;
   currency: "PLN";
@@ -56,6 +57,8 @@ export function buildFakturowniaProduct(g: GoodsForFakturownia, categoryId: numb
     code: serial,
     description: fakturowniaDescription(g),
     ...(categoryId !== null ? { category_id: categoryId } : {}),
+    // jak przy wpisywaniu ręcznym (15.10.2026, zrzut formularza): bez stawki VAT cena zakupu netto = brutto; V23 — netto z Towaru, brutto ×1,23 i stawka 23
+    purchase_price_net: money(g.vat === "V23" ? gross / 1.23 : gross),
     purchase_price_gross: money(gross),
     ...(g.vat === "V23" ? { purchase_tax: "23" } : {}),
     currency: "PLN",
