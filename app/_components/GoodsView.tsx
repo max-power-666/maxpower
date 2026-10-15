@@ -52,10 +52,10 @@ type Totals = { price_pln: number; costs: number; total_pln: number; pcc: number
 // V23 = każdy wiersz z VAT V23 (niezależnie od arkusza), VM i Skup = reszta swojego rodzaju (VAT VM albo pusty).
 type Tab = "vm" | "v23" | "skup" | "all";
 const TABS: { key: Tab; label: string }[] = [
+  { key: "all", label: "Wszystkie" }, // wszystkie wiersze razem (10.10.2026); od 15.10.2026 pierwsza pigułka i widok domyślny
   { key: "vm", label: "VM" },
   { key: "v23", label: "V23" },
   { key: "skup", label: "Skup" },
-  { key: "all", label: "Wszystkie" }, // wszystkie wiersze razem (10.10.2026)
 ];
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function scopeFilter(q: any, tab: Tab) {
@@ -78,8 +78,8 @@ const fmtPln = (n: number | null | undefined) => (n === null || n === undefined 
 type Facets = { category: Map<string, number>; supplier: Map<string, number> };
 
 export default function GoodsView({ session, members, isAdmin }: { session: Session; members: MemberLite[]; isAdmin: boolean }) {
-  const [tab, setTab] = useState<Tab>("vm");
-  const [pageSize, setPageSize] = useState(100);
+  const [tab, setTab] = useState<Tab>("all");
+  const [pageSize, setPageSize] = useState(50);
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
