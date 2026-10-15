@@ -346,7 +346,7 @@ export default function GoodsView({ session, members, isAdmin, canSend = false }
       const pl = first.payload as { name: string; code?: string; description: string; purchase_price_net: string; category_id?: number };
       const ok = confirm(
         `Wysłać do Fakturowni ${preview.ready} ${preview.ready === 1 ? "pozycję" : "pozycji"} (produkt + dokument PZ ze stanem 1)?\n\n` +
-          `Przykład: ${first.message}\nNazwa ${pl.name}, kod (SKU) ${pl.code || "—"}, opis „${pl.description || "—"}”, cena zakupu netto ${pl.purchase_price_net} zł${pl.category_id ? "" : ", bez kategorii"}.` +
+          `Przykład: ${first.message}\nNazwa i kod produktu: ${pl.name}, opis „${pl.description || "—"}”, cena zakupu netto ${pl.purchase_price_net} zł${pl.category_id ? "" : ", bez kategorii"}.` +
           (skipped.length ? `\n\nPominięte (${skipped.length}):\n${skipped.slice(0, 8).map((r) => `• ${r.serial || `#${r.id}`}: ${r.message}`).join("\n")}${skipped.length > 8 ? "\n…" : ""}` : "") +
           `\n\nTo tworzy produkty i dokumenty PZ w Twoim koncie Fakturowni.`
       );

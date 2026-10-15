@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { admin } from "@/lib/parcelServer";
 import { requireRole } from "@/lib/serverAuth";
-import { buildFakturowniaProduct, buildPzDocument, exportVat, looksLikeSku, nameKeys, purchaseGrossForCache, serialKey, VAT_BLOCK_MESSAGE, type GoodsForFakturownia } from "@/lib/fakturowniaGoods";
+import { buildFakturowniaProduct, buildPzDocument, exportVat, nameKeys, purchaseGrossForCache, serialKey, VAT_BLOCK_MESSAGE, type GoodsForFakturownia } from "@/lib/fakturowniaGoods";
 import { warsawYmd } from "@/lib/warsawDate";
 
 // Towar -> Fakturownia (15.10.2026): wysyła wybrane pozycje Towaru do magazynu Fakturowni jako produkty (POST /products.json). Półautomat: przycisk w zakładce Towar
@@ -60,30 +60,6 @@ export async function POST(request: Request) {
     }
     const goods = (rows || []) as GoodsForFakturownia[];
 
-    // SKU do pola "Kod produktu": Skup — SKU z Trade-in zapisane w Towarze ("Nazwa"); pozostałe — "Nazwa", gdy wygląda jak SKU, a inaczej SKU po numerze seryjnym
-    // (priorytet jak w widokach magazynowych: ręczne przypisanie > wcześniejszy wpis z Testów/Trade-in > import).
-    const needLookup = goods.filter((g) => g.serial && !(looksLikeSku(g.name)));
-    const skuBySerial = new Map<string, string>();
-    if (needLookup.length > 0) {
-      const variants = Array.from(new Set(needLookup.flatMap((g) => [g.serial!.trim(), g.serial!.trim().toUpperCase(), g.serial!.trim().toLowerCase()])));
-      const norm = (v: string) => v.trim().toLowerCase();
-      const best = new Map<string, { sku: string; rank: number; at: string }>();
-      const offer = (serial: string, sku: string | null, rank: number, at: string) => {
-        const k = norm(serial);
-        const s = (sku || "").trim();
-        if (!s || /^(sku|none|null|-)$/i.test(s)) return;
-        const cur = best.get(k);
-        if (!cur || rank < cur.rank || (rank === cur.rank && at < cur.at)) best.set(k, { sku: s, rank, at });
-      };
-      const sk = await db.from("serial_skus").select("serial_number, sku, source").in("serial_number", variants);
-      for (const r of sk.data || []) offer(String(r.serial_number), r.sku as string, r.source === "manual" ? 0 : 3, "");
-      const tl = await db.from("test_log").select("serial_number, sku, started_at").in("serial_number", variants).not("sku", "is", null);
-      for (const r of tl.data || []) offer(String(r.serial_number), r.sku as string, 1, String(r.started_at));
-      const bi = await db.from("buyback_order_intake").select("serial_number, sku, entered_at").in("serial_number", variants).not("sku", "is", null);
-      for (const r of bi.data || []) offer(String(r.serial_number), r.sku as string, 1, String(r.entered_at));
-      for (const [k, v] of best) skuBySerial.set(k, v.sku);
-    }
-    for (const g of goods) g.sku = looksLikeSku(g.name) ? (g.name || "").trim() : skuBySerial.get((g.serial || "").trim().toLowerCase()) ?? null;
 
     // kategorie Fakturowni wg nazwy (bez rozróżniania wielkości liter)
     const catRes = await fetch(`${base}/categories.json?api_token=${encodeURIComponent(token)}&per_page=100`, { cache: "no-store" });
@@ -154,7 +130,6 @@ export async function POST(request: Request) {
       const warns: string[] = [];
       if (g.category && !cat) warns.push(`w Fakturowni nie ma kategorii „${g.category}” — produkt bez kategorii`);
       else if (!g.category) warns.push("pozycja nie ma kategorii");
-      if (!g.sku) warns.push("nie znaleziono SKU — kod produktu będzie pusty");
       if (!(g.supplier || "").trim()) warns.push("brak dostawcy — PZ bez klienta");
       const warn = warns.length ? ` (uwaga: ${warns.join("; ")})` : "";
       const plan = `${pzOnly ? `Wystawię PZ do produktu ${g.fakturownia_product_id}` : "Utworzę produkt i PZ"} — magazyn ${whName}, dostawca ${(g.supplier || "").trim() || "—"}, 1 szt.`;
