@@ -15,6 +15,8 @@ export type GoodsForFakturownia = {
   vat: string | null;
   price_pln: number | string | null;
   fakturownia_product_id?: number | null;
+  fakturownia_pz_id?: number | null;
+  supplier?: string | null; // kanał / dostawca z Towaru (Buyback, Allegro…) — "klient" na dokumencie PZ
   sku?: string | null; // SKU rozstrzygnięte po stronie serwera (patrz resolveSku) — trafia do pola "Kod produktu"
 };
 
@@ -96,3 +98,28 @@ export function nameKeys(name: string | null | undefined): string[] {
   return Array.from(new Set([strip(lower), ...derived].filter((k) => k !== "")));
 }
 export const serialKey = (serial: string | null | undefined) => (serial || "").trim().toLowerCase().replace(/^0+/, "");
+
+// Magazyn Fakturowni wg VAT pozycji (decyzja właściciela 15.10.2026): V23 -> magazyn "V23", wszystko inne (VM, Skup, brak VAT) -> magazyn "VM".
+export const warehouseNameFor = (vat: string | null | undefined) => ((vat || "").trim().toUpperCase() === "V23" ? "V23" : "VM");
+
+export type PzDocument = {
+  kind: "pz";
+  number: null;
+  warehouse_id: string;
+  issue_date: string;
+  client_name?: string;
+  warehouse_actions: { product_id: string; purchase_tax: number; price_net: number; quantity: number }[];
+};
+// Dokument PZ (przyjęcie na stan) dla jednego produktu: 1 szt., cena zakupu netto z payloadu produktu, stawka 23 dla V23 i 0 dla VM (cena netto = brutto);
+// "klient" = dostawca z Towaru (Buyback, Allegro…). Format wg dokumentacji API ("Dodanie dokumentu magazynowego PZ dla istniejącego produktu").
+export function buildPzDocument(g: Pick<GoodsForFakturownia, "vat" | "supplier">, product: Pick<FakturowniaProduct, "purchase_price_net">, productId: number, warehouseId: number, issueDate: string): PzDocument {
+  const supplier = (g.supplier || "").trim();
+  return {
+    kind: "pz",
+    number: null,
+    warehouse_id: String(warehouseId),
+    issue_date: issueDate,
+    ...(supplier ? { client_name: supplier } : {}),
+    warehouse_actions: [{ product_id: String(productId), purchase_tax: warehouseNameFor(g.vat) === "V23" ? 23 : 0, price_net: Number(product.purchase_price_net), quantity: 1 }],
+  };
+}

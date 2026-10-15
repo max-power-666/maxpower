@@ -47,6 +47,7 @@ type Row = {
   fakturownia_product_id?: number | null; // wysłano do Fakturowni z aplikacji (supabase/goods-fakturownia.sql)
   fakturownia_sent_at?: string | null;
   fakturownia_sent_by?: string | null;
+  fakturownia_pz_id?: number | null; // dokument PZ wystawiony w Fakturowni (stan 1)
 };
 
 type Totals = { price_pln: number; costs: number; total_pln: number; pcc: number; commission: number; commission_pcc: number };
@@ -185,7 +186,7 @@ export default function GoodsView({ session, members, isAdmin, canSend = false }
     setError("");
     try {
       const from = (page - 1) * pageSize;
-      const { data, error: err, count: total } = await applyFilters(supabase.from(listTable).select(availView ? `${COLUMNS}, available${pendingCol ? ", pending" : ""}${fakCols ? ", fakturownia_product_id, fakturownia_sent_at, fakturownia_sent_by" : ""}${statusCols ? ", product_status_source, product_status, product_status_at" : ""}` : COLUMNS, { count: "exact" }))
+      const { data, error: err, count: total } = await applyFilters(supabase.from(listTable).select(availView ? `${COLUMNS}, available${pendingCol ? ", pending" : ""}${fakCols ? ", fakturownia_product_id, fakturownia_sent_at, fakturownia_sent_by, fakturownia_pz_id" : ""}${statusCols ? ", product_status_source, product_status, product_status_at" : ""}` : COLUMNS, { count: "exact" }))
         .order("purchased_on", { ascending: false, nullsFirst: false })
         .order("id", { ascending: false })
         .range(from, from + pageSize - 1);
@@ -341,12 +342,12 @@ export default function GoodsView({ session, members, isAdmin, canSend = false }
         return;
       }
       const first = preview.results.find((r) => r.status === "ready")!;
-      const pl = first.payload as { name: string; description: string; purchase_price_gross: string; category_id?: number };
+      const pl = first.payload as { name: string; code?: string; description: string; purchase_price_net: string; category_id?: number };
       const ok = confirm(
-        `Wysłać do Fakturowni ${preview.ready} ${preview.ready === 1 ? "produkt" : "produktów"} (stan 1, cena zakupu brutto, kategoria wg nazwy)?\n\n` +
-          `Przykład: nazwa ${pl.name}, opis „${pl.description || "—"}”, cena zakupu brutto ${pl.purchase_price_gross} zł${pl.category_id ? "" : ", bez kategorii"}.` +
+        `Wysłać do Fakturowni ${preview.ready} ${preview.ready === 1 ? "pozycję" : "pozycji"} (produkt + dokument PZ ze stanem 1)?\n\n` +
+          `Przykład: ${first.message}\nNazwa ${pl.name}, kod (SKU) ${pl.code || "—"}, opis „${pl.description || "—"}”, cena zakupu netto ${pl.purchase_price_net} zł${pl.category_id ? "" : ", bez kategorii"}.` +
           (skipped.length ? `\n\nPominięte (${skipped.length}):\n${skipped.slice(0, 8).map((r) => `• ${r.serial || `#${r.id}`}: ${r.message}`).join("\n")}${skipped.length > 8 ? "\n…" : ""}` : "") +
-          `\n\nTo tworzy produkty w Twoim koncie Fakturowni.`
+          `\n\nTo tworzy produkty i dokumenty PZ w Twoim koncie Fakturowni.`
       );
       if (!ok) return;
       const done = await call(false);
@@ -385,7 +386,7 @@ export default function GoodsView({ session, members, isAdmin, canSend = false }
   const anyFilter = !!(search || category || supplier || serialFilter);
   const showGroup = tab === "all"; // w "Wszystkie" pierwsza kolumna mówi, do której pigułki należy wiersz
   const canPush = canSend && fakCols && availView; // przyciski wysyłki do Fakturowni (potrzebują kolumn z goods-fakturownia.sql w widoku)
-  const pushable = (r: Row) => !!r.serial && !r.fakturownia_product_id && !r.available; // ma numer, nie wysłano i nie ma go w magazynie Fakturowni
+  const pushable = (r: Row) => !!r.serial && !(r.fakturownia_product_id && r.fakturownia_pz_id) && !r.available; // ma numer, nie ma kompletu (produkt + PZ) i nie ma go w magazynie Fakturowni
   const colSpan = (canPush ? 1 : 0) + (isSkup ? 18 : (isTradeIn ? 17 : 14) + (showGroup ? 1 : 0) + 1) + (availView ? (statusCols ? 2 : 1) : 0); // kolumna akcji (Edytuj / Usuń)
   const groupOf = (r: Row) => (r.vat === "V23" ? "V23" : r.kind === "trade_in" ? "Skup" : "VM");
 
@@ -633,12 +634,12 @@ export default function GoodsView({ session, members, isAdmin, canSend = false }
                 )}
                 <td className="p-2 whitespace-nowrap text-right">
                   {canPush && (
-                    r.fakturownia_product_id ? (
-                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-tealsoft text-teal mr-3" title={`Wysłano do Fakturowni${r.fakturownia_sent_at ? ` ${new Date(r.fakturownia_sent_at).toLocaleString("pl-PL")}` : ""}${r.fakturownia_sent_by ? ` (${displayNameForEmail(r.fakturownia_sent_by, members)})` : ""}, produkt ${r.fakturownia_product_id}`}>W Fakturowni ✓</span>
+                    r.fakturownia_product_id && r.fakturownia_pz_id ? (
+                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-tealsoft text-teal mr-3" title={`Wysłano do Fakturowni${r.fakturownia_sent_at ? ` ${new Date(r.fakturownia_sent_at).toLocaleString("pl-PL")}` : ""}${r.fakturownia_sent_by ? ` (${displayNameForEmail(r.fakturownia_sent_by, members)})` : ""}, produkt ${r.fakturownia_product_id}, PZ ${r.fakturownia_pz_id}`}>W Fakturowni ✓</span>
                     ) : r.available ? (
                       <span className="text-[10px] text-inksoft mr-3" title="Numer jest już w magazynie Fakturowni">jest w magazynie</span>
                     ) : r.serial ? (
-                      <button onClick={() => sendToFakturownia([r.id])} disabled={sending} className="text-teal hover:underline mr-3 disabled:opacity-50" title="Utwórz produkt w Fakturowni (najpierw podgląd i potwierdzenie)">Do Fakturowni</button>
+                      <button onClick={() => sendToFakturownia([r.id])} disabled={sending} className="text-teal hover:underline mr-3 disabled:opacity-50" title={r.fakturownia_product_id ? "Produkt jest już w Fakturowni, ale bez stanu — wystaw dokument PZ (najpierw podgląd i potwierdzenie)" : "Utwórz produkt w Fakturowni i przyjmij go na stan dokumentem PZ (najpierw podgląd i potwierdzenie)"}>{r.fakturownia_product_id ? "Wystaw PZ" : "Do Fakturowni"}</button>
                     ) : null
                   )}
                   <button onClick={() => startEdit(r)} className="text-teal hover:underline">Edytuj</button>
