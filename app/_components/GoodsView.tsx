@@ -549,10 +549,12 @@ export default function GoodsView({ session, members, isAdmin }: { session: Sess
         <span>Pozycji: <span className="font-semibold">{count ?? "—"}</span></span>
         <span>Cena PLN: <span className="font-semibold">{fmtPln(totals?.price_pln)}</span></span>
         <span>{isSkup ? "Serwis" : "Koszty"}: <span className="font-semibold">{fmtPln(totals?.costs)}</span></span>
-        <span>{isSkup ? "Cena + koszty (PLN)" : "Cena PLN + koszty"}: <span className="font-semibold">{fmtPln(totals?.total_pln)}</span></span>
         {isTradeIn && <span>PCC: <span className="font-semibold">{fmtPln(totals?.pcc)}</span></span>}
-        {isSkup && <span>Prowizja: <span className="font-semibold">{fmtPln(totals?.commission)}</span></span>}
-        {isTradeIn && <span>Prowizja + PCC: <span className="font-semibold">{fmtPln(totals?.commission_pcc)}</span></span>}
+        {isTradeIn && <span title="10% ceny + opłata logistyczna wg regulaminu">Prowizja: <span className="font-semibold">{fmtPln(totals?.commission)}</span></span>}
+        {isTradeIn && <span title="Prowizja + PCC">Prowizja + PCC: <span className="font-semibold">{fmtPln(totals?.commission_pcc)}</span></span>}
+        <span title={isTradeIn ? "Suma kolumny „Cena PLN + koszty”: Cena PLN + Koszty (Serwis) + Prowizja + PCC. Wartość z arkusza/zapisu wiersza, nie przeliczenie sum obok — przy wierszach z arkusza może różnić się o grosze." : "Suma kolumny „Cena PLN + koszty”: Cena PLN + Koszty."}>
+          = {isSkup ? "Cena + koszty (PLN)" : isTradeIn ? "Cena PLN + koszty + prowizja i PCC" : "Cena PLN + koszty"}: <span className="font-semibold">{fmtPln(totals?.total_pln)}</span>
+        </span>
       </div>
       <p className="text-[11px] text-inksoft mt-2 max-w-3xl">Dane z arkusza Towar.numbers i dopisane formularzem „Dodaj towar”; edytować może każdy, kto ma zakładkę Towar (każda edycja zapisuje się w historii zmian: kto, kiedy, co), a usuwać tylko Admin. Kwoty „Cena PLN”, „Koszty”, „Cena PLN + koszty” i „Prowizja + PCC” to wartości z arkusza, nie przeliczenia aplikacji; sumy dotyczą całego wyniku filtrów.</p>
 
