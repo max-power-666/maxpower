@@ -15,11 +15,12 @@ export type GoodsForFakturownia = {
   vat: string | null;
   price_pln: number | string | null;
   fakturownia_product_id?: number | null;
+  sku?: string | null; // SKU rozstrzygnięte po stronie serwera (patrz resolveSku) — trafia do pola "Kod produktu"
 };
 
 export type FakturowniaProduct = {
   name: string;
-  code: string;
+  code?: string; // SKU (puste, gdy SKU nie da się ustalić)
   description: string;
   category_id?: number;
   purchase_price_net: string;
@@ -47,20 +48,26 @@ export function purchaseGrossForCache(p: Pick<FakturowniaProduct, "purchase_pric
   return Math.round(Number(p.purchase_price_net) * (1 + Number(p.purchase_tax || 0) / 100) * 100) / 100;
 }
 
-export function fakturowniaDescription(g: Pick<GoodsForFakturownia, "kind" | "name" | "order_no" | "invoice_no">): string {
+export function fakturowniaDescription(g: Pick<GoodsForFakturownia, "kind" | "name" | "order_no" | "invoice_no" | "sku">): string {
   const ref = (g.order_no || "").trim() || (g.invoice_no || "").trim();
   if (g.kind === "trade_in") return (g.order_no || "").trim(); // Skup: dokładnie numer zamówienia Buyback (po nim liczymy koszty Trade-in)
   const nm = (g.name || "").trim();
-  return [ref, nm].filter(Boolean).join(" — ");
+  return [ref, nm && nm !== (g.sku || "").trim() ? nm : ""].filter(Boolean).join(" — "); // nazwa, tylko gdy nie jest samym SKU (SKU idzie do kodu produktu)
 }
+
+// Czy tekst wygląda jak SKU (kod bez spacji z myślnikami, np. SGW9C-44-BK-A, albo aparat "237387 (3/5)") — w Towarze pole "Nazwa" bywa SKU albo opisową nazwą.
+export const looksLikeSku = (v: string | null | undefined): boolean => {
+  const t = (v || "").trim();
+  return /^[A-Za-z0-9][A-Za-z0-9./]*(-[A-Za-z0-9./]+)+$/.test(t) || /^\d{3,}\s*\(\d\/\d\)$/.test(t);
+};
 
 export function buildFakturowniaProduct(g: GoodsForFakturownia, categoryId: number | null): FakturowniaProduct | null {
   const serial = (g.serial || "").trim();
   const net = purchaseNetFromGoods(g);
   if (!serial || net === null) return null;
   return {
-    name: serial,
-    code: serial,
+    name: serial, // Nazwa = numer seryjny
+    ...(g.sku && g.sku.trim() ? { code: g.sku.trim() } : {}), // Kod produktu = SKU
     description: fakturowniaDescription(g),
     ...(categoryId !== null ? { category_id: categoryId } : {}),
     // jak przy wpisywaniu ręcznym (zrzut formularza): VM — bez stawki VAT, cena zakupu netto = brutto; V23 — netto ze stawką 23 (brutto liczy Fakturownia)

@@ -61,6 +61,31 @@ type OrderRow = {
   sku: string | null;
 };
 type Event = { at: string; text: string; details?: string[] };
+// Wiersz rejestru Towar (15.10.2026): grupa VM / V23 / Skup, waluta, kurs, ceny — widoczny tylko dla osób z dostępem do Towaru (RLS goods_register).
+type GoodsRow = {
+  kind: "vm_v23" | "trade_in";
+  source: string | null;
+  serial: string | null;
+  name: string | null;
+  supplier: string | null;
+  purchased_on: string | null;
+  order_no: string | null;
+  invoice_no: string | null;
+  category: string | null;
+  price: number | null;
+  vat: string | null;
+  currency: string | null;
+  nbp_rate: number | null;
+  price_pln: number | null;
+  costs: number | null;
+  pcc: number | null;
+  commission_pcc: number | null;
+  total_pln: number | null;
+  fakturownia_product_id?: number | null;
+  fakturownia_sent_at?: string | null;
+};
+const goodsGroup = (g: GoodsRow) => (g.vat === "V23" ? "V23" : g.kind === "trade_in" ? "Skup" : "VM");
+const fmtDay = (d: string | null) => (d ? `${d.slice(8, 10)}.${d.slice(5, 7)}.${d.slice(0, 4)}` : null);
 
 function fmtDateTime(iso: string) {
   return new Date(iso).toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -91,6 +116,7 @@ export default function ProductCardDrawer({
   const [stock, setStock] = useState<StockRow[]>([]);
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [intakes, setIntakes] = useState<IntakeRow[]>([]);
+  const [goods, setGoods] = useState<GoodsRow[]>([]);
   // Kursy EUR (NBP) — do przeliczenia wartości zakupu z Trade-in na PLN (podstawa PCC)
   const [eurRates, setEurRates] = useState<NbpRate[]>([]);
   useEffect(() => {
@@ -214,6 +240,15 @@ export default function ProductCardDrawer({
         }
         list.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
 
+        // rejestr Towar (brak dostępu/tabeli = brak sekcji, bez błędu karty); numer porównujemy też bez zer wiodących
+        const gp = serial.trim();
+        const gStripped = gp.replace(/^0+/, "");
+        const gOr = Array.from(new Set([gp, gStripped, `0${gStripped}`, `00${gStripped}`].filter(Boolean))).map((v) => `serial.ilike.${escapeLike(v).replace(/[,()"]/g, " ")}`).join(",");
+        const goodsCols = "kind, source, serial, name, supplier, purchased_on, order_no, invoice_no, category, price, vat, currency, nbp_rate, price_pln, costs, pcc, commission_pcc, total_pln";
+        let goodsRes = await supabase.from("goods_register").select(`${goodsCols}, fakturownia_product_id, fakturownia_sent_at`).or(gOr).limit(5);
+        if (goodsRes.error && (goodsRes.error.code === "42703" || goodsRes.error.code === "PGRST204")) goodsRes = (await supabase.from("goods_register").select(goodsCols).or(gOr).limit(5)) as unknown as typeof goodsRes;
+        const goodsRows = goodsRes.error ? [] : ((goodsRes.data as unknown as GoodsRow[]) || []);
+
         // części przypisane do numeru (brak tabeli = brak sekcji, bez błędu karty)
         const wanted = serial.trim().toLowerCase();
         const partsRes = await supabase.from("service_parts").select("name, part_code, status, price_pln, device_ref").ilike("device_ref", `%${pattern}%`).limit(200);
@@ -230,6 +265,7 @@ export default function ProductCardDrawer({
         if (cancelled) return;
         setParts(partRows);
         setStock(stockRows);
+        setGoods(goodsRows);
         setOrders(orderRows);
         setIntakes(intakes);
         setEvents(list);
@@ -247,7 +283,7 @@ export default function ProductCardDrawer({
 
   const pricedParts = parts.filter((p) => p.cost !== null);
   const partsCost = parts.length > 0 ? pricedParts.reduce((n, p) => n + (p.cost as number), 0) : null;
-  const nothingFound = !loading && !error && stock.length === 0 && parts.length === 0 && orders.length === 0 && intakes.length === 0 && events.length === 0;
+  const nothingFound = !loading && !error && stock.length === 0 && goods.length === 0 && parts.length === 0 && orders.length === 0 && intakes.length === 0 && events.length === 0;
 
   return (
     <div className="fixed inset-0 bg-black/30 flex justify-end z-50" onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -266,6 +302,34 @@ export default function ProductCardDrawer({
 
         {!loading && !error && (
           <>
+            {goods.length > 0 && (
+              <div className="mt-6">
+                <h3 className="text-xs font-semibold text-inksoft mb-2">TOWAR (ZAKUP)</h3>
+                {goods.map((g, i) => (
+                  <div key={i} className="border border-line bg-white mb-2">
+                    <Row label="Grupa" value={`${goodsGroup(g)}${g.source === "buyback" ? " (dopisany automatycznie z Buyback)" : ""}`} />
+                    <Row label={g.kind === "trade_in" ? "Kanał" : "Dostawca"} value={g.supplier} />
+                    <Row label="Data zakupu" value={fmtDay(g.purchased_on)} />
+                    {g.kind === "trade_in" && <Row label="SKU" value={g.name} mono />}
+                    {g.kind !== "trade_in" && <Row label="Nazwa" value={g.name} />}
+                    <Row label="Kategoria" value={g.category} />
+                    <Row label="Nr zamówienia" value={g.order_no} mono />
+                    <Row label="Nr faktury / DW" value={g.invoice_no} mono />
+                    <Row label="VAT" value={g.vat} />
+                    <Row label="Waluta" value={g.currency} />
+                    <Row label="Cena zakupu (w walucie)" value={fmtMoney(g.price, g.currency)} />
+                    <Row label="Kurs NBP" value={g.nbp_rate === null ? null : Number(g.nbp_rate).toLocaleString("pl-PL", { minimumFractionDigits: 4, maximumFractionDigits: 4 })} />
+                    <Row label={g.vat === "V23" ? "Cena PLN (netto)" : "Cena PLN"} value={fmtMoney(g.price_pln, "zł")} />
+                    <Row label="Serwis (części)" value={fmtMoney(g.costs, "zł")} />
+                    {g.kind === "trade_in" && <Row label="PCC" value={fmtMoney(g.pcc, "zł")} />}
+                    {g.kind === "trade_in" && <Row label="Prowizja + PCC" value={fmtMoney(g.commission_pcc, "zł")} />}
+                    <Row label="Cena + koszty" value={fmtMoney(g.total_pln, "zł")} />
+                    <Row label="Fakturownia" value={g.fakturownia_product_id ? `wysłano${g.fakturownia_sent_at ? ` ${fmtDateTime(g.fakturownia_sent_at)}` : ""} (produkt ${g.fakturownia_product_id})` : null} />
+                  </div>
+                ))}
+              </div>
+            )}
+
             {stock.length > 0 && (
               <div className="mt-6">
                 <h3 className="text-xs font-semibold text-inksoft mb-2">MAGAZYN (FAKTUROWNIA)</h3>
