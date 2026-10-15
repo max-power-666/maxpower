@@ -5,7 +5,7 @@ import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { MARKETPLACES } from "@/lib/salesOrders";
-import { ACTIVE_REQUEST_STATUSES, canEditRequest, REQUEST_DELETE_ROLES, REQUEST_PRIORITIES, REQUEST_PRIORITY_LABEL, REQUEST_PRIORITY_RANK, REQUEST_STATUSES, REQUEST_STATUS_LABEL, requestCode, type RequestPriority, type RequestStatus } from "@/lib/serviceRequests";
+import { ACTIVE_REQUEST_STATUSES, canEditRequest, REJECTED_REQUEST_STATUSES, REQUEST_DELETE_ROLES, REQUEST_PRIORITIES, REQUEST_PRIORITY_LABEL, REQUEST_PRIORITY_RANK, REQUEST_STATUSES, REQUEST_STATUS_LABEL, requestCode, type RequestPriority, type RequestStatus } from "@/lib/serviceRequests";
 
 // Zamówienia -> Zapotrzebowanie (08.10.2026): pracownicy zlecają zadania dla serwisu (dowolna treść albo numer zamówienia + priorytet; autor, data i numer ZAP-n automatycznie), serwisant przyjmuje zlecenie i ustawia status.
 // Kto może zmieniać status, pilnuje baza (trigger service_requests_guard); tu przyciski i lista statusu pokazują się tylko serwisantom (canHandle).
@@ -36,6 +36,7 @@ const STATUS_STYLE: Record<RequestStatus, string> = {
   w_realizacji: "bg-[#efe6f8] text-[#7a3fb0]",
   zrobione: "bg-tealsoft text-teal",
   odrzucone: "bg-rustsoft text-rust",
+  brak_w_serwisie: "bg-paper text-rust border border-rust",
 };
 const PRIORITY_STYLE: Record<RequestPriority, string> = {
   wysoki: "bg-rustsoft text-rust",
@@ -157,7 +158,7 @@ export default function ServiceRequestsView({ session, members, role, canHandle 
       rows
         .filter((r) => {
         if (filter === "deleted" ? !r.deleted_at : !!r.deleted_at) return false; // usunięte tylko w widoku "Usunięte"
-        if (filter === "active" ? !ACTIVE_REQUEST_STATUSES.includes(r.status) : filter !== "all" && filter !== "deleted" && r.status !== filter) return false;
+        if (filter === "active" ? !ACTIVE_REQUEST_STATUSES.includes(r.status) : filter !== "all" && filter !== "deleted" && (filter === "odrzucone" ? !REJECTED_REQUEST_STATUSES.includes(r.status) : r.status !== filter)) return false; // "Odrzucone" obejmuje też "Brak w serwisie"
         if (!search) return true;
         return r.message.toLowerCase().includes(search) || requestCode(r.id).toLowerCase().includes(search) || name(r.created_by_email).toLowerCase().includes(search);
         })
@@ -256,7 +257,7 @@ export default function ServiceRequestsView({ session, members, role, canHandle 
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <button onClick={() => setFilter("active")} className={pill(filter === "active")}>Aktywne ({count((r) => ACTIVE_REQUEST_STATUSES.includes(r.status))})</button>
         {REQUEST_STATUSES.filter((s) => s.key === "zrobione" || s.key === "odrzucone").map((s) => (
-          <button key={s.key} onClick={() => setFilter(s.key)} className={pill(filter === s.key)}>{s.label} ({count((r) => r.status === s.key)})</button>
+          <button key={s.key} onClick={() => setFilter(s.key)} className={pill(filter === s.key)}>{s.label} ({count((r) => (s.key === "odrzucone" ? REJECTED_REQUEST_STATUSES.includes(r.status) : r.status === s.key))})</button>
         ))}
         <button onClick={() => setFilter("all")} className={pill(filter === "all")}>Wszystkie ({live.length})</button>
         {softDelete && <button onClick={() => setFilter("deleted")} className={pill(filter === "deleted")}>Usunięte ({deletedCount})</button>}

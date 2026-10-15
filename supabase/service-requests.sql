@@ -17,7 +17,7 @@ create table if not exists service_requests (
   created_by_user_id uuid references auth.users(id) on delete set null,
   created_by_email text,
   created_at timestamptz not null default now(),
-  status text not null default 'nowe' check (status in ('nowe', 'przyjete', 'w_realizacji', 'zrobione', 'odrzucone')),
+  status text not null default 'nowe' check (status in ('nowe', 'przyjete', 'w_realizacji', 'zrobione', 'odrzucone', 'brak_w_serwisie')),
   accepted_by_email text,                       -- kto pierwszy przyjął zlecenie (status przyjete / w_realizacji / zrobione)
   accepted_at timestamptz,
   status_changed_by_email text,                 -- ostatnia zmiana statusu
@@ -26,6 +26,10 @@ create table if not exists service_requests (
 );
 -- Priorytet (08.10.2026): wysoki / sredni / niski — wybierany przy dodawaniu zlecenia. Dodany osobno, żeby plik działał też na tabeli założonej wcześniej bez tej kolumny.
 alter table service_requests add column if not exists priority text not null default 'sredni' check (priority in ('wysoki', 'sredni', 'niski'));
+-- Status "brak_w_serwisie" (15.10.2026): serwis nie ma żądanej rzeczy; w UI liczy się do widoku "Odrzucone". Ograniczenie statusu odtwarzane przy każdym uruchomieniu pliku.
+alter table service_requests drop constraint if exists service_requests_status_check;
+alter table service_requests add constraint service_requests_status_check
+  check (status in ('nowe', 'przyjete', 'w_realizacji', 'zrobione', 'odrzucone', 'brak_w_serwisie'));
 alter table service_requests add column if not exists deleted_at timestamptz;
 alter table service_requests add column if not exists deleted_by_email text;
 create index if not exists service_requests_status_idx on service_requests (status, created_at desc);

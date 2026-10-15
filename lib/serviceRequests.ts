@@ -5,9 +5,12 @@ export const REQUEST_STATUSES = [
   { key: "w_realizacji", label: "W realizacji" },
   { key: "zrobione", label: "Zrobione" },
   { key: "odrzucone", label: "Odrzucone" },
+  { key: "brak_w_serwisie", label: "Brak w serwisie" },
 ] as const;
 export type RequestStatus = (typeof REQUEST_STATUSES)[number]["key"];
 export const REQUEST_STATUS_LABEL = Object.fromEntries(REQUEST_STATUSES.map((s) => [s.key, s.label])) as Record<RequestStatus, string>;
+// Statusy zamknięte odmownie (15.10.2026): "Brak w serwisie" (serwis nie ma żądanej rzeczy) trafia do widoku "Odrzucone" razem z "Odrzucone"; etykieta zostaje własna.
+export const REJECTED_REQUEST_STATUSES: RequestStatus[] = ["odrzucone", "brak_w_serwisie"];
 // Statusy "do zrobienia" — pokazywane domyślnie ("Aktywne").
 export const ACTIVE_REQUEST_STATUSES: RequestStatus[] = ["nowe", "przyjete", "w_realizacji"];
 export const REQUEST_PRIORITIES = [
