@@ -583,6 +583,18 @@ export default function GoodsView({ session, members, isAdmin, canSend = false }
                     ) : (
                       <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${r.available ? "bg-tealsoft text-teal" : "bg-paper text-inksoft border border-line"}`}>{r.available ? "Tak" : "Nie"}</span>
                     )}
+                    {/* Wysyłka do Fakturowni (15.10.2026): status / przycisk pod plakietką dostępności */}
+                    <div className="mt-1">
+                      {canPush && (
+                      r.fakturownia_product_id && r.fakturownia_pz_id ? (
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-tealsoft text-teal" title={`Wysłano do Fakturowni${r.fakturownia_sent_at ? ` ${new Date(r.fakturownia_sent_at).toLocaleString("pl-PL")}` : ""}${r.fakturownia_sent_by ? ` (${displayNameForEmail(r.fakturownia_sent_by, members)})` : ""}, produkt ${r.fakturownia_product_id}, PZ ${r.fakturownia_pz_id}`}>W Fakturowni ✓</span>
+                      ) : r.available ? null /* "Tak" wyżej mówi, że numer jest już w magazynie Fakturowni */ : r.serial && !hasExportVat(r) ? (
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-rustsoft text-rust" title="Wysyłka do Fakturowni zablokowana: brak VAT (VM albo V23). Uzupełnij VAT w edycji pozycji — to decyduje o magazynie i stawce zakupu.">brak VAT — blokada</span>
+                      ) : r.serial ? (
+                        <button onClick={() => sendToFakturownia([r.id])} disabled={sending} className="text-teal hover:underline disabled:opacity-50" title={r.fakturownia_product_id ? "Produkt jest już w Fakturowni, ale bez stanu — wystaw dokument PZ (najpierw podgląd i potwierdzenie)" : "Utwórz produkt w Fakturowni i przyjmij go na stan dokumentem PZ (najpierw podgląd i potwierdzenie)"}>{r.fakturownia_product_id ? "Wystaw PZ" : "Do Fakturowni"}</button>
+                      ) : null
+                    )}
+                    </div>
                   </td>
                 )}
                 {availView && statusCols && (
@@ -635,17 +647,6 @@ export default function GoodsView({ session, members, isAdmin, canSend = false }
                   </>
                 )}
                 <td className="p-2 whitespace-nowrap text-right">
-                  {canPush && (
-                    r.fakturownia_product_id && r.fakturownia_pz_id ? (
-                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-tealsoft text-teal mr-3" title={`Wysłano do Fakturowni${r.fakturownia_sent_at ? ` ${new Date(r.fakturownia_sent_at).toLocaleString("pl-PL")}` : ""}${r.fakturownia_sent_by ? ` (${displayNameForEmail(r.fakturownia_sent_by, members)})` : ""}, produkt ${r.fakturownia_product_id}, PZ ${r.fakturownia_pz_id}`}>W Fakturowni ✓</span>
-                    ) : r.available ? (
-                      <span className="text-[10px] text-inksoft mr-3" title="Numer jest już w magazynie Fakturowni">jest w magazynie</span>
-                    ) : r.serial && !hasExportVat(r) ? (
-                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-rustsoft text-rust mr-3" title="Wysyłka do Fakturowni zablokowana: brak VAT (VM albo V23). Uzupełnij VAT w edycji pozycji — to decyduje o magazynie i stawce zakupu.">brak VAT — eksport zablokowany</span>
-                    ) : r.serial ? (
-                      <button onClick={() => sendToFakturownia([r.id])} disabled={sending} className="text-teal hover:underline mr-3 disabled:opacity-50" title={r.fakturownia_product_id ? "Produkt jest już w Fakturowni, ale bez stanu — wystaw dokument PZ (najpierw podgląd i potwierdzenie)" : "Utwórz produkt w Fakturowni i przyjmij go na stan dokumentem PZ (najpierw podgląd i potwierdzenie)"}>{r.fakturownia_product_id ? "Wystaw PZ" : "Do Fakturowni"}</button>
-                    ) : null
-                  )}
                   <button onClick={() => startEdit(r)} className="text-teal hover:underline">Edytuj</button>
                   {isAdmin && <button onClick={() => removeRow(r)} className="text-rust hover:underline ml-3">Usuń</button>}
                 </td>
