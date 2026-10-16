@@ -11,6 +11,7 @@ import { warsawYmd } from "@/lib/warsawDate";
 import { DEFAULT_ASSUMPTIONS, normListingSku, bmRules, refurbedRules, suggestPrice, type Assumptions, type PriceInputs, type Suggestion, type VatMode, BM_LOCALE_BY_MARKET, bmMarketIsReduced } from "@/lib/listingPrice";
 import { autoBand, decidePrice } from "@/lib/pricingStrategy";
 import { isCountedOrder } from "@/lib/salesOrders";
+import { listingLinks } from "@/lib/listings";
 import StockSyncBar from "./StockSyncBar";
 import { marginAtPrice } from "@/lib/listingPrice";
 import type { MarketInfo } from "@/lib/marketPricing";
@@ -617,6 +618,9 @@ export default function ListingQueueView({ session, members, canPrice = false, i
               <div key={o.externalId} className="border border-line bg-white p-2.5 mb-1.5 space-y-1.5">
                 <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
                   <span className="font-mono font-semibold">{o.sku}</span>
+                  {listingLinks({ marketplace: mp, product_id: null, title: null, sku: o.sku, external_id: o.externalId }).filter((lk) => lk.label === "Panel").map((lk) => (
+                    <a key={lk.url} href={lk.url} target="_blank" rel="noopener noreferrer" title={lk.hint} onClick={(e) => e.stopPropagation()} className="text-teal underline">Panel ↗</a>
+                  ))}
                   <span className={o.quantity > 0 ? "text-teal" : "text-amber"}>ilość {o.quantity}</span>
                   <span>cena <b className="font-mono">{o.price ?? "—"} {o.currency || ""}</b></span>
                   <span className="text-inksoft" title="Cena minimalna automatu marketplace'u">min <span className="font-mono">{o.minPrice ?? "—"}</span></span>
