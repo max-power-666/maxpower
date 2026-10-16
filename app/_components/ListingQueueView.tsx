@@ -10,6 +10,8 @@ import { summarizeShippingCosts, type ShipmentCostRow } from "@/lib/shippingCost
 import { warsawYmd } from "@/lib/warsawDate";
 import { DEFAULT_ASSUMPTIONS, normListingSku, bmRules, refurbedRules, suggestPrice, type Assumptions, type PriceInputs, type Suggestion, type VatMode } from "@/lib/listingPrice";
 import { autoBand, decidePrice } from "@/lib/pricingStrategy";
+import { isCountedOrder } from "@/lib/salesOrders";
+import StockSyncBar from "./StockSyncBar";
 import { marginAtPrice } from "@/lib/listingPrice";
 import type { MarketInfo } from "@/lib/marketPricing";
 import ProductCardDrawer from "./ProductCardDrawer";
@@ -88,7 +90,7 @@ type Group = { key: string; sku: string; rows: Entry[] };
 // Oferta "własna" grupy: SKU oferty = SKU z listy (z ewentualną końcówką -nM). Oferty z dodatkiem ("PS4-500-BK-B+GTA5") to inne produkty (zestawy z grą) — ich ceny nie ruszamy.
 const isOwnOffer = (o: Offer, groupSku: string) => o.sku.trim().toUpperCase().replace(/-\d+M$/, "") === groupSku;
 
-export default function ListingQueueView({ session, members, canPrice = false }: { session: Session; members: MemberLite[]; canPrice?: boolean }) {
+export default function ListingQueueView({ session, members, canPrice = false, isAdmin = false }: { session: Session; members: MemberLite[]; canPrice?: boolean; isAdmin?: boolean }) {
   const [rows, setRows] = useState<Entry[]>([]);
   const [goods, setGoods] = useState<Map<string, Goods>>(new Map());
   const [listings, setListings] = useState<Map<string, { backmarket: ListingInfo | null; refurbed: ListingInfo | null }>>(new Map());
@@ -111,6 +113,7 @@ export default function ListingQueueView({ session, members, canPrice = false }:
   const [fetchingMkt, setFetchingMkt] = useState(false);
   const [pricing, setPricing] = useState<string | null>(null);
   const [priceNote, setPriceNote] = useState<{ ok: boolean; text: string } | null>(null);
+  const [qtyBusy, setQtyBusy] = useState(false);
   const [eurRate, setEurRate] = useState<{ mid: number; date: string } | null>(null);
   const [shipAvg, setShipAvg] = useState<number | null>(null);
   const [showParams, setShowParams] = useState(false);
@@ -291,6 +294,75 @@ export default function ListingQueueView({ session, members, canPrice = false }:
       setPriceNote({ ok: false, text: `${label}: ${e.message || e}` });
     } finally {
       setPricing(null);
+    }
+  }
+
+  // "Zaktualizuj ilości" (16.10.2026): ilość każdej oferty z danym SKU na Back Market i refurbed = liczba sztuk z listy "Do wystawienia" z tym SKU, które nie zostały jeszcze sprzedane
+  // (numer seryjny pozycji zamówienia liczonego jako sprzedaż, z datą zamówienia po dodaniu wpisu do listy). Zmienia PRAWDZIWE stany na marketplace'ach — najpierw okno ze zmianami.
+  async function updateQuantities() {
+    setQtyBusy(true);
+    setPriceNote(null);
+    try {
+      const { data: all, error: qe } = await supabase.from("listing_queue").select("serial_number, sku, created_at").limit(5000);
+      if (qe) throw new Error(qe.message);
+      const entries = ((all as { serial_number: string; sku: string; created_at: string }[]) || []).filter((e) => e.sku);
+      if (entries.length === 0) throw new Error("Lista „Do wystawienia” jest pusta.");
+      const soldSerials = new Map<string, { at: number }[]>();
+      const serials = Array.from(new Set(entries.map((e) => e.serial_number)));
+      for (let i = 0; i < serials.length; i += 40) {
+        const chunk = serials.slice(i, i + 40);
+        const { data: items } = await supabase.from("sales_order_items").select("serial_number, marketplace, sales_orders(order_date, status)").filter("serial_number", "in", inList(chunk.flatMap(serialVariants)));
+        for (const it of (items as any[]) || []) {
+          const o = Array.isArray(it.sales_orders) ? it.sales_orders[0] : it.sales_orders;
+          if (!o || !isCountedOrder(it.marketplace, o.status)) continue;
+          const k = normSerial(it.serial_number);
+          soldSerials.set(k, [...(soldSerials.get(k) ?? []), { at: Date.parse(o.order_date) }]);
+        }
+      }
+      const available = new Map<string, number>();
+      for (const e of entries) {
+        const sold = (soldSerials.get(normSerial(e.serial_number)) ?? []).some((s) => s.at >= Date.parse(e.created_at) - 60_000);
+        const k = e.sku.trim().toUpperCase().replace(/-\d+M$/, "");
+        available.set(k, (available.get(k) ?? 0) + (sold ? 0 : 1));
+      }
+      const lst = await fetchListings(Array.from(available.keys()));
+      const changes: { marketplace: "backmarket" | "refurbed"; externalId: string; sku: string; from: number; to: number }[] = [];
+      const notes: string[] = [];
+      for (const [k, qty] of available) {
+        for (const mp of ["backmarket", "refurbed"] as const) {
+          const own = (lst.get(normListingSku(k))?.[mp]?.offers ?? []).filter((o) => isOwnOffer(o, k));
+          if (own.length === 0) continue;
+          if (own.length > 1) {
+            notes.push(`${k} (${mp === "backmarket" ? "Back Market" : "refurbed"}): ${own.length} ofert — pominięto`);
+            continue;
+          }
+          if (own[0].quantity !== qty) changes.push({ marketplace: mp, externalId: own[0].externalId, sku: k, from: own[0].quantity, to: qty });
+        }
+      }
+      if (changes.length === 0) {
+        setPriceNote({ ok: true, text: `Ilości ofert zgadzają się z listą — nic do zmiany.${notes.length ? ` Pominięte: ${notes.join("; ")}.` : ""}` });
+        return;
+      }
+      const lines = changes.slice(0, 25).map((c) => `${c.sku} — ${c.marketplace === "backmarket" ? "Back Market" : "refurbed"}: ${c.from} → ${c.to}`).join("\n");
+      if (!confirm(`Zmienić ilości ofert (${changes.length})?\n\n${lines}${changes.length > 25 ? `\n… i ${changes.length - 25} więcej` : ""}\n\nIlość = sztuki z listy „Do wystawienia” z tym SKU, które nie zostały jeszcze sprzedane (sprzedaż rozpoznajemy po numerze seryjnym w zamówieniu). To zmienia PRAWDZIWE stany na marketplace'ach.`)) return;
+      let ok = 0;
+      const errs: string[] = [];
+      for (let i = 0; i < changes.length; i += 24) {
+        const batch = changes.slice(i, i + 24);
+        const res = await fetch("/api/listings/set-quantity", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ confirm: true, items: batch.map((c) => ({ marketplace: c.marketplace, externalId: c.externalId, quantity: c.to, reason: `Zaktualizuj ilości: ${c.sku}` })) }) });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.error || "Nie udało się zmienić ilości.");
+        for (const r of data.results as { ok: boolean; error?: string; externalId: string }[]) {
+          if (r.ok) ok++;
+          else errs.push(r.error || r.externalId);
+        }
+      }
+      setPriceNote({ ok: errs.length === 0, text: `Zmieniono ilości w ${ok} ofertach${errs.length ? `; błędy (${errs.length}): ${errs.slice(0, 3).join(" | ")}` : ""}.${notes.length ? ` Pominięte: ${notes.join("; ")}.` : ""}` });
+      setReload((n) => n + 1);
+    } catch (e: any) {
+      setPriceNote({ ok: false, text: e.message || String(e) });
+    } finally {
+      setQtyBusy(false);
     }
   }
 
@@ -576,6 +648,7 @@ export default function ListingQueueView({ session, members, canPrice = false }:
         ))}
         <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="Szukaj: numer seryjny albo SKU" className={`${inp} w-64 ml-2`} />
         {canPrice && <button onClick={fetchBuybox} disabled={fetchingMkt || groups.length === 0} className="ml-auto border border-line bg-white px-3 py-1.5 rounded text-sm font-semibold disabled:opacity-50" title="Pobierz z marketplace'ów ceny BuyBox/Backbox dla ofert z tymi SKU (tylko odczyt)">{fetchingMkt ? "Sprawdzam…" : "Sprawdź BuyBox"}</button>}
+        {canPrice && <button onClick={updateQuantities} disabled={qtyBusy} className="border border-line bg-white px-3 py-1.5 rounded text-sm font-semibold disabled:opacity-50" title="Ustaw ilość ofert z tymi SKU na Back Market i refurbed = liczba niesprzedanych sztuk z listy „Do wystawienia” (najpierw okno ze zmianami)">{qtyBusy ? "Liczę…" : "Zaktualizuj ilości"}</button>}
         <button onClick={() => setShowParams((v) => !v)} className={`${canPrice ? "" : "ml-auto "}border border-line bg-white px-3 py-1.5 rounded text-sm font-semibold`}>{showParams ? "Ukryj założenia" : "Założenia cen"}</button>
       </div>
 
@@ -626,6 +699,7 @@ export default function ListingQueueView({ session, members, canPrice = false }:
       )}
 
       {error && <p className="text-rust text-xs mb-3">{error}</p>}
+      {canPrice && <StockSyncBar session={session} isAdmin={isAdmin} canRun={canPrice} />}
       {priceNote && <p className={`text-xs mb-3 ${priceNote.ok ? "text-teal" : "text-rust"}`}>{priceNote.text}</p>}
       {!loading && rows.length > 0 && !anyGoods && <p className="text-amber text-xs mb-3">Nie znaleziono tych numerów w Towarze (albo nie masz dostępu do zakładki Towar) — ceny zakupu i sugestie są niedostępne.</p>}
 

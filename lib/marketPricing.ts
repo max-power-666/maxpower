@@ -26,7 +26,7 @@ const num = (v: unknown): number | null => {
 const money = (m: any): { v: number | null; c: string | null } => ({ v: num(m?.amount), c: typeof m?.currency === "string" ? m.currency : null });
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-async function withRetry(doFetch: typeof fetch, url: string, init: RequestInit, what: string, timeoutMs = 30_000): Promise<Response> {
+export async function withRetry(doFetch: typeof fetch, url: string, init: RequestInit, what: string, timeoutMs = 30_000): Promise<Response> {
   for (let attempt = 1; ; attempt++) {
     const res = await doFetch(url, { ...init, cache: "no-store", signal: AbortSignal.timeout(timeoutMs) });
     if ([429, 502, 503, 504].includes(res.status) && attempt < 3) {
@@ -41,7 +41,7 @@ async function withRetry(doFetch: typeof fetch, url: string, init: RequestInit, 
   }
 }
 
-const bmHeaders = (cfg: BmListingsConfig, json = false) => ({
+export const bmHeaders = (cfg: BmListingsConfig, json = false) => ({
   Accept: "application/json",
   "Accept-Language": cfg.lang,
   Authorization: cfg.auth,
@@ -78,13 +78,13 @@ export async function bmSetListingPrice(cfg: BmListingsConfig, listingId: string
 }
 
 // ---- refurbed ----
-const rfHeaders = (c: RefurbedClient) => ({
+export const rfHeaders = (c: RefurbedClient) => ({
   Authorization: `Plain ${c.token.trim().replace(/^Plain\s+/i, "")}`,
   "Content-Type": "application/json",
   Accept: "application/json",
   "User-Agent": c.userAgent,
 });
-const rfUrl = (c: RefurbedClient, method: string) => `${c.baseUrl ?? REFURBED_BASE_URL}/refb.merchant.v1.OfferService/${method}`;
+export const rfUrl = (c: RefurbedClient, method: string) => `${c.baseUrl ?? REFURBED_BASE_URL}/refb.merchant.v1.OfferService/${method}`;
 
 // Ceny rynków z oferty: ręcznie ustawione mają pierwszeństwo przed wyliczonymi. Stan BuyBox: WON / SHOULD_WIN = mamy (SHOULD_WIN: wygramy przy najbliższym odświeżeniu), ELIGIBLE / WON_ELSEWHERE = nie mamy,
 // INELIGIBLE / UNSPECIFIED = nie wiadomo.

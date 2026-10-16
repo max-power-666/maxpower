@@ -37,6 +37,10 @@
       "schedule": "*/15 * * * *"
     },
     {
+      "path": "/api/listings/stock-sync",
+      "schedule": "5,20,35,50 * * * *"
+    },
+    {
       "path": "/api/nbp/sync",
       "schedule": "0 13 * * *"
     },
