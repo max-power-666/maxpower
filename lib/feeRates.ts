@@ -7,8 +7,8 @@
 //    po numerach i kwotach i się MYLIŁA — FV26-… od Allegro to ZAKUPY TOWARU (gra "Mario Kart 8 Deluxe Switch"), a Erli FV-A-… to REKLAMA ("Zakup Erli Campaigns - pobranie automatyczne"), nie prowizja.
 //  - Allegro: liczymy tylko miesięczną fakturę opłat dla Polski w PLN ("Zapewnienie funkcjonalności i usług dostępnych na platformie handlowej Allegro (allegro.pl)", seria "/PL/N/PLN/"). Pomijamy: faktury
 //    zaliczkowe/korygujące (serie P, NP, NC — drobne kwoty), faktury CZ/SK/HU w innych walutach (już tam nie sprzedajemy — decyzja właściciela), "FV26-…" (zakup towaru od Allegro) i "ET26-…" (usługa zwrotu).
-//  - Erli: tylko faktura FV-P-… ("Zapewnienie funkcjonalności i usług dostępnych na platformie handlowej ERLI.pl" — opłaty platformy). FV-A-… to Erli Campaigns (reklama) — nie jest prowizją, pokazujemy ją osobno
-//    (kolumna "reklama") i nie wchodzi do stawki.
+//  - Erli: faktura FV-P-… ("Zapewnienie funkcjonalności i usług dostępnych na platformie handlowej ERLI.pl" — opłaty platformy) ORAZ FV-A-… (Erli Campaigns — reklama, pobierana automatycznie): od 16.10.2026
+//    reklama jest DOLICZANA do stawki (decyzja właściciela — "doliczmy reklamę do erli"), a w tabeli pokazana osobno (kolumna "w tym reklama"). Wymaganą fakturą miesiąca jest FV-P; brak FV-A (miesiąc bez kampanii) nie blokuje.
 //  - Miesiąc jest kompletny, gdy ma wymaganą fakturę opłat (Allegro: seria N; Erli: FV-P) i sprzedaż; w oknie bierzemy 3 najnowsze kompletne miesiące przed bieżącym.
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isCountedOrder } from "./salesOrders";
@@ -34,7 +34,7 @@ export function classifyFeeInvoice(inv: FeeInvoiceRow): FeeClass | null {
   if (/erli/.test(name)) {
     const m = number.match(/^FV-([AP])-(\d{4})-(\d{2})-/i);
     const ym = m ? `${m[2]}-${m[3]}` : null;
-    if (/campaigns|reklam/.test(product) || (!product && m?.[1].toUpperCase() === "A")) return { marketplace: "erli", series: "A", ym, include: false, ads: true, why: "Erli Campaigns — reklama, nie prowizja" };
+    if (/campaigns|reklam/.test(product) || (!product && m?.[1].toUpperCase() === "A")) return { marketplace: "erli", series: "A", ym, include: (inv.currency || "PLN").toUpperCase() === "PLN", ads: true, why: "" };
     if (!ym) return { marketplace: "erli", series: "?", ym: null, include: false, why: "numer faktury Erli w nieznanym formacie" };
     if (!isPlatformFee && product) return { marketplace: "erli", series: m![1].toUpperCase(), ym, include: false, why: `inna usługa: ${inv.product}` };
     return { marketplace: "erli", series: "P", ym, include: (inv.currency || "PLN").toUpperCase() === "PLN", why: "" };
@@ -84,16 +84,13 @@ export function computeFeeRates(invoices: FeeInvoiceRow[], sales: FeeSales[], no
     for (const inv of invoices) {
       const c = classifyFeeInvoice(inv);
       if (!c || c.marketplace !== mp) continue;
-      if (c.ads && c.ym) {
-        month(c.ym).adsNet += num(inv.price_net); // reklama (Erli Campaigns): pokazujemy osobno, poza stawką prowizji
-        continue;
-      }
       if (!c.include || !c.ym) {
         excluded.push({ number: inv.number || "(bez numeru)", issueDate: inv.issue_date, net: num(inv.price_net), currency: (inv.currency || "PLN").toUpperCase(), why: c.why || "poza zakresem" });
         continue;
       }
       const m = month(c.ym);
       m.net += num(inv.price_net);
+      if (c.ads) m.adsNet += num(inv.price_net); // reklama (Erli Campaigns) — wliczona do net, pokazywana też osobno
       m.series.add(c.series);
       m.invoices.push({ number: inv.number || "", series: c.series, net: num(inv.price_net) });
     }

@@ -62,7 +62,7 @@ export default function MarketplaceFeesView({ session }: { session: Session }) {
                   <th className="p-3">Miesiąc</th>
                   <th className="p-3">Faktury (netto)</th>
                   <th className="p-3 text-right">Faktury razem</th>
-                  {Object.values(rates ?? {}).some((x) => x.marketplace === r.marketplace && x.months.some((m) => m.adsNet > 0)) && <th className="p-3 text-right" title="Erli Campaigns (reklama) — poza prowizją">Reklama</th>}
+                  {Object.values(rates ?? {}).some((x) => x.marketplace === r.marketplace && x.months.some((m) => m.adsNet > 0)) && <th className="p-3 text-right" title="Erli Campaigns (reklama) — wliczona w fakturach razem">w tym reklama</th>}
                   <th className="p-3 text-right">Sprzedaż brutto</th>
                   <th className="p-3 text-right">Zamówień</th>
                   <th className="p-3 text-right">Stawka</th>
@@ -74,7 +74,7 @@ export default function MarketplaceFeesView({ session }: { session: Session }) {
                   <tr key={m.ym} className="border-b border-line last:border-0 align-top">
                     <td className="p-3 whitespace-nowrap">{monthLabel(m.ym)}</td>
                     <td className="p-3 text-xs font-mono">
-                      {m.invoices.length === 0 ? <span className="text-inksoft">—</span> : m.invoices.map((i) => <div key={i.number} title={i.number}>{r.marketplace === "erli" ? "FV-P (opłaty platformy)" : "opłaty"}: {money(i.net)} zł</div>)}
+                      {m.invoices.length === 0 ? <span className="text-inksoft">—</span> : m.invoices.map((i) => <div key={i.number} title={i.number}>{r.marketplace === "erli" ? (i.series === "A" ? "FV-A (reklama)" : "FV-P (opłaty)") : "opłaty"}: {money(i.net)} zł</div>)}
                     </td>
                     <td className="p-3 text-right font-mono">{money(m.net)}</td>
                     {r.months.some((x) => x.adsNet > 0) && <td className="p-3 text-right font-mono text-inksoft">{m.adsNet ? money(m.adsNet) : "—"}</td>}
@@ -108,8 +108,7 @@ export default function MarketplaceFeesView({ session }: { session: Session }) {
         ))}
       <p className="text-[11px] text-inksoft">
         Co jest na fakturze, rozpoznajemy po nazwie pozycji z Fakturowni. <b>Allegro:</b> tylko sprzedaż do Polski i miesięczna faktura „Zapewnienie funkcjonalności i usług… (allegro.pl)” w PLN (seria „/PL/N/PLN/”); pomijamy faktury w HUF/CZK/EUR
-        (tam już nie sprzedajemy), drobne faktury zaliczkowe/korygujące, usługę zwrotu oraz faktury „FV26-…”, które są <b>zakupami towaru od Allegro</b> (gra Mario Kart 8 Deluxe), a nie kosztem prowizji. <b>Erli:</b> tylko faktura FV-P
-        („Zapewnienie funkcjonalności i usług… ERLI.pl”); faktura FV-A to <b>Erli Campaigns — reklama</b>, pokazana osobno w kolumnie „Reklama” i niewliczana do prowizji. Miesiąc faktury to miesiąc rozliczenia z numeru faktury.
+        (tam już nie sprzedajemy), drobne faktury zaliczkowe/korygujące, usługę zwrotu oraz faktury „FV26-…”, które są <b>zakupami towaru od Allegro</b> (gra Mario Kart 8 Deluxe), a nie kosztem prowizji. <b>Erli:</b> faktura FV-P („Zapewnienie funkcjonalności i usług… ERLI.pl”, opłaty platformy) <b>oraz FV-A — Erli Campaigns, reklama</b>, doliczona do stawki na prośbę właściciela (kolumna „w tym reklama”). Miesiąc faktury to miesiąc rozliczenia z numeru faktury.
       </p>
     </div>
   );
