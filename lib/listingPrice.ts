@@ -1,4 +1,4 @@
-// Sugerowana cena sprzedaży dla "Magazyn -> Do wystawienia" (16.10.2026): cena, przy której zysk netto po WSZYSTKICH kosztach to ~X% ceny sprzedaży (domyślnie 20%).
+// Sugerowana cena sprzedaży dla "Magazyn -> Do wystawienia" (16.10.2026): cena, przy której zysk netto po WSZYSTKICH kosztach to X% ceny sprzedaży — widełki 20–25% (edytowalne).
 // Ta sama definicja marży co w zakładce Marża (lib/margin.ts): marża = sprzedaż − zakup − VAT − wysyłka − koszty dodatkowe − prowizja (− serwis, który siedzi w kosztach dodatkowych z Towaru),
 // marża % = marża ÷ cena sprzedaży (brutto). Czyste funkcje, bez bazy.
 //
@@ -43,14 +43,15 @@ export function suggestPrice(i: PriceInputs, r: MarketRules): Suggestion | null 
 
 // ---- Reguły marketplace'ów ----
 export type Assumptions = {
-  targetPct: number; // docelowy zysk netto, % ceny sprzedaży
+  targetMinPct: number; // dolna granica widełek zysku netto, % ceny sprzedaży
+  targetMaxPct: number; // górna granica widełek
   shippingPln: number; // koszt wysyłki do klienta (PLN netto)
   bmCountry: string; // kraj sprzedaży na Back Market — decyduje o programie Accelerator (konsole 6% do FR/DE/ES/IT do 31.12.2026)
   bmPaymentPct: number; // opłata płatnicza BM (regulamin 1%)
   rfCommissionPct: number; // refurbed: prowizja bazowa (z danych zamówień: 12%)
   rfPaymentPct: number; // refurbed: opłata płatnicza (z danych zamówień: 1,5%)
 };
-export const DEFAULT_ASSUMPTIONS: Assumptions = { targetPct: 20, shippingPln: 37, bmCountry: "FR", bmPaymentPct: 1, rfCommissionPct: 12, rfPaymentPct: 1.5 };
+export const DEFAULT_ASSUMPTIONS: Assumptions = { targetMinPct: 20, targetMaxPct: 25, shippingPln: 37, bmCountry: "FR", bmPaymentPct: 1, rfCommissionPct: 12, rfPaymentPct: 1.5 };
 export const BM_CCBM_EUR = { main: 6.99, accessory: 1.99 }; // stała opłata CCBM za pozycję (regulamin; średnie z faktur w Marży są zbliżone)
 
 export function bmRules(sku: string, a: Assumptions, today: string): { rules: MarketRules; kind: BmKind; note: string } {
@@ -65,3 +66,6 @@ export const refurbedRules = (a: Assumptions): { rules: MarketRules; note: strin
 });
 
 export { bmKind };
+
+// Normalizacja SKU do porównania SKU z listy "Do wystawienia" (SKU magazynowe, np. PS4-500-BK-B) z SKU ofert (często z końcówką -nM i dodatkiem "+gra"): bez "+…" i bez "-0M/-1M/-2M".
+export const normListingSku = (sku: string | null | undefined) => (sku || "").trim().toUpperCase().replace(/\+.*$/, "").replace(/-\d+M$/, "");

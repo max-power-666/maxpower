@@ -8,16 +8,20 @@ import { escapeLike } from "@/lib/search";
 import { skuCategoryOf } from "@/lib/skuParts";
 import { summarizeShippingCosts, type ShipmentCostRow } from "@/lib/shippingCosts";
 import { warsawYmd } from "@/lib/warsawDate";
-import { DEFAULT_ASSUMPTIONS, bmRules, refurbedRules, suggestPrice, type Assumptions, type PriceInputs, type Suggestion, type VatMode } from "@/lib/listingPrice";
+import { DEFAULT_ASSUMPTIONS, normListingSku, bmRules, refurbedRules, suggestPrice, type Assumptions, type PriceInputs, type Suggestion, type VatMode } from "@/lib/listingPrice";
 import ProductCardDrawer from "./ProductCardDrawer";
 
 // Magazyn -> "Do wystawienia" (16.10.2026, na prośbę właściciela): urządzenia gotowe do wystawienia na sprzedaż wprowadzane skanerem (numer seryjny + SKU). Cena zakupu i koszty
 // dodatkowe (serwis, prowizja + PCC) idą z Towaru, a sugerowana cena sprzedaży na Back Market i refurbed jest liczona tak, żeby zysk netto po wszystkich kosztach wynosił ~20% ceny
-// (wzór i założenia: lib/listingPrice.ts, ta sama definicja marży co zakładka Marża). Ceny widzą tylko osoby z dostępem do Towaru (RLS) — pozostali widzą samą listę.
+// (wzór i założenia: lib/listingPrice.ts, ta sama definicja marży co zakładka Marża); widełki zysku 20–25% są edytowalne. Przy każdej sugestii widać, czy oferta z tym SKU jest już
+// utworzona w Listingach i jaka jest w niej ilość. Ceny widzą tylko osoby z dostępem do Towaru (RLS) — pozostali widzą samą listę.
 
 type Entry = { id: number; serial_number: string; sku: string; notes: string | null; created_by_email: string | null; created_at: string; listed_at: string | null; listed_by_email: string | null };
 type Goods = { serial: string | null; name: string | null; kind: string | null; vat: string | null; price_pln: number | string | null; total_pln: number | string | null; costs: number | string | null; commission_pcc: number | string | null; purchased_on: string | null };
 type Filter = "todo" | "done" | "all";
+type ListingRow = { marketplace: string; sku: string | null; quantity: number | null; price: number | null; currency: string | null; state: string | null };
+type ListingInfo = { count: number; quantity: number; prices: number[]; currency: string | null; skus: string[] };
+type Pair = { lo: Suggestion | null; hi: Suggestion | null };
 
 const LS_KEY = "listing-queue-assumptions";
 const pill = (active: boolean) => `px-3 py-1.5 rounded-full text-sm font-semibold border ${active ? "bg-ink text-paper border-ink" : "bg-white border-line"}`;
@@ -52,9 +56,33 @@ async function fetchGoods(serials: string[]): Promise<Map<string, Goods>> {
   return out;
 }
 
+// Oferty z Magazyn -> Listingi (marketplace_listings): po SKU z listy, porównanie bez "+dodatku" i końcówki -nM; dla każdego marketplace'u liczba ofert, łączna ilość i ceny.
+async function fetchListings(skus: string[]): Promise<Map<string, { backmarket: ListingInfo | null; refurbed: ListingInfo | null }>> {
+  const want = Array.from(new Set(skus.map(normListingSku).filter(Boolean)));
+  const out = new Map<string, { backmarket: ListingInfo | null; refurbed: ListingInfo | null }>();
+  for (const k of want) out.set(k, { backmarket: null, refurbed: null });
+  for (let i = 0; i < want.length; i += 15) {
+    const chunk = want.slice(i, i + 15);
+    const or = chunk.map((k) => `sku.ilike."${escapeLike(k).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}%"`).join(",");
+    const { data } = await supabase.from("marketplace_listings").select("marketplace, sku, quantity, price, currency, state").or(or).limit(2000);
+    for (const l of (data as ListingRow[]) || []) {
+      const k = normListingSku(l.sku);
+      const slot = out.get(k);
+      if (!slot || (l.marketplace !== "backmarket" && l.marketplace !== "refurbed")) continue;
+      const cur = (slot[l.marketplace] ??= { count: 0, quantity: 0, prices: [], currency: l.currency, skus: [] });
+      cur.count += 1;
+      cur.quantity += Number(l.quantity) || 0;
+      if (l.price !== null && l.price !== undefined) cur.prices.push(Number(l.price));
+      cur.skus.push(`${l.sku} ×${Number(l.quantity) || 0}`);
+    }
+  }
+  return out;
+}
+
 export default function ListingQueueView({ session, members }: { session: Session; members: MemberLite[] }) {
   const [rows, setRows] = useState<Entry[]>([]);
   const [goods, setGoods] = useState<Map<string, Goods>>(new Map());
+  const [listings, setListings] = useState<Map<string, { backmarket: ListingInfo | null; refurbed: ListingInfo | null }>>(new Map());
   const [filter, setFilter] = useState<Filter>("todo");
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
@@ -115,9 +143,7 @@ export default function ListingQueueView({ session, members }: { session: Sessio
     let cancelled = false;
     (async () => {
       setLoading(true);
-      let q = supabase.from("listing_queue").select("id, serial_number, sku, notes, created_by_email, created_at, listed_at, listed_by_email");
-      if (filter === "todo") q = q.is("listed_at", null);
-      else if (filter === "done") q = q.not("listed_at", "is", null);
+      let q = supabase.from("listing_queue").select("id, serial_number, sku, notes, created_by_email, created_at");
       if (search) q = q.or(`serial_number.ilike.%${escapeLike(search)}%,sku.ilike.%${escapeLike(search)}%`);
       const { data, error: err } = await q.order("created_at", { ascending: false }).limit(300);
       if (cancelled) return;
@@ -129,13 +155,14 @@ export default function ListingQueueView({ session, members }: { session: Sessio
         const list = (data as Entry[]) || [];
         setRows(list);
         setGoods(await fetchGoods(Array.from(new Set(list.map((r) => r.serial_number)))));
+        setListings(await fetchListings(list.map((r) => r.sku)));
       }
       setLoading(false);
     })();
     return () => {
       cancelled = true;
     };
-  }, [filter, search, reload]);
+  }, [search, reload]);
 
   // Po zeskanowaniu numeru seryjnego podpowiadamy SKU znane z systemu (Towar -> Skup, SKU z magazynu: Testy / Trade-in / import); można je nadpisać skanem SKU.
   async function lookupSku(s: string) {
@@ -174,11 +201,6 @@ export default function ListingQueueView({ session, members }: { session: Sessio
     serialRef.current?.focus();
   }
 
-  async function toggleListed(r: Entry) {
-    const { error: err } = await supabase.from("listing_queue").update({ listed_at: r.listed_at ? null : new Date().toISOString() }).eq("id", r.id);
-    if (err) setError(err.code === "23505" ? "To urządzenie jest już ponownie na liście „Do wystawienia”." : `Nie zapisano: ${err.message}`);
-    else setReload((n) => n + 1);
-  }
   async function remove(r: Entry) {
     if (!confirm(`Usunąć ${r.serial_number} z listy?`)) return;
     const { data, error: err } = await supabase.from("listing_queue").delete().eq("id", r.id).select("id");
@@ -189,21 +211,21 @@ export default function ListingQueueView({ session, members }: { session: Sessio
 
   // Wyliczenia na wiersz
   const calc = useMemo(() => {
-    const out = new Map<number, { g: Goods | null; input: PriceInputs | null; bm: Suggestion | null; rf: Suggestion | null; bmNote: string; rfNote: string; cat: string; vatMissing: boolean }>();
+    const out = new Map<number, { g: Goods | null; input: PriceInputs | null; bm: Pair | null; rf: Pair | null; bmNote: string; rfNote: string; cat: string; vatMissing: boolean }>();
     for (const r of rows) {
       const g = goods.get(normSerial(r.serial_number)) ?? null;
       const purchase = num(g?.price_pln);
       const totalCosts = num(g?.total_pln);
       const extra = purchase !== null ? (totalCosts !== null ? Math.max(0, totalCosts - purchase) : (num(g?.costs) ?? 0) + (num(g?.commission_pcc) ?? 0)) : 0;
       const vat: VatMode = (g?.vat || "").toUpperCase() === "V23" ? "V23" : "VM";
-      const input: PriceInputs | null = purchase !== null && purchase > 0 && eurRate ? { purchasePln: purchase, extraPln: extra, vat, shippingPln: a.shippingPln, targetPct: a.targetPct, eurRate: eurRate.mid } : null;
+      const input: PriceInputs | null = purchase !== null && purchase > 0 && eurRate ? { purchasePln: purchase, extraPln: extra, vat, shippingPln: a.shippingPln, targetPct: a.targetMinPct, eurRate: eurRate.mid } : null;
       const bmr = bmRules(r.sku, a, today);
       const rfr = refurbedRules(a);
       out.set(r.id, {
         g,
         input,
-        bm: input ? suggestPrice(input, bmr.rules) : null,
-        rf: input ? suggestPrice(input, rfr.rules) : null,
+        bm: input ? { lo: suggestPrice(input, bmr.rules), hi: suggestPrice({ ...input, targetPct: a.targetMaxPct }, bmr.rules) } : null,
+        rf: input ? { lo: suggestPrice(input, rfr.rules), hi: suggestPrice({ ...input, targetPct: a.targetMaxPct }, rfr.rules) } : null,
         bmNote: bmr.note,
         rfNote: rfr.note,
         cat: skuCategoryOf(r.sku),
@@ -213,37 +235,76 @@ export default function ListingQueueView({ session, members }: { session: Sessio
     return out;
   }, [rows, goods, a, eurRate, today]);
 
-  const SugCell = ({ s }: { s: Suggestion | null }) =>
-    s ? (
+  const SugCell = ({ p, info }: { p: Pair | null; info: ListingInfo | null | undefined }) => {
+    const lo = p?.lo ?? null;
+    const hi = p?.hi ?? null;
+    const same = lo && hi && lo.eur === hi.eur;
+    return (
       <div className="whitespace-nowrap">
-        <div className="font-mono font-bold text-base">{s.eur.toLocaleString("pl-PL")} €</div>
-        <div className="text-[11px] text-inksoft font-mono">{pln(s.pricePln)} zł</div>
-        <div className="text-[11px] text-teal font-mono" title="Zysk netto po wszystkich kosztach przy tej cenie">zysk {pln(s.margin.marginPln)} zł · {pct1(s.margin.marginPct)}</div>
+        {lo && hi ? (
+          <>
+            <div className="font-mono font-bold text-base">{same ? `${lo.eur.toLocaleString("pl-PL")} €` : `${lo.eur.toLocaleString("pl-PL")} – ${hi.eur.toLocaleString("pl-PL")} €`}</div>
+            <div className="text-[11px] text-inksoft font-mono">{same ? `${pln(lo.pricePln)} zł` : `${pln(lo.pricePln)} – ${pln(hi.pricePln)} zł`}</div>
+            <div className="text-[11px] text-teal font-mono" title="Zysk netto po wszystkich kosztach przy cenie minimalnej i maksymalnej">zysk {pln(lo.margin.marginPln)}{same ? "" : ` – ${pln(hi.margin.marginPln)}`} zł · {pct1(lo.margin.marginPct)}{same ? "" : ` – ${pct1(hi.margin.marginPct)}`}</div>
+          </>
+        ) : (
+          <span className="text-inksoft">—</span>
+        )}
+        <ListingBadge info={info} />
       </div>
+    );
+  };
+
+  // Czy oferta z tym SKU jest już utworzona (Magazyn -> Listingi) i jaka jest w niej ilość
+  const ListingBadge = ({ info }: { info: ListingInfo | null | undefined }) =>
+    info === undefined ? null : info === null ? (
+      <div className="text-[11px] text-inksoft mt-1" title="W Listingach nie ma oferty z tym SKU">brak listingu</div>
     ) : (
-      <span className="text-inksoft">—</span>
+      <div className={`text-[11px] mt-1 ${info.quantity > 0 ? "text-teal" : "text-amber"}`} title={`Oferty z tym SKU: ${info.skus.join(", ")}`}>
+        listing jest · ilość {info.quantity}{info.count > 1 ? ` (${info.count} oferty)` : ""}
+        {info.prices.length > 0 && <span className="text-inksoft"> · cena {info.prices.length === 1 || Math.min(...info.prices) === Math.max(...info.prices) ? info.prices[0] : `${Math.min(...info.prices)}–${Math.max(...info.prices)}`} {info.currency || ""}</span>}
+      </div>
     );
 
-  const Breakdown = ({ s, title, note, input }: { s: Suggestion | null; title: string; note: string; input: PriceInputs | null }) =>
-    !s || !input ? null : (
+  const Breakdown = ({ p, title, note, input }: { p: Pair | null; title: string; note: string; input: PriceInputs | null }) => {
+    const lo = p?.lo;
+    const hi = p?.hi;
+    if (!lo || !hi || !input) return null;
+    const rowsDef: [string, (s: Suggestion) => number][] = [
+      ["Cena sprzedaży brutto", (s) => s.margin.salePln],
+      [`− cena zakupu ${input.vat === "V23" ? "(netto, V23)" : ""}`, () => input.purchasePln],
+      [`− ${input.vat === "V23" ? "VAT należny 23% od całej ceny" : "VAT od marży 23/123"}`, (s) => s.margin.vatPln],
+      ["− wysyłka do klienta", () => input.shippingPln],
+      ["− koszty dodatkowe (serwis, prowizja + PCC z Towaru)", () => input.extraPln],
+      ["− prowizja i opłaty marketplace'u", (s) => s.margin.commissionPln],
+    ];
+    return (
       <div className="text-xs">
-        <div className="font-semibold mb-1">{title} — {s.eur} € ({pln(s.pricePln)} zł brutto)</div>
+        <div className="font-semibold mb-1">{title}</div>
         <div className="text-inksoft mb-1">{note}</div>
         <table className="font-mono">
+          <thead>
+            <tr className="text-inksoft"><th></th><th className="text-right pl-4 font-normal">cena min. ({lo.eur} €)</th><th className="text-right pl-4 font-normal">cena maks. ({hi.eur} €)</th></tr>
+          </thead>
           <tbody>
-            <tr><td className="pr-4">Cena sprzedaży brutto</td><td className="text-right">{pln(s.margin.salePln)}</td></tr>
-            <tr><td className="pr-4">− cena zakupu {input.vat === "V23" ? "(netto, V23)" : ""}</td><td className="text-right">{pln(input.purchasePln)}</td></tr>
-            <tr><td className="pr-4">− {input.vat === "V23" ? "VAT należny 23% od całej ceny" : "VAT od marży 23/123"}</td><td className="text-right">{pln(s.margin.vatPln)}</td></tr>
-            <tr><td className="pr-4">− wysyłka do klienta</td><td className="text-right">{pln(input.shippingPln)}</td></tr>
-            <tr><td className="pr-4">− koszty dodatkowe (serwis, prowizja + PCC z Towaru)</td><td className="text-right">{pln(input.extraPln)}</td></tr>
-            <tr><td className="pr-4">− prowizja i opłaty marketplace'u</td><td className="text-right">{pln(s.margin.commissionPln)}</td></tr>
-            <tr className="font-bold border-t border-line"><td className="pr-4">= zysk netto</td><td className="text-right">{pln(s.margin.marginPln)} ({pct1(s.margin.marginPct)})</td></tr>
+            {rowsDef.map(([label, f]) => (
+              <tr key={label}><td className="pr-4">{label}</td><td className="text-right pl-4">{pln(f(lo))}</td><td className="text-right pl-4">{pln(f(hi))}</td></tr>
+            ))}
+            <tr className="font-bold border-t border-line"><td className="pr-4">= zysk netto</td><td className="text-right pl-4">{pln(lo.margin.marginPln)} ({pct1(lo.margin.marginPct)})</td><td className="text-right pl-4">{pln(hi.margin.marginPln)} ({pct1(hi.margin.marginPct)})</td></tr>
           </tbody>
         </table>
       </div>
     );
+  };
 
-  const todoCount = rows.filter((r) => !r.listed_at).length;
+  // "Wystawione" wynika z Listingów (bez ręcznego przycisku): oferta z tym SKU z ilością > 0 na Back Market albo refurbed.
+  const isListed = (r: Entry) => {
+    const l = listings.get(normListingSku(r.sku));
+    return !!l && ((l.backmarket?.quantity ?? 0) > 0 || (l.refurbed?.quantity ?? 0) > 0);
+  };
+  const todoCount = rows.filter((r) => !isListed(r)).length;
+  const listedCount = rows.length - todoCount;
+  const visible = rows.filter((r) => (filter === "all" ? true : filter === "todo" ? !isListed(r) : isListed(r)));
   const anyGoods = goods.size > 0;
 
   return (
@@ -295,8 +356,8 @@ export default function ListingQueueView({ session, members }: { session: Sessio
       </div>
 
       <div className="flex flex-wrap items-center gap-2 mb-3">
-        {([["todo", "Do wystawienia"], ["done", "Wystawione"], ["all", "Wszystkie"]] as const).map(([k, label]) => (
-          <button key={k} onClick={() => setFilter(k)} className={pill(filter === k)}>{label}{filter === "todo" && k === "todo" ? <span className="ml-1.5 text-xs font-normal opacity-70">{todoCount}</span> : null}</button>
+        {([["todo", "Do wystawienia", todoCount], ["done", "Wystawione", listedCount], ["all", "Wszystkie", rows.length]] as const).map(([k, label, n]) => (
+          <button key={k} onClick={() => setFilter(k)} className={pill(filter === k)} title={k === "done" ? "Mają ofertę z tym SKU i ilością > 0 na Back Market albo refurbed (Magazyn → Listingi)" : undefined}>{label}<span className="ml-1.5 text-xs font-normal opacity-70">{n}</span></button>
         ))}
         <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="Szukaj: numer seryjny albo SKU" className={`${inp} w-64 ml-2`} />
         <button onClick={() => setShowParams((v) => !v)} className="ml-auto border border-line bg-white px-3 py-1.5 rounded text-sm font-semibold">{showParams ? "Ukryj założenia" : "Założenia cen"}</button>
@@ -305,9 +366,13 @@ export default function ListingQueueView({ session, members }: { session: Sessio
       {showParams && (
         <div className="border border-line bg-white p-4 mb-3 text-sm">
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-            <label className="text-xs font-semibold text-inksoft">Docelowy zysk netto (% ceny)
-              <input type="number" step="0.5" value={a.targetPct} onChange={(e) => setParam({ targetPct: Number(e.target.value) || 0 })} className={`${inp} w-full mt-1 font-mono`} />
-            </label>
+            <div className="text-xs font-semibold text-inksoft">Widełki zysku netto (% ceny)
+              <div className="flex items-center gap-1 mt-1">
+                <input type="number" step="0.5" value={a.targetMinPct} onChange={(e) => setParam({ targetMinPct: Number(e.target.value) || 0 })} className={`${inp} w-full font-mono`} title="Od (cena minimalna)" />
+                <span>–</span>
+                <input type="number" step="0.5" value={a.targetMaxPct} onChange={(e) => setParam({ targetMaxPct: Number(e.target.value) || 0 })} className={`${inp} w-full font-mono`} title="Do (cena maksymalna)" />
+              </div>
+            </div>
             <label className="text-xs font-semibold text-inksoft">Wysyłka do klienta (zł netto)
               <input type="number" step="1" value={a.shippingPln} onChange={(e) => setParam({ shippingPln: Number(e.target.value) || 0 })} className={`${inp} w-full mt-1 font-mono`} />
               {shipAvg !== null && <button type="button" onClick={() => setParam({ shippingPln: shipAvg })} className="text-teal font-normal underline block mt-0.5">użyj średniej z ostatnich przesyłek: {pln(shipAvg)}</button>}
@@ -348,19 +413,19 @@ export default function ListingQueueView({ session, members }: { session: Sessio
               <th className="p-3">SKU</th>
               <th className="p-3 text-right">Cena zakupu</th>
               <th className="p-3 text-right" title="Serwis + prowizja Buyback + PCC z Towaru">Koszty dod.</th>
-              <th className="p-3">Back Market — sugerowana cena</th>
+              <th className="p-3" title="Widełki ceny: zysk netto od dolnej do górnej granicy (Założenia cen)">Back Market — sugerowana cena</th>
               <th className="p-3">refurbed — sugerowana cena</th>
               <th className="p-3"></th>
             </tr>
           </thead>
           <tbody>
-            {!loading && rows.length === 0 && !error && <tr><td colSpan={8} className="p-6 text-center text-inksoft text-sm">{search ? "Brak wyników." : filter === "done" ? "Nic jeszcze nie oznaczono jako wystawione." : "Lista jest pusta — zeskanuj pierwsze urządzenie powyżej."}</td></tr>}
-            {rows.map((r) => {
+            {!loading && visible.length === 0 && !error && <tr><td colSpan={8} className="p-6 text-center text-inksoft text-sm">{search ? "Brak wyników." : filter === "done" ? "Żadne urządzenie z listy nie ma jeszcze oferty z ilością > 0." : filter === "todo" && rows.length > 0 ? "Wszystkie urządzenia z listy mają już aktywne oferty." : "Lista jest pusta — zeskanuj pierwsze urządzenie powyżej."}</td></tr>}
+            {visible.map((r) => {
               const c = calc.get(r.id)!;
               const open = expanded.has(r.id);
               return (
                 <Fragment key={r.id}>
-                  <tr className={`border-b border-line align-top ${r.listed_at ? "opacity-60" : ""}`}>
+                  <tr className="border-b border-line align-top">
                     <td className="p-3 text-xs whitespace-nowrap">
                       <div>{fmtDT(r.created_at)}</div>
                       <div className="text-inksoft">{displayNameForEmail(r.created_by_email, members)}</div>
@@ -382,13 +447,11 @@ export default function ListingQueueView({ session, members }: { session: Sessio
                       ) : <span className="text-inksoft font-sans text-xs">brak w Towarze</span>}
                     </td>
                     <td className="p-3 text-right font-mono whitespace-nowrap">{c.input ? pln(c.input.extraPln) : "—"}</td>
-                    <td className="p-3"><SugCell s={c.bm} /></td>
-                    <td className="p-3"><SugCell s={c.rf} /></td>
+                    <td className="p-3"><SugCell p={c.bm} info={listings.size ? (listings.get(normListingSku(r.sku))?.backmarket ?? null) : undefined} /></td>
+                    <td className="p-3"><SugCell p={c.rf} info={listings.size ? (listings.get(normListingSku(r.sku))?.refurbed ?? null) : undefined} /></td>
                     <td className="p-3 whitespace-nowrap text-xs">
                       {c.input && <button onClick={() => setExpanded((p) => { const n = new Set(p); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n; })} className="text-inksoft font-semibold mr-3" title="Pokaż wyliczenie">{open ? "▾ Wyliczenie" : "▸ Wyliczenie"}</button>}
-                      <button onClick={() => toggleListed(r)} className="text-teal font-semibold mr-3">{r.listed_at ? "Cofnij" : "Wystawione ✓"}</button>
                       <button onClick={() => remove(r)} className="text-rust font-semibold">Usuń</button>
-                      {r.listed_at && <div className="text-inksoft mt-1">wystawiono {fmtDT(r.listed_at)} · {displayNameForEmail(r.listed_by_email, members)}</div>}
                       {c.vatMissing && <div className="text-amber mt-1" title="W Towarze brak VAT (VM/V23) — liczone jak VM">brak VAT w Towarze</div>}
                     </td>
                   </tr>
@@ -396,8 +459,8 @@ export default function ListingQueueView({ session, members }: { session: Sessio
                     <tr className="border-b border-line bg-paper">
                       <td colSpan={8} className="p-4">
                         <div className="grid md:grid-cols-2 gap-6">
-                          <Breakdown s={c.bm} title="Back Market" note={c.bmNote} input={c.input} />
-                          <Breakdown s={c.rf} title="refurbed" note={c.rfNote} input={c.input} />
+                          <Breakdown p={c.bm} title="Back Market" note={c.bmNote} input={c.input} />
+                          <Breakdown p={c.rf} title="refurbed" note={c.rfNote} input={c.input} />
                         </div>
                       </td>
                     </tr>
