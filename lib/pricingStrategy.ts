@@ -26,6 +26,7 @@ export function decidePrice(i: StrategyInput): StrategyResult {
     const toWin = Math.floor(i.priceToWinEur - i.undercutEur);
     if (toWin < floor) return mk(floor, `cena do wygrania BuyBox (${i.priceToWinEur} €) jest poniżej dolnej granicy opłacalności (${floor} €)`, "Wygranie BuyBox przy tej cenie dałoby zysk poniżej celu — zostajemy przy dolnej granicy.");
     if (cur > toWin) return mk(toWin, `nasza cena jest wyższa niż cena do wygrania BuyBox (${i.priceToWinEur} €)`);
+    if (cur < floor) return mk(floor, "cena jest poniżej dolnej granicy opłacalności", "Obecna cena daje zysk poniżej celu.");
     return mk(cur, "cena jest już na poziomie ceny do wygrania BuyBox — bez zmiany");
   }
   if (cur < floor) return mk(floor, "cena jest poniżej dolnej granicy opłacalności", "Obecna cena daje zysk poniżej celu.");
