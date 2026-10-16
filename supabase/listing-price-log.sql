@@ -15,6 +15,8 @@ create table if not exists listing_price_log (
   ok boolean not null default true,
   error text
 );
+alter table listing_price_log add column if not exists old_min_price numeric;
+alter table listing_price_log add column if not exists new_min_price numeric;   -- ustawiona cena minimalna (automat marketplace'u), null = bez zmiany
 create index if not exists listing_price_log_offer_idx on listing_price_log (marketplace, external_id, created_at desc);
 
 alter table listing_price_log enable row level security;

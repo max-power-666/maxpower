@@ -64,17 +64,17 @@ export async function bmMarketInfo(cfg: BmListingsConfig, listingId: string): Pr
   });
 }
 
-export async function bmSetListingPrice(cfg: BmListingsConfig, listingId: string, price: number, currency: string): Promise<{ price: number | null }> {
+export async function bmSetListingPrice(cfg: BmListingsConfig, listingId: string, price: number, currency: string, minPrice?: number | null): Promise<{ price: number | null; minPrice: number | null }> {
   const doFetch = cfg.fetchImpl ?? fetch;
   const res = await withRetry(
     doFetch,
     `${cfg.baseUrl}/ws/listings/${encodeURIComponent(listingId)}`,
-    { method: "POST", headers: bmHeaders(cfg, true), body: JSON.stringify({ price: price.toFixed(2), currency }) },
+    { method: "POST", headers: bmHeaders(cfg, true), body: JSON.stringify({ price: price.toFixed(2), currency, ...(minPrice ? { min_price: minPrice.toFixed(2) } : {}) }) },
     "Back Market (zmiana ceny)",
     cfg.timeoutMs
   );
   const data = await res.json().catch(() => null);
-  return { price: num(data?.price) };
+  return { price: num(data?.price), minPrice: num(data?.min_price) };
 }
 
 // ---- refurbed ----
@@ -117,15 +117,15 @@ export async function refurbedMarketInfo(c: RefurbedClient, offerId: string): Pr
   return mapRefurbedMarkets(data?.offer);
 }
 
-export async function refurbedSetReferencePrice(c: RefurbedClient, offerId: string, price: number, currency: string): Promise<{ price: number | null }> {
+export async function refurbedSetReferencePrice(c: RefurbedClient, offerId: string, price: number, currency: string, minPrice?: number | null): Promise<{ price: number | null; minPrice: number | null }> {
   const doFetch = c.fetchImpl ?? fetch;
   const res = await withRetry(
     doFetch,
     rfUrl(c, "UpdateOffer"),
-    { method: "POST", headers: rfHeaders(c), body: JSON.stringify({ identifier: { id: offerId }, reference_price: price.toFixed(2), reference_currency_code: currency }) },
+    { method: "POST", headers: rfHeaders(c), body: JSON.stringify({ identifier: { id: offerId }, reference_price: price.toFixed(2), reference_currency_code: currency, ...(minPrice ? { reference_min_price: minPrice.toFixed(2) } : {}) }) },
     "refurbed (UpdateOffer)",
     c.timeoutMs
   );
   const data = await res.json().catch(() => null);
-  return { price: num(data?.offer?.reference_price) };
+  return { price: num(data?.offer?.reference_price), minPrice: num(data?.offer?.reference_min_price) };
 }

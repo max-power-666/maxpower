@@ -9,7 +9,7 @@ import { skuCategoryOf } from "@/lib/skuParts";
 import { summarizeShippingCosts, type ShipmentCostRow } from "@/lib/shippingCosts";
 import { warsawYmd } from "@/lib/warsawDate";
 import { DEFAULT_ASSUMPTIONS, normListingSku, bmRules, refurbedRules, suggestPrice, type Assumptions, type PriceInputs, type Suggestion, type VatMode } from "@/lib/listingPrice";
-import { decidePrice } from "@/lib/pricingStrategy";
+import { autoBand, decidePrice } from "@/lib/pricingStrategy";
 import { marginAtPrice } from "@/lib/listingPrice";
 import type { MarketInfo } from "@/lib/marketPricing";
 import ProductCardDrawer from "./ProductCardDrawer";
@@ -22,8 +22,8 @@ import ProductCardDrawer from "./ProductCardDrawer";
 type Entry = { id: number; serial_number: string; sku: string; notes: string | null; created_by_email: string | null; created_at: string; listed_at: string | null; listed_by_email: string | null };
 type Goods = { serial: string | null; name: string | null; kind: string | null; vat: string | null; price_pln: number | string | null; total_pln: number | string | null; costs: number | string | null; commission_pcc: number | string | null; purchased_on: string | null };
 type Filter = "todo" | "done" | "all";
-type ListingRow = { marketplace: string; external_id: string; sku: string | null; quantity: number | null; price: number | null; currency: string | null; state: string | null };
-type Offer = { externalId: string; sku: string; quantity: number; price: number | null; currency: string | null };
+type ListingRow = { marketplace: string; external_id: string; sku: string | null; quantity: number | null; price: number | null; min_price?: number | null; currency: string | null; state: string | null };
+type Offer = { externalId: string; sku: string; quantity: number; price: number | null; minPrice: number | null; currency: string | null };
 type ListingInfo = { count: number; quantity: number; prices: number[]; currency: string | null; skus: string[]; offers: Offer[] };
 type Pair = { lo: Suggestion | null; hi: Suggestion | null };
 
@@ -68,7 +68,7 @@ async function fetchListings(skus: string[]): Promise<Map<string, { backmarket: 
   for (let i = 0; i < want.length; i += 15) {
     const chunk = want.slice(i, i + 15);
     const or = chunk.map((k) => `sku.ilike."${escapeLike(k).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}%"`).join(",");
-    const { data } = await supabase.from("marketplace_listings").select("marketplace, external_id, sku, quantity, price, currency, state").or(or).limit(2000);
+    const { data } = await supabase.from("marketplace_listings").select("marketplace, external_id, sku, quantity, price, min_price, currency, state").or(or).limit(2000);
     for (const l of (data as ListingRow[]) || []) {
       const k = normListingSku(l.sku);
       const slot = out.get(k);
@@ -78,7 +78,7 @@ async function fetchListings(skus: string[]): Promise<Map<string, { backmarket: 
       cur.quantity += Number(l.quantity) || 0;
       if (l.price !== null && l.price !== undefined) cur.prices.push(Number(l.price));
       cur.skus.push(`${l.sku} ×${Number(l.quantity) || 0}`);
-      cur.offers.push({ externalId: l.external_id, sku: l.sku || "", quantity: Number(l.quantity) || 0, price: l.price === null || l.price === undefined ? null : Number(l.price), currency: l.currency });
+      cur.offers.push({ externalId: l.external_id, sku: l.sku || "", quantity: Number(l.quantity) || 0, price: l.price === null || l.price === undefined ? null : Number(l.price), minPrice: l.min_price === null || l.min_price === undefined ? null : Number(l.min_price), currency: l.currency });
     }
   }
   return out;
@@ -263,14 +263,14 @@ export default function ListingQueueView({ session, members, canPrice = false }:
     }
   }
 
-  async function applyPrice(g: Group, mp: "backmarket" | "refurbed", o: Offer, target: number, reason: string, marginsTxt: string) {
+  async function applyPrice(g: Group, mp: "backmarket" | "refurbed", o: Offer, target: number, reason: string, marginsTxt: string, minTarget: number | null = null) {
     const label = mp === "backmarket" ? "Back Market" : "refurbed";
-    if (!confirm(`Zmienić cenę oferty na ${label}?\n\nSKU: ${o.sku}\nCena teraz: ${o.price ?? "—"} ${o.currency || "EUR"}\nNowa cena: ${target} ${o.currency || "EUR"}\nPowód: ${reason}\n${marginsTxt ? `Zysk przy nowej cenie: ${marginsTxt}\n` : ""}\nTo zmienia PRAWDZIWĄ cenę na marketplace'ie (kupujący zobaczą ją od razu).`)) return;
+    if (!confirm(`Zmienić cenę oferty na ${label}?\n\nSKU: ${o.sku}\nCena teraz: ${o.price ?? "—"} ${o.currency || "EUR"}\nNowa cena: ${target} ${o.currency || "EUR"}\n${minTarget !== null ? `Cena minimalna (automat marketplace'u): ${o.minPrice ?? "—"} → ${minTarget} ${o.currency || "EUR"}\n` : ""}Powód: ${reason}\n${marginsTxt ? `Zysk przy nowej cenie: ${marginsTxt}\n` : ""}\nTo zmienia PRAWDZIWĄ cenę na marketplace'ie (kupujący zobaczą ją od razu).`)) return;
     const key = offerKey(mp, o.externalId);
     setPricing(key);
     setPriceNote(null);
     const call = async (force: boolean) => {
-      const res = await fetch("/api/listings/update-price", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ marketplace: mp, externalId: o.externalId, price: target, confirm: true, force, reason }) });
+      const res = await fetch("/api/listings/update-price", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ marketplace: mp, externalId: o.externalId, price: target, ...(minTarget !== null ? { minPrice: minTarget } : {}), confirm: true, force, reason }) });
       return { res, data: await res.json() };
     };
     try {
@@ -280,7 +280,7 @@ export default function ListingQueueView({ session, members, canPrice = false }:
         ({ res, data } = await call(true));
       }
       if (!res.ok) throw new Error(data?.error || "Nie udało się zmienić ceny.");
-      setPriceNote({ ok: !data.mismatch && !data.logWarning, text: `${label}: cena oferty ${o.sku} ustawiona na ${data.applied} ${o.currency || "EUR"}${data.mismatch ? ` (marketplace zwrócił inną cenę niż wysłana: ${data.applied} zamiast ${data.requested})` : ""}.${data.logWarning ? ` ${data.logWarning}` : ""}` });
+      setPriceNote({ ok: !data.mismatch && !data.logWarning, text: `${label}: cena oferty ${o.sku} ustawiona na ${data.applied} ${o.currency || "EUR"}${minTarget !== null ? `, cena minimalna ${data.appliedMin ?? minTarget}${data.minMismatch ? ` (marketplace zwrócił inną niż wysłana: ${minTarget})` : ""}` : ""}${data.mismatch ? ` (marketplace zwrócił inną cenę niż wysłana: ${data.applied} zamiast ${data.requested})` : ""}.${data.logWarning ? ` ${data.logWarning}` : ""}` });
       setMkt((p) => {
         const n = new Map(p);
         n.delete(key); // dane BuyBox sprzed zmiany są nieaktualne
@@ -458,6 +458,22 @@ export default function ListingQueueView({ session, members, canPrice = false }:
                 ) : (
                   canPrice && <div className="mt-1 text-inksoft">BuyBox: kliknij „Sprawdź BuyBox”.</div>
                 )}
+                {band && eurOk && (() => {
+                  const ab = autoBand(mp, band.floor, band.ceil);
+                  const same = o.price !== null && o.minPrice !== null && Math.abs(o.price - ab.priceEur) < 0.005 && Math.abs(o.minPrice - ab.minEur) < 0.005;
+                  const mAt = (eur: number) => (eurRate ? g.rows.map((r) => { const c = calc.get(r.id); return c?.input ? marginAtPrice(eur * eurRate.mid, c.input, rules).marginPct : null; }).filter((x): x is number => x !== null).map(pct1).join(" · ") : "");
+                  return (
+                    <div className="mt-1 border-t border-line pt-1">
+                      Automat marketplace&apos;u ({mp === "backmarket" ? "BackPricer" : "cena min. + referencyjna"}): teraz min <b className="font-mono">{o.minPrice ?? "—"}</b> · cena <b className="font-mono">{o.price ?? "—"}</b>; docelowo min <b className="font-mono">{ab.minEur} €</b> (zysk {mAt(ab.minEur) || "—"}) · cena <b className="font-mono">{ab.priceEur} €</b> (zysk {mAt(ab.priceEur) || "—"})
+                      {ab.capped && <div className="text-inksoft">Back Market dopuszcza cenę najwyżej 8% powyżej minimalnej, więc cena docelowa jest niższa niż górna granica widełek ({band.ceil} €).</div>}
+                      {canPrice && (same ? <div className="text-teal">✓ ustawione zgodnie z widełkami</div> : (
+                        <button onClick={() => applyPrice(g, mp, o, ab.priceEur, `automat marketplace'u: min ${ab.minEur} €, cena ${ab.priceEur} €`, mAt(ab.priceEur), ab.minEur)} disabled={pricing === offerKey(mp, o.externalId)} className="mt-1 block border border-ink px-3 py-1 rounded text-xs font-semibold disabled:opacity-50">
+                          {pricing === offerKey(mp, o.externalId) ? "Ustawiam…" : `Ustaw automat: min ${ab.minEur} € · cena ${ab.priceEur} €`}
+                        </button>
+                      ))}
+                    </div>
+                  );
+                })()}
                 {dec ? (
                   <div className="mt-1">
                     Strategia: <b className="font-mono">{dec.targetEur} €</b>{" "}

@@ -33,3 +33,17 @@ export function decidePrice(i: StrategyInput): StrategyResult {
   if (cur > ceiling) return mk(ceiling, "cena jest powyżej górnej granicy widełek (brak danych o BuyBox)");
   return mk(cur, "cena mieści się w widełkach — bez zmiany");
 }
+
+// Widełki dla AUTOMATU marketplace'u (16.10.2026): Back Market (BackPricer) i refurbed (cena minimalna + referencyjna) same obniżają cenę w poszukiwaniu BuyBox, ale nigdy poniżej ceny minimalnej.
+// Ustawiamy im dolną granicę opłacalności jako cenę minimalną, a górną jako cenę docelową — wtedy platforma pilnuje BuyBox na bieżąco, a my pilnujemy zysku.
+//  - Back Market: min_price musi spełniać `1,08 * min_price >= price` i `min_price <= price` (inaczej BM sam ustawia min = cena i automat nie działa), więc cena docelowa to najwyżej 8% powyżej minimalnej.
+//  - refurbed: cena minimalna (reference_min_price) i referencyjna (reference_price) bez takiego limitu.
+export type AutoBand = { minEur: number; priceEur: number; capped: boolean };
+export function autoBand(marketplace: "backmarket" | "refurbed", floorEur: number, ceilingEur: number): AutoBand {
+  const min = Math.ceil(floorEur);
+  const ceiling = Math.max(min, Math.ceil(ceilingEur));
+  if (marketplace === "refurbed") return { minEur: min, priceEur: ceiling, capped: false };
+  const maxBm = Math.floor(min * 1.08);
+  const price = Math.max(min, Math.min(ceiling, maxBm));
+  return { minEur: min, priceEur: price, capped: price < ceiling };
+}
