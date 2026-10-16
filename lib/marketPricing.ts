@@ -11,6 +11,7 @@ import { REFURBED_BASE_URL, type RefurbedClient } from "./refurbed";
 export type MarketInfo = {
   market: string; // kod rynku (FR, DE, …)
   ours: number | null; // nasza cena w tym rynku
+  minPrice?: number | null; // nasza cena minimalna w tym rynku (Back Market: min_price automatu)
   currency: string | null;
   won: boolean | null; // czy mamy Backbox/BuyBox (null = nieznane)
   priceToWin: number | null; // cena, którą trzeba ustawić, żeby wygrać
@@ -60,11 +61,14 @@ export async function bmMarketInfo(cfg: BmListingsConfig, listingId: string): Pr
     const price = money(c.price);
     const ptw = money(c.price_to_win);
     const win = money(c.winner_price);
-    return { market: String(c.market || ""), ours: price.v, currency: price.c ?? ptw.c ?? win.c, won: typeof c.is_winning === "boolean" ? c.is_winning : null, priceToWin: ptw.v, winnerPrice: win.v, state: null };
+    return { market: String(c.market || ""), ours: price.v, minPrice: money(c.min_price).v, currency: price.c ?? ptw.c ?? win.c, won: typeof c.is_winning === "boolean" ? c.is_winning : null, priceToWin: ptw.v, winnerPrice: win.v, state: null };
   });
 }
 
-export async function bmSetListingPrice(cfg: BmListingsConfig, listingId: string, price: number, currency: string, minPrice?: number | null): Promise<{ price: number | null; minPrice: number | null }> {
+// lang: język rynku (Accept-Language), którego cena ma być zmieniona; bez niego rynek z BACKMARKET_LANG. Uwaga: cena w innym języku niż obecne rynki oferty DODAŁABY ten kraj do oferty —
+// dlatego wołamy to wyłącznie dla rynków, które oferta już ma (z Backbox).
+export async function bmSetListingPrice(cfg0: BmListingsConfig, listingId: string, price: number, currency: string, minPrice?: number | null, lang?: string): Promise<{ price: number | null; minPrice: number | null }> {
+  const cfg = lang ? { ...cfg0, lang } : cfg0;
   const doFetch = cfg.fetchImpl ?? fetch;
   const res = await withRetry(
     doFetch,

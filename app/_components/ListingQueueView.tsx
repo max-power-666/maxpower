@@ -8,7 +8,7 @@ import { escapeLike } from "@/lib/search";
 import { skuCategoryOf } from "@/lib/skuParts";
 import { summarizeShippingCosts, type ShipmentCostRow } from "@/lib/shippingCosts";
 import { warsawYmd } from "@/lib/warsawDate";
-import { DEFAULT_ASSUMPTIONS, normListingSku, bmRules, refurbedRules, suggestPrice, type Assumptions, type PriceInputs, type Suggestion, type VatMode } from "@/lib/listingPrice";
+import { DEFAULT_ASSUMPTIONS, normListingSku, bmRules, refurbedRules, suggestPrice, type Assumptions, type PriceInputs, type Suggestion, type VatMode, BM_LOCALE_BY_MARKET, bmMarketIsReduced } from "@/lib/listingPrice";
 import { autoBand, decidePrice } from "@/lib/pricingStrategy";
 import { isCountedOrder } from "@/lib/salesOrders";
 import StockSyncBar from "./StockSyncBar";
@@ -367,9 +367,57 @@ export default function ListingQueueView({ session, members, canPrice = false, i
     }
   }
 
+  // Back Market: "Ustaw automat" dla WSZYSTKICH aktywnych krajów oferty (ceny per kraj, 16.10.2026). Najpierw pobiera rynki oferty z Backbox, jeśli ich jeszcze nie mamy, potem okno ze zmianami.
+  async function applyBmAuto(g: Group, o: Offer) {
+    const key = offerKey("backmarket", o.externalId);
+    setPricing(key);
+    setPriceNote(null);
+    try {
+      let markets: MarketInfo[] | null = mkt.get(key)?.error ? null : mkt.get(key)?.markets ?? null;
+      if (!markets) {
+        const res = await fetch("/api/listings/market-info", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ items: [{ marketplace: "backmarket", externalId: o.externalId }] }) });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.error || "Nie udało się pobrać rynków oferty.");
+        const r = (data.results as { ok: boolean; markets: MarketInfo[]; error?: string }[])[0];
+        if (!r?.ok) throw new Error(r?.error || "Back Market nie zwrócił rynków oferty.");
+        markets = r.markets;
+        setMkt((p) => new Map(p).set(key, { markets: r.markets }));
+      }
+      const plan = bmMarketPlan(g, markets);
+      if (!plan) throw new Error("Brak cen zakupu w Towarze — nie wyliczę cen.");
+      if (plan.rows.length === 0) throw new Error("Back Market nie zwrócił żadnego rynku oferty obsługiwanego w EUR.");
+      const changes = plan.rows.filter((r) => !r.same);
+      if (changes.length === 0) {
+        setPriceNote({ ok: true, text: "Wszystkie kraje oferty są już ustawione zgodnie z widełkami." });
+        return;
+      }
+      const lines = changes.map((r) => `${r.market}${r.reduced ? "" : " (standardowa prowizja)"}: ${r.ours ?? "—"} / ${r.min ?? "—"} → ${r.ab.priceEur} / ${r.ab.minEur} €`).join("\n");
+      if (!confirm(`Ustawić ceny automatu na Back Market (${changes.length} krajów)?\n\nSKU: ${o.sku}\nkraj: cena / min teraz → cena / min po zmianie\n${lines}${plan.skipped.length ? `\n\nPominięte rynki (brak ustawienia w API / inna waluta): ${plan.skipped.join(", ")}` : ""}\n\nTo zmienia PRAWDZIWE ceny na Back Market (kupujący zobaczą je od razu).`)) return;
+      const res = await fetch("/api/listings/update-price", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ marketplace: "backmarket", externalId: o.externalId, price: plan.abRed.priceEur, minPrice: plan.abRed.minEur, markets: changes.map((r) => ({ market: r.market, price: r.ab.priceEur, minPrice: r.ab.minEur })), confirm: true, reason: `automat Back Market per kraj: FR/DE/ES/IT min ${plan.abRed.minEur} cena ${plan.abRed.priceEur}; pozostałe min ${plan.abOth.minEur} cena ${plan.abOth.priceEur}` }),
+      });
+      const data = await res.json();
+      if (!res.ok && !data?.marketResults) throw new Error(data?.error || "Nie udało się ustawić cen.");
+      const fails = (data.marketResults as { market: string; ok: boolean; error?: string }[]).filter((r) => !r.ok);
+      setPriceNote({ ok: fails.length === 0, text: `Back Market ${o.sku}: ustawiono ${data.okCount} z ${changes.length} krajów${fails.length ? `; błędy: ${fails.map((f) => `${f.market} (${f.error})`).slice(0, 3).join(" | ")}` : ""}.` });
+      setMkt((p) => {
+        const n = new Map(p);
+        n.delete(key);
+        return n;
+      });
+      setReload((n) => n + 1);
+    } catch (e: any) {
+      setPriceNote({ ok: false, text: `Back Market: ${e.message || e}` });
+    } finally {
+      setPricing(null);
+    }
+  }
+
   // Wyliczenia na wiersz
   const calc = useMemo(() => {
-    const out = new Map<number, { g: Goods | null; input: PriceInputs | null; bm: Pair | null; rf: Pair | null; bmNote: string; rfNote: string; cat: string; vatMissing: boolean }>();
+    const out = new Map<number, { g: Goods | null; input: PriceInputs | null; bm: Pair | null; bmx: Pair | null; rf: Pair | null; bmNote: string; rfNote: string; cat: string; vatMissing: boolean }>();
     for (const r of rows) {
       const g = goods.get(normSerial(r.serial_number)) ?? null;
       const purchase = num(g?.price_pln);
@@ -378,11 +426,13 @@ export default function ListingQueueView({ session, members, canPrice = false, i
       const vat: VatMode = (g?.vat || "").toUpperCase() === "V23" ? "V23" : "VM";
       const input: PriceInputs | null = purchase !== null && purchase > 0 && eurRate ? { purchasePln: purchase, extraPln: extra, vat, shippingPln: a.shippingPln, targetPct: a.targetMinPct, eurRate: eurRate.mid } : null;
       const bmr = bmRules(r.sku, a, today);
+      const bmxr = bmRules(r.sku, a, today, "BE"); // kraje bez obniżonej prowizji (Accelerator tylko FR/DE/ES/IT)
       const rfr = refurbedRules(a);
       out.set(r.id, {
         g,
         input,
         bm: input ? { lo: suggestPrice(input, bmr.rules), hi: suggestPrice({ ...input, targetPct: a.targetMaxPct }, bmr.rules) } : null,
+        bmx: input ? { lo: suggestPrice(input, bmxr.rules), hi: suggestPrice({ ...input, targetPct: a.targetMaxPct }, bmxr.rules) } : null,
         rf: input ? { lo: suggestPrice(input, rfr.rules), hi: suggestPrice({ ...input, targetPct: a.targetMaxPct }, rfr.rules) } : null,
         bmNote: bmr.note,
         rfNote: rfr.note,
@@ -465,7 +515,7 @@ export default function ListingQueueView({ session, members, canPrice = false, i
   }, [visible]);
 
   // Widełki grupy: dolna = najwyższa z cen minimalnych (zysk 20%) wśród sztuk, górna = najwyższa z cen maksymalnych (zysk 25%) — żadna sztuka nie schodzi poniżej celu.
-  const bandsOf = (g: Group, mp: "bm" | "rf") => {
+  const bandsOf = (g: Group, mp: "bm" | "bmx" | "rf") => {
     let floor = 0;
     let ceil = 0;
     let n = 0;
@@ -479,12 +529,37 @@ export default function ListingQueueView({ session, members, canPrice = false, i
     return n > 0 ? { floor, ceil, n } : null;
   };
 
+  // Back Market: plan cen PER RYNEK (16.10.2026): FR/DE/ES/IT (obniżona prowizja Accelerator) dostają tę samą cenę i minimum, pozostałe aktywne rynki oferty (BE, AT, NL, FI, PT, IE, GR, SK) wyższe,
+  // liczone ze standardową prowizją. Rynki oferty pochodzą z Backbox ("Sprawdź BuyBox"); rynków bez języka w API (GB, SE…) nie ruszamy.
+  const bmMarketPlan = (g: Group, markets: MarketInfo[] | null) => {
+    const red = bandsOf(g, "bm");
+    const oth = bandsOf(g, "bmx");
+    if (!red || !oth) return null;
+    const abRed = autoBand("backmarket", red.floor, red.ceil);
+    const abOth = autoBand("backmarket", oth.floor, oth.ceil);
+    const rows = (markets ?? [])
+      .filter((x) => BM_LOCALE_BY_MARKET[x.market.toUpperCase()] && (x.currency || "EUR").toUpperCase() === "EUR")
+      .map((x) => {
+        const market = x.market.toUpperCase();
+        const reduced = bmMarketIsReduced(market);
+        const ab = reduced ? abRed : abOth;
+        const same = x.ours !== null && x.minPrice != null && Math.abs(x.ours - ab.priceEur) < 0.005 && Math.abs(x.minPrice - ab.minEur) < 0.005;
+        return { market, reduced, ab, same, ours: x.ours, min: x.minPrice ?? null };
+      });
+    const skipped = (markets ?? []).filter((x) => !BM_LOCALE_BY_MARKET[x.market.toUpperCase()] || (x.currency || "EUR").toUpperCase() !== "EUR").map((x) => x.market.toUpperCase());
+    return { abRed, abOth, rows, skipped, loaded: markets !== null };
+  };
+
   // Plan "automatu marketplace'u" dla oferty: cena minimalna + docelowa z widełek grupy i czy oferta już tak stoi
   const offerPlan = (g: Group, mp: "backmarket" | "refurbed", o: Offer) => {
     const band = bandsOf(g, mp === "backmarket" ? "bm" : "rf");
     if (!band || (o.currency || "EUR").toUpperCase() !== "EUR") return null;
     const ab = autoBand(mp, band.floor, band.ceil);
-    const same = o.price !== null && o.minPrice !== null && Math.abs(o.price - ab.priceEur) < 0.005 && Math.abs(o.minPrice - ab.minEur) < 0.005;
+    let same = o.price !== null && o.minPrice !== null && Math.abs(o.price - ab.priceEur) < 0.005 && Math.abs(o.minPrice - ab.minEur) < 0.005;
+    if (mp === "backmarket") {
+      const bp = bmMarketPlan(g, mkt.get(offerKey(mp, o.externalId))?.markets ?? null);
+      if (bp && bp.loaded && bp.rows.length > 0) same = bp.rows.every((r) => r.same);
+    }
     return { band, ab, same };
   };
   const ownOffersOf = (g: Group, mp: "backmarket" | "refurbed") => (listings.get(g.key)?.[mp]?.offers ?? []).filter((o) => isOwnOffer(o, g.sku));
@@ -512,6 +587,7 @@ export default function ListingQueueView({ session, members, canPrice = false, i
             const decMargins = dec ? marginsAt(dec.targetEur).map(pct1).join(" · ") : "";
             const minAtMin = plan ? marginsAt(plan.ab.minEur) : [];
             const showStrategy = dec && (dec.action !== "hold" || dec.warning);
+            const bmp = mp === "backmarket" ? bmMarketPlan(g, m && !m.error ? m.markets : null) : null;
             return (
               <div key={o.externalId} className="border border-line bg-white p-2.5 mb-1.5 space-y-1.5">
                 <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
@@ -532,7 +608,32 @@ export default function ListingQueueView({ session, members, canPrice = false, i
                     )
                   ) : null}
                 </div>
-                {plan && (
+                {mp === "backmarket" && bmp ? (
+                  <div className="space-y-1" title={`Automat BackPricer obniża cenę w poszukiwaniu BuyBox, ale nigdy poniżej ceny minimalnej. Back Market ma ceny per kraj: FR, DE, ES i IT (obniżona prowizja) dostają tę samą cenę, pozostałe kraje wyższą (standardowa prowizja). Back Market dopuszcza cenę najwyżej 8% powyżej minimalnej.${bmp.rows.length ? "\n" + bmp.rows.map((r) => `${r.market}: ${r.ours ?? "—"}/${r.min ?? "—"} → ${r.ab.priceEur}/${r.ab.minEur}`).join("; ") : ""}`}>
+                    <div>
+                      Automat: <b>FR · DE · ES · IT</b> min <b className="font-mono">{bmp.abRed.minEur}</b> · cena <b className="font-mono">{bmp.abRed.priceEur} €</b>
+                      {(bmp.abOth.minEur !== bmp.abRed.minEur || bmp.abOth.priceEur !== bmp.abRed.priceEur) ? (
+                        <> <span className="text-inksoft">|</span> <b>pozostałe kraje</b> min <b className="font-mono">{bmp.abOth.minEur}</b> · cena <b className="font-mono">{bmp.abOth.priceEur} €</b></>
+                      ) : (
+                        <span className="text-inksoft"> (te same ceny w pozostałych krajach)</span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      {minAtMin.length > 0 && <span className="text-inksoft">zysk przy min ≥ {pct1(Math.min(...minAtMin))}</span>}
+                      {bmp.loaded && bmp.rows.length > 0 && <span className="text-inksoft">{bmp.rows.filter((r) => r.same).length}/{bmp.rows.length} krajów zgodnych</span>}
+                      {bmp.skipped.length > 0 && <span className="text-inksoft" title="Rynki bez ustawienia ceny w API lub w innej walucie">pominięte: {bmp.skipped.join(", ")}</span>}
+                      {plan?.same && bmp.loaded && bmp.rows.length > 0 ? (
+                        <span className="text-teal ml-auto">✓ ustawione we wszystkich krajach</span>
+                      ) : (
+                        canPrice && (
+                          <button onClick={() => applyBmAuto(g, o)} disabled={busyKey(o)} className="ml-auto border border-ink px-2.5 py-1 rounded font-semibold disabled:opacity-50">
+                            {busyKey(o) ? "Ustawiam…" : bmp.loaded && bmp.rows.length > 0 ? `Ustaw automat (${bmp.rows.filter((r) => !r.same).length} krajów)` : "Ustaw automat (wszystkie kraje)"}
+                          </button>
+                        )
+                      )}
+                    </div>
+                  </div>
+                ) : plan && (
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1" title={`Automat marketplace'u (${mp === "backmarket" ? "BackPricer" : "cena min. + referencyjna"}) obniża cenę w poszukiwaniu BuyBox, ale nigdy poniżej ceny minimalnej. Ustawiamy: min = dolna granica widełek (zysk ${a.targetMinPct}%), cena = górna.${plan.ab.capped ? " Back Market dopuszcza cenę najwyżej 8% powyżej minimalnej, więc cena jest niższa niż górna granica widełek." : ""}`}>
                     <span>Automat: min <b className="font-mono">{plan.ab.minEur}</b> · cena <b className="font-mono">{plan.ab.priceEur} €</b>{plan.ab.capped && <span className="text-inksoft"> (limit BM +8%)</span>}</span>
                     {minAtMin.length > 0 && <span className="text-inksoft">zysk przy min ≥ {pct1(Math.min(...minAtMin))}</span>}
@@ -556,7 +657,7 @@ export default function ListingQueueView({ session, members, canPrice = false, i
                     </span>
                     {canPrice && dec.action !== "hold" && (
                       <button onClick={() => applyPrice(g, mp, o, dec.targetEur, dec.reason, decMargins)} disabled={busyKey(o)} className="ml-auto bg-ink text-paper px-2.5 py-1 rounded font-semibold disabled:opacity-50">
-                        {busyKey(o) ? "Zmieniam…" : `Ustaw ${dec.targetEur} €`}
+                        {busyKey(o) ? "Zmieniam…" : `Ustaw ${dec.targetEur} €${mp === "backmarket" ? ` (${(bmLang?.split("-")[1] || a.bmCountry).toUpperCase()})` : ""}`}
                       </button>
                     )}
                     {dec.warning && <div className="w-full text-amber">⚠ {dec.warning}</div>}

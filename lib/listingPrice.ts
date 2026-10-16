@@ -56,10 +56,18 @@ export type Assumptions = {
 export const DEFAULT_ASSUMPTIONS: Assumptions = { targetMinPct: 20, targetMaxPct: 25, shippingPln: 37, bmCountry: "FR", bmPaymentPct: 1, rfCommissionPct: 12, rfPaymentPct: 1.5, rfMarket: "DE", undercutEur: 0 };
 export const BM_CCBM_EUR = { main: 6.99, accessory: 1.99 }; // stała opłata CCBM za pozycję (regulamin; średnie z faktur w Marży są zbliżone)
 
-export function bmRules(sku: string, a: Assumptions, today: string): { rules: MarketRules; kind: BmKind; note: string } {
-  const c = bmCommissionPct({ sku, title: null, country: a.bmCountry, date: today });
+// Rynki Back Market z obniżoną prowizją w programie Accelerator (konsole, smartwatche nie-Apple): ta sama cena we wszystkich czterech; w pozostałych krajach prowizja jest standardowa, więc cena musi być wyższa.
+export const BM_REDUCED_MARKETS = ["FR", "DE", "ES", "IT"] as const;
+// Kod rynku (MarketCode z API Back Market) -> język nagłówka Accept-Language, którym ustawia się cenę tego rynku. Tylko rynki w EUR (GB, SE, US, JP pomijamy). Finlandia (fi-fi) nie występuje na liście
+// języków w specyfikacji, ale jest w MarketCode i w panelu — błąd ustawienia pojedynczego rynku nie przerywa pozostałych.
+export const BM_LOCALE_BY_MARKET: Record<string, string> = { FR: "fr-fr", BE: "fr-be", ES: "es-es", DE: "de-de", AT: "de-at", IT: "it-it", NL: "nl-nl", PT: "pt-pt", IE: "en-ie", GR: "el-gr", SK: "sk-sk", FI: "fi-fi" };
+export const bmMarketIsReduced = (market: string) => (BM_REDUCED_MARKETS as readonly string[]).includes(market.toUpperCase());
+
+export function bmRules(sku: string, a: Assumptions, today: string, country?: string): { rules: MarketRules; kind: BmKind; note: string } {
+  const bmCountry = country ?? a.bmCountry;
+  const c = bmCommissionPct({ sku, title: null, country: bmCountry, date: today });
   const fixedEur = c.kind === "accessory" ? BM_CCBM_EUR.accessory : BM_CCBM_EUR.main;
-  const why = c.kind === "accessory" ? "akcesorium konsolowe" : c.kind === "console" ? (c.accelerator ? `konsola do ${a.bmCountry} w programie Accelerator (do 31.12.2026)` : "konsola poza programem Accelerator") : c.kind === "smartwatch" ? (c.accelerator ? "smartwatch w programie Accelerator (do 30.11.2026)" : "smartwatch") : "pozostałe produkty";
+  const why = c.kind === "accessory" ? "akcesorium konsolowe" : c.kind === "console" ? (c.accelerator ? `konsola do ${bmCountry} w programie Accelerator (do 31.12.2026)` : "konsola poza programem Accelerator") : c.kind === "smartwatch" ? (c.accelerator ? "smartwatch w programie Accelerator (do 30.11.2026)" : "smartwatch") : "pozostałe produkty";
   return { rules: { commissionPct: c.pct, paymentPct: a.bmPaymentPct, fixedEur }, kind: c.kind, note: `prowizja ${c.pct}% (${why}) + płatność ${a.bmPaymentPct}% + CCBM ${fixedEur} €` };
 }
 export const refurbedRules = (a: Assumptions): { rules: MarketRules; note: string } => ({
