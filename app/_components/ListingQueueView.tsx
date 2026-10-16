@@ -106,6 +106,7 @@ export default function ListingQueueView({ session, members, canPrice = false, i
   const [adding, setAdding] = useState(false);
   const [openSerial, setOpenSerial] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
   const [reload, setReload] = useState(0);
   // Ceny BuyBox z marketplace'ów (na żądanie) i zmiana cen ofert (16.10.2026)
   const [mkt, setMkt] = useState<Map<string, { markets: MarketInfo[]; error?: string }>>(new Map());
@@ -392,7 +393,7 @@ export default function ListingQueueView({ session, members, canPrice = false, i
     return out;
   }, [rows, goods, a, eurRate, today]);
 
-  const SugCell = ({ p, info }: { p: Pair | null; info: ListingInfo | null | undefined }) => {
+  const SugCell = ({ p }: { p: Pair | null }) => {
     const lo = p?.lo ?? null;
     const hi = p?.hi ?? null;
     const same = lo && hi && lo.eur === hi.eur;
@@ -407,21 +408,9 @@ export default function ListingQueueView({ session, members, canPrice = false, i
         ) : (
           <span className="text-inksoft">—</span>
         )}
-        <ListingBadge info={info} />
       </div>
     );
   };
-
-  // Czy oferta z tym SKU jest już utworzona (Magazyn -> Listingi) i jaka jest w niej ilość
-  const ListingBadge = ({ info }: { info: ListingInfo | null | undefined }) =>
-    info === undefined ? null : info === null ? (
-      <div className="text-[11px] text-inksoft mt-1" title="W Listingach nie ma oferty z tym SKU">brak listingu</div>
-    ) : (
-      <div className={`text-[11px] mt-1 ${info.quantity > 0 ? "text-teal" : "text-amber"}`} title={`Oferty z tym SKU: ${info.skus.join(", ")}`}>
-        listing jest · ilość {info.quantity}{info.count > 1 ? ` (${info.count} oferty)` : ""}
-        {info.prices.length > 0 && <span className="text-inksoft"> · cena {info.prices.length === 1 || Math.min(...info.prices) === Math.max(...info.prices) ? info.prices[0] : `${Math.min(...info.prices)}–${Math.max(...info.prices)}`} {info.currency || ""}</span>}
-      </div>
-    );
 
   const Breakdown = ({ p, title, note, input }: { p: Pair | null; title: string; note: string; input: PriceInputs | null }) => {
     const lo = p?.lo;
@@ -490,109 +479,146 @@ export default function ListingQueueView({ session, members, canPrice = false, i
     return n > 0 ? { floor, ceil, n } : null;
   };
 
+  // Plan "automatu marketplace'u" dla oferty: cena minimalna + docelowa z widełek grupy i czy oferta już tak stoi
+  const offerPlan = (g: Group, mp: "backmarket" | "refurbed", o: Offer) => {
+    const band = bandsOf(g, mp === "backmarket" ? "bm" : "rf");
+    if (!band || (o.currency || "EUR").toUpperCase() !== "EUR") return null;
+    const ab = autoBand(mp, band.floor, band.ceil);
+    const same = o.price !== null && o.minPrice !== null && Math.abs(o.price - ab.priceEur) < 0.005 && Math.abs(o.minPrice - ab.minEur) < 0.005;
+    return { band, ab, same };
+  };
+  const ownOffersOf = (g: Group, mp: "backmarket" | "refurbed") => (listings.get(g.key)?.[mp]?.offers ?? []).filter((o) => isOwnOffer(o, g.sku));
+  const toggleGroup = (key: string) => setOpenGroups((p) => { const n = new Set(p); if (n.has(key)) n.delete(key); else n.add(key); return n; });
+
   const renderOffers = (g: Group, mp: "backmarket" | "refurbed") => {
     const band = bandsOf(g, mp === "backmarket" ? "bm" : "rf");
     const info = listings.get(g.key)?.[mp] ?? null;
     const rules = mp === "backmarket" ? bmRules(g.sku, a, today).rules : refurbedRules(a).rules;
     const title = mp === "backmarket" ? "Back Market" : "refurbed";
+    const own = ownOffersOf(g, mp);
+    const busyKey = (o: Offer) => pricing === offerKey(mp, o.externalId);
     return (
       <div className="text-xs">
-        <div className="font-semibold mb-1">{title}{band ? <span className="font-normal text-inksoft"> — widełki grupy: {band.floor === band.ceil ? `${band.floor} €` : `${band.floor} – ${band.ceil} €`}</span> : <span className="font-normal text-inksoft"> — brak cen zakupu w Towarze</span>}</div>
-        {!info || info.offers.filter((o) => isOwnOffer(o, g.sku)).length === 0 ? (
-          <div className="text-inksoft">Brak oferty z tym SKU — utwórz ją w panelu marketplace'u (aplikacja ofert nie tworzy).</div>
+        <div className="font-semibold mb-1.5">{title}{band ? <span className="font-normal text-inksoft"> · widełki {band.floor === band.ceil ? `${band.floor} €` : `${band.floor}–${band.ceil} €`}</span> : <span className="font-normal text-inksoft"> · brak cen zakupu w Towarze</span>}</div>
+        {own.length === 0 ? (
+          <div className="text-inksoft">Brak oferty z tym SKU — utwórz ją w panelu marketplace&apos;u (aplikacja ofert nie tworzy).</div>
         ) : (
-          info.offers.filter((o) => isOwnOffer(o, g.sku)).slice(0, 6).map((o) => {
+          own.slice(0, 6).map((o) => {
             const m = mkt.get(offerKey(mp, o.externalId));
             const mi = m ? marketFor(mp, m.markets) : null;
-            const eurOk = (o.currency || "EUR").toUpperCase() === "EUR";
-            const dec = band && eurOk ? decidePrice({ floorEur: band.floor, ceilingEur: band.ceil, currentEur: o.price, won: mi?.won ?? null, priceToWinEur: mi && (mi.currency || "EUR") === "EUR" ? mi.priceToWin : null, undercutEur: a.undercutEur }) : null;
-            const unitMargins = dec && eurRate ? g.rows.map((r) => { const c = calc.get(r.id); return c?.input ? marginAtPrice(dec.targetEur * eurRate.mid, c.input, rules).marginPct : null; }) : [];
-            const marginsTxt = unitMargins.filter((x): x is number => x !== null).map(pct1).join(" · ");
+            const plan = offerPlan(g, mp, o);
+            const dec = plan ? decidePrice({ floorEur: plan.band.floor, ceilingEur: plan.band.ceil, currentEur: o.price, won: mi?.won ?? null, priceToWinEur: mi && (mi.currency || "EUR") === "EUR" ? mi.priceToWin : null, undercutEur: a.undercutEur }) : null;
+            const marginsAt = (eur: number) => (eurRate ? g.rows.map((r) => { const c = calc.get(r.id); return c?.input ? marginAtPrice(eur * eurRate.mid, c.input, rules).marginPct : null; }).filter((x): x is number => x !== null) : []);
+            const decMargins = dec ? marginsAt(dec.targetEur).map(pct1).join(" · ") : "";
+            const minAtMin = plan ? marginsAt(plan.ab.minEur) : [];
+            const showStrategy = dec && (dec.action !== "hold" || dec.warning);
             return (
-              <div key={o.externalId} className="border border-line bg-white p-2 mb-1.5">
-                <div className="flex flex-wrap items-baseline gap-x-3">
-                  <span className="font-mono">{o.sku}</span>
+              <div key={o.externalId} className="border border-line bg-white p-2.5 mb-1.5 space-y-1.5">
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+                  <span className="font-mono font-semibold">{o.sku}</span>
                   <span className={o.quantity > 0 ? "text-teal" : "text-amber"}>ilość {o.quantity}</span>
-                  <span>cena teraz: <b className="font-mono">{o.price ?? "—"} {o.currency || ""}</b></span>
+                  <span>cena <b className="font-mono">{o.price ?? "—"} {o.currency || ""}</b></span>
+                  <span className="text-inksoft" title="Cena minimalna automatu marketplace'u">min <span className="font-mono">{o.minPrice ?? "—"}</span></span>
+                  {m?.error ? (
+                    <span className="text-rust ml-auto">BuyBox: {m.error}</span>
+                  ) : m ? (
+                    mi ? (
+                      <span className="ml-auto" title={m.markets.map((x) => `${x.market}: ${x.won === null ? "?" : x.won ? "mamy" : "nie mamy"}${x.priceToWin !== null ? `, do wygrania ${x.priceToWin}` : ""}`).join(" | ")}>
+                        BuyBox {mi.market}: {mi.won === null ? <span className="text-inksoft">brak danych</span> : mi.won ? <b className="text-teal">mamy</b> : <b className="text-rust">nie mamy</b>}
+                        {mi.priceToWin !== null && <span className="text-inksoft"> · do wygrania <b className="font-mono text-ink">{mi.priceToWin}</b></span>}
+                      </span>
+                    ) : (
+                      <span className="ml-auto text-inksoft">BuyBox: brak danych</span>
+                    )
+                  ) : null}
                 </div>
-                {m?.error ? (
-                  <div className="text-rust mt-1">BuyBox: {m.error}</div>
-                ) : m ? (
-                  mi ? (
-                    <div className="mt-1" title={m.markets.map((x) => `${x.market}: ${x.won === null ? "?" : x.won ? "mamy" : "nie mamy"}${x.priceToWin !== null ? `, do wygrania ${x.priceToWin}` : ""}`).join(" | ")}>
-                      BuyBox ({mi.market}): {mi.won === null ? <span className="text-inksoft">brak danych</span> : mi.won ? <span className="text-teal font-semibold">mamy</span> : <span className="text-rust font-semibold">nie mamy</span>}
-                      {mi.priceToWin !== null && <> · cena do wygrania: <b className="font-mono">{mi.priceToWin} {mi.currency || ""}</b></>}
-                      {mi.winnerPrice !== null && <span className="text-inksoft"> · {mp === "refurbed" ? "cena zwycięzcy (z wysyłką)" : "cena zwycięzcy"}: {mi.winnerPrice}</span>}
-                    </div>
-                  ) : (
-                    <div className="mt-1 text-inksoft">BuyBox: marketplace nie zwrócił danych dla tej oferty.</div>
-                  )
-                ) : (
-                  canPrice && <div className="mt-1 text-inksoft">BuyBox: kliknij „Sprawdź BuyBox”.</div>
-                )}
-                {band && eurOk && (() => {
-                  const ab = autoBand(mp, band.floor, band.ceil);
-                  const same = o.price !== null && o.minPrice !== null && Math.abs(o.price - ab.priceEur) < 0.005 && Math.abs(o.minPrice - ab.minEur) < 0.005;
-                  const mAt = (eur: number) => (eurRate ? g.rows.map((r) => { const c = calc.get(r.id); return c?.input ? marginAtPrice(eur * eurRate.mid, c.input, rules).marginPct : null; }).filter((x): x is number => x !== null).map(pct1).join(" · ") : "");
-                  return (
-                    <div className="mt-1 border-t border-line pt-1">
-                      Automat marketplace&apos;u ({mp === "backmarket" ? "BackPricer" : "cena min. + referencyjna"}): teraz min <b className="font-mono">{o.minPrice ?? "—"}</b> · cena <b className="font-mono">{o.price ?? "—"}</b>; docelowo min <b className="font-mono">{ab.minEur} €</b> (zysk {mAt(ab.minEur) || "—"}) · cena <b className="font-mono">{ab.priceEur} €</b> (zysk {mAt(ab.priceEur) || "—"})
-                      {ab.capped && <div className="text-inksoft">Back Market dopuszcza cenę najwyżej 8% powyżej minimalnej, więc cena docelowa jest niższa niż górna granica widełek ({band.ceil} €).</div>}
-                      {canPrice && (same ? <div className="text-teal">✓ ustawione zgodnie z widełkami</div> : (
-                        <button onClick={() => applyPrice(g, mp, o, ab.priceEur, `automat marketplace'u: min ${ab.minEur} €, cena ${ab.priceEur} €`, mAt(ab.priceEur), ab.minEur)} disabled={pricing === offerKey(mp, o.externalId)} className="mt-1 block border border-ink px-3 py-1 rounded text-xs font-semibold disabled:opacity-50">
-                          {pricing === offerKey(mp, o.externalId) ? "Ustawiam…" : `Ustaw automat: min ${ab.minEur} € · cena ${ab.priceEur} €`}
+                {plan && (
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1" title={`Automat marketplace'u (${mp === "backmarket" ? "BackPricer" : "cena min. + referencyjna"}) obniża cenę w poszukiwaniu BuyBox, ale nigdy poniżej ceny minimalnej. Ustawiamy: min = dolna granica widełek (zysk ${a.targetMinPct}%), cena = górna.${plan.ab.capped ? " Back Market dopuszcza cenę najwyżej 8% powyżej minimalnej, więc cena jest niższa niż górna granica widełek." : ""}`}>
+                    <span>Automat: min <b className="font-mono">{plan.ab.minEur}</b> · cena <b className="font-mono">{plan.ab.priceEur} €</b>{plan.ab.capped && <span className="text-inksoft"> (limit BM +8%)</span>}</span>
+                    {minAtMin.length > 0 && <span className="text-inksoft">zysk przy min ≥ {pct1(Math.min(...minAtMin))}</span>}
+                    {plan.same ? (
+                      <span className="text-teal ml-auto">✓ ustawione</span>
+                    ) : (
+                      canPrice && (
+                        <button onClick={() => applyPrice(g, mp, o, plan.ab.priceEur, `automat marketplace'u: min ${plan.ab.minEur} €, cena ${plan.ab.priceEur} €`, marginsAt(plan.ab.priceEur).map(pct1).join(" · "), plan.ab.minEur)} disabled={busyKey(o)} className="ml-auto border border-ink px-2.5 py-1 rounded font-semibold disabled:opacity-50">
+                          {busyKey(o) ? "Ustawiam…" : "Ustaw automat"}
                         </button>
-                      ))}
-                    </div>
-                  );
-                })()}
-                {dec ? (
-                  <div className="mt-1">
-                    Strategia: <b className="font-mono">{dec.targetEur} €</b>{" "}
-                    <span className={dec.action === "hold" ? "text-inksoft" : dec.action === "lower" ? "text-rust" : "text-teal"}>({dec.action === "hold" ? "bez zmiany" : dec.action === "lower" ? "obniż" : "podnieś"})</span>
-                    <span className="text-inksoft"> — {dec.reason}</span>
-                    {dec.warning && <div className="text-amber">⚠ {dec.warning}</div>}
-                    {marginsTxt && <div className="text-inksoft">zysk przy tej cenie (sztuki z grupy): {marginsTxt}</div>}
-                    {canPrice && dec.action !== "hold" && (
-                      <button onClick={() => applyPrice(g, mp, o, dec.targetEur, dec.reason, marginsTxt)} disabled={pricing === offerKey(mp, o.externalId)} className="mt-1 bg-ink text-paper px-3 py-1 rounded text-xs font-semibold disabled:opacity-50">
-                        {pricing === offerKey(mp, o.externalId) ? "Zmieniam…" : `Ustaw ${dec.targetEur} € na ${title}`}
-                      </button>
+                      )
                     )}
                   </div>
-                ) : (
-                  <div className="mt-1 text-inksoft">{!eurOk ? `Oferta w walucie ${o.currency} — strategia liczy tylko EUR.` : "Brak cen zakupu w Towarze — nie wyliczę strategii."}</div>
                 )}
+                {showStrategy && dec && (
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span title={dec.reason}>
+                      Wg BuyBox: <b className="font-mono">{dec.targetEur} €</b>{" "}
+                      <span className={dec.action === "lower" ? "text-rust" : dec.action === "raise" ? "text-teal" : "text-inksoft"}>({dec.action === "lower" ? "obniż" : dec.action === "raise" ? "podnieś" : "bez zmiany"})</span>
+                      <span className="text-inksoft"> — {dec.reason}</span>
+                    </span>
+                    {canPrice && dec.action !== "hold" && (
+                      <button onClick={() => applyPrice(g, mp, o, dec.targetEur, dec.reason, decMargins)} disabled={busyKey(o)} className="ml-auto bg-ink text-paper px-2.5 py-1 rounded font-semibold disabled:opacity-50">
+                        {busyKey(o) ? "Zmieniam…" : `Ustaw ${dec.targetEur} €`}
+                      </button>
+                    )}
+                    {dec.warning && <div className="w-full text-amber">⚠ {dec.warning}</div>}
+                  </div>
+                )}
+                {!plan && <div className="text-inksoft">{(o.currency || "EUR").toUpperCase() !== "EUR" ? `Oferta w walucie ${o.currency} — ceny liczymy tylko w EUR.` : "Brak cen zakupu w Towarze — nie wyliczę cen."}</div>}
               </div>
             );
           })
         )}
         {info && info.offers.some((o) => !isOwnOffer(o, g.sku)) && (
           <div className="text-inksoft mt-1" title="Oferty z dodatkiem (np. zestaw z grą) to inne produkty — cen nie zmieniamy z aplikacji">
-            Powiązane oferty z dodatkiem (bez zmiany ceny): {info.offers.filter((o) => !isOwnOffer(o, g.sku)).slice(0, 4).map((o) => `${o.sku} ×${o.quantity} ${o.price ?? "—"} ${o.currency || ""}`).join("; ")}
+            Oferty z dodatkiem (bez zmian): {info.offers.filter((o) => !isOwnOffer(o, g.sku)).slice(0, 4).map((o) => `${o.sku} ×${o.quantity} ${o.price ?? "—"} ${o.currency || ""}`).join("; ")}
           </div>
         )}
       </div>
     );
   };
 
-  const renderGroupPanel = (g: Group) => {
+  // Nagłówek grupy SKU (zwijany): SKU, liczba sztuk, koszt oraz po jednym "kapsułkowym" podsumowaniu oferty na każdym marketplace'ie
+  const renderGroupHeader = (g: Group) => {
+    const open = openGroups.has(g.key);
     const costs = g.rows.map((r) => { const c = calc.get(r.id); return c?.input ? c.input.purchasePln + c.input.extraPln : null; }).filter((x): x is number => x !== null);
+    const chip = (mp: "backmarket" | "refurbed") => {
+      if (listings.size === 0) return null;
+      const own = ownOffersOf(g, mp);
+      const label = mp === "backmarket" ? "BM" : "refurbed";
+      if (own.length === 0) return <span key={mp} className="px-2 py-0.5 rounded-full border border-line text-inksoft">{label}: brak oferty</span>;
+      const qty = own.reduce((s, o) => s + o.quantity, 0);
+      const prices = own.map((o) => o.price).filter((x): x is number => x !== null);
+      const todo = canPrice && own.some((o) => { const pl = offerPlan(g, mp, o); return pl && !pl.same; });
+      return (
+        <span key={mp} className={`px-2 py-0.5 rounded-full border ${qty > 0 ? "border-teal text-teal" : "border-amber text-amber"}`} title={own.map((o) => `${o.sku} ×${o.quantity} ${o.price ?? "—"} ${o.currency || ""}`).join("; ")}>
+          {label}: ilość {qty}{prices.length > 0 ? ` · ${Math.min(...prices) === Math.max(...prices) ? prices[0] : `${Math.min(...prices)}–${Math.max(...prices)}`} €` : ""}{todo && <b className="text-amber"> · ceny do ustawienia</b>}
+        </span>
+      );
+    };
     return (
-      <tr key={`${g.key}-panel`} className="border-b border-line bg-paper">
-        <td colSpan={8} className="p-3">
-          <div className="text-xs mb-2">
-            <b className="font-mono">{g.sku}</b> · {g.rows.length} {g.rows.length === 1 ? "sztuka" : "szt."}
-            {costs.length > 0 && <span className="text-inksoft"> · koszt (zakup + koszty): {costs.length > 1 && Math.min(...costs) !== Math.max(...costs) ? `${pln(Math.min(...costs))} – ${pln(Math.max(...costs))}` : pln(costs[0])} zł</span>}
-            {g.rows.length > 1 && <span className="text-inksoft"> · jedna oferta = jedna cena dla wszystkich sztuk, więc widełki liczone są po najdroższej sztuce</span>}
-          </div>
-          <div className="grid md:grid-cols-2 gap-4">
-            {renderOffers(g, "backmarket")}
-            {renderOffers(g, "refurbed")}
+      <tr key={`${g.key}-head`} onClick={() => toggleGroup(g.key)} className="border-b border-line bg-paper cursor-pointer hover:bg-white">
+        <td colSpan={8} className="px-3 py-2.5">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
+            <span className="font-semibold text-sm">{open ? "▾" : "▸"} <span className="font-mono">{g.sku}</span></span>
+            <span>{g.rows.length} szt.</span>
+            {costs.length > 0 && <span className="text-inksoft" title="Zakup + koszty dodatkowe z Towaru">koszt {costs.length > 1 && Math.min(...costs) !== Math.max(...costs) ? `${pln(Math.min(...costs))} – ${pln(Math.max(...costs))}` : pln(costs[0])} zł</span>}
+            <span className="ml-auto flex flex-wrap items-center gap-2">{chip("backmarket")}{chip("refurbed")}</span>
           </div>
         </td>
       </tr>
     );
   };
+
+  const renderGroupPanel = (g: Group) => (
+    <tr key={`${g.key}-panel`} className="border-b border-line bg-paper">
+      <td colSpan={8} className="px-3 pb-3 pt-1">
+        {g.rows.length > 1 && <div className="text-[11px] text-inksoft mb-2">Jedna oferta = jedna cena dla wszystkich sztuk, więc widełki są liczone po najdroższej sztuce.</div>}
+        <div className="grid md:grid-cols-2 gap-4">
+          {renderOffers(g, "backmarket")}
+          {renderOffers(g, "refurbed")}
+        </div>
+      </td>
+    </tr>
+  );
 
   return (
     <div>
@@ -649,6 +675,7 @@ export default function ListingQueueView({ session, members, canPrice = false, i
         <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="Szukaj: numer seryjny albo SKU" className={`${inp} w-64 ml-2`} />
         {canPrice && <button onClick={fetchBuybox} disabled={fetchingMkt || groups.length === 0} className="ml-auto border border-line bg-white px-3 py-1.5 rounded text-sm font-semibold disabled:opacity-50" title="Pobierz z marketplace'ów ceny BuyBox/Backbox dla ofert z tymi SKU (tylko odczyt)">{fetchingMkt ? "Sprawdzam…" : "Sprawdź BuyBox"}</button>}
         {canPrice && <button onClick={updateQuantities} disabled={qtyBusy} className="border border-line bg-white px-3 py-1.5 rounded text-sm font-semibold disabled:opacity-50" title="Ustaw ilość ofert z tymi SKU na Back Market i refurbed = liczba niesprzedanych sztuk z listy „Do wystawienia” (najpierw okno ze zmianami)">{qtyBusy ? "Liczę…" : "Zaktualizuj ilości"}</button>}
+        {groups.length > 0 && <button onClick={() => setOpenGroups(openGroups.size === groups.length ? new Set() : new Set(groups.map((g) => g.key)))} className="border border-line bg-white px-3 py-1.5 rounded text-sm font-semibold">{openGroups.size === groups.length ? "Zwiń wszystko" : "Rozwiń wszystko"}</button>}
         <button onClick={() => setShowParams((v) => !v)} className={`${canPrice ? "" : "ml-auto "}border border-line bg-white px-3 py-1.5 rounded text-sm font-semibold`}>{showParams ? "Ukryj założenia" : "Założenia cen"}</button>
       </div>
 
@@ -721,8 +748,9 @@ export default function ListingQueueView({ session, members, canPrice = false, i
             {!loading && visible.length === 0 && !error && <tr><td colSpan={8} className="p-6 text-center text-inksoft text-sm">{search ? "Brak wyników." : filter === "done" ? "Żadne urządzenie z listy nie ma jeszcze oferty z ilością > 0." : filter === "todo" && rows.length > 0 ? "Wszystkie urządzenia z listy mają już aktywne oferty." : "Lista jest pusta — zeskanuj pierwsze urządzenie powyżej."}</td></tr>}
             {groups.map((g) => (
               <Fragment key={g.key}>
-              {renderGroupPanel(g)}
-              {g.rows.map((r) => {
+              {renderGroupHeader(g)}
+              {openGroups.has(g.key) && renderGroupPanel(g)}
+              {openGroups.has(g.key) && g.rows.map((r) => {
               const c = calc.get(r.id)!;
               const open = expanded.has(r.id);
               return (
@@ -749,8 +777,8 @@ export default function ListingQueueView({ session, members, canPrice = false, i
                       ) : <span className="text-inksoft font-sans text-xs">brak w Towarze</span>}
                     </td>
                     <td className="p-3 text-right font-mono whitespace-nowrap">{c.input ? pln(c.input.extraPln) : "—"}</td>
-                    <td className="p-3"><SugCell p={c.bm} info={listings.size ? (listings.get(normListingSku(r.sku))?.backmarket ?? null) : undefined} /></td>
-                    <td className="p-3"><SugCell p={c.rf} info={listings.size ? (listings.get(normListingSku(r.sku))?.refurbed ?? null) : undefined} /></td>
+                    <td className="p-3"><SugCell p={c.bm} /></td>
+                    <td className="p-3"><SugCell p={c.rf} /></td>
                     <td className="p-3 whitespace-nowrap text-xs">
                       {c.input && <button onClick={() => setExpanded((p) => { const n = new Set(p); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n; })} className="text-inksoft font-semibold mr-3" title="Pokaż wyliczenie">{open ? "▾ Wyliczenie" : "▸ Wyliczenie"}</button>}
                       <button onClick={() => remove(r)} className="text-rust font-semibold">Usuń</button>

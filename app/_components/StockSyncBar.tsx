@@ -67,7 +67,7 @@ export default function StockSyncBar({ session, isAdmin, canRun }: { session: Se
       <span title="Sprzedaż sztuki z SKU na jednym marketplace'ie zmniejsza ilość oferty z tym samym SKU na drugim (sprawdzane co minutę).">
         Synchronizacja stanów BM ↔ refurbed:{" "}
         {st.enabled ? <b className="text-teal">włączona</b> : <b className="text-amber">wyłączona</b>}
-        {st.enabled && <span className="text-inksoft"> (od {fmt(st.activated_at)}; ostatni przebieg {fmt(st.last_run_at)}{st.last_result ? ` — ${st.last_result}` : ""})</span>}
+        {st.enabled && <span className="text-inksoft" title={`Włączona od ${fmt(st.activated_at)}${st.last_result ? ` · ${st.last_result}` : ""}`}> · ostatni przebieg {fmt(st.last_run_at)}</span>}
       </span>
       {isAdmin && <button onClick={toggle} disabled={busy} className="border border-line bg-white px-2 py-1 rounded font-semibold disabled:opacity-50">{st.enabled ? "Wyłącz" : "Włącz"}</button>}
       {canRun && st.enabled && <button onClick={runNow} disabled={busy} className="border border-line bg-white px-2 py-1 rounded font-semibold disabled:opacity-50">{busy ? "Pracuję…" : "Uruchom teraz"}</button>}
