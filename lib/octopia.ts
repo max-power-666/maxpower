@@ -24,7 +24,7 @@ export class OctopiaError extends Error {
   }
 }
 
-async function getToken(cfg: OctopiaConfig): Promise<string> {
+export async function getToken(cfg: OctopiaConfig): Promise<string> {
   const doFetch = cfg.fetchImpl ?? fetch;
   const res = await doFetch(OCTOPIA_AUTH_URL, {
     method: "POST",
@@ -148,4 +148,39 @@ export async function octopiaShipOrder(
     { parcelNumber: opts.parcelNumber, carrierName: opts.carrierName, trackingUrl: opts.trackingUrl, orderLineIds: ready.map((l) => String(l.orderLineId)) },
   ]);
   return { alreadyShipped: false };
+}
+
+// ---- Oferty (16.10.2026, Magazyn -> Listingi -> Cdiscount) ----
+// GET /offers?salesChannelId=CDISFR&limit=…&expand=salesChannelFeedback — paginacja kursorem: nagłówek Link z rel="next" i parametrem Cursor. expand dokłada dane kanału (BuyBox, konkurencja, jakość).
+export const OCTOPIA_OFFERS_LIMIT = 200; // maksimum to 1000, ale z expand odpowiedzi są duże
+export async function octopiaFetchOffersPage(cfg: OctopiaConfig, token: string, cursor: string | null, salesChannelId = "CDISFR"): Promise<{ items: any[]; nextCursor: string | null }> {
+  const doFetch = cfg.fetchImpl ?? fetch;
+  const params = new URLSearchParams({ salesChannelId, limit: String(OCTOPIA_OFFERS_LIMIT), expand: "salesChannelFeedback" });
+  if (cursor) params.set("Cursor", cursor);
+  for (let attempt = 1; ; attempt++) {
+    const res = await doFetch(`${OCTOPIA_API_URL}/offers?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${token}`, SellerId: cfg.sellerId, Accept: "application/json" },
+      cache: "no-store",
+      signal: AbortSignal.timeout(60_000),
+    });
+    if ([429, 502, 503, 504].includes(res.status) && attempt < 4) {
+      await new Promise((r) => setTimeout(r, 1500 * attempt));
+      continue;
+    }
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new OctopiaError(`Octopia zwróciło błąd (${res.status}) przy pobieraniu ofert: ${text.slice(0, 200)}`, res.status);
+    }
+    const data = await res.json();
+    const items = (data.items as any[]) || [];
+    const link = res.headers.get("link") || "";
+    let next: string | null = null;
+    for (const part of link.split(/,\s*(?=<)/)) {
+      if (!/rel="?next"?/i.test(part)) continue;
+      const m = part.match(/[?&]Cursor=([^&>\s]+)/i);
+      if (m) next = decodeURIComponent(m[1]);
+    }
+    // obrona przed pętlą: ten sam kursor albo pusta strona kończą listę
+    return { items, nextCursor: next && next !== cursor && items.length > 0 ? next : null };
+  }
 }

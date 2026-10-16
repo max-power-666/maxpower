@@ -5,14 +5,14 @@
 //  - nigdy nie usuwamy, gdy migawka nie zapisała ani jednej oferty (pusta odpowiedź API to nie "wszystko zniknęło");
 //  - niedokończona migawka starsza niż RESTART_AFTER_MS zaczyna się od nowa (żeby nie sklejać bardzo starych porcji).
 
-import type { ListingRow } from "./listings";
+import type { ListingMarketplace, ListingRow } from "./listings";
 
 export const RESTART_AFTER_MS = 3 * 60 * 60 * 1000;
 
 export type ListingsMeta = { scan_cursor: string | null; scan_started_at: string | null };
 
 export type SnapshotDeps = {
-  marketplace: "backmarket" | "refurbed";
+  marketplace: ListingMarketplace;
   budgetMs: number;
   now?: () => number;
   loadMeta: () => Promise<ListingsMeta | null>;

@@ -1,18 +1,19 @@
 import { NextResponse } from "next/server";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { isAuthorized } from "@/lib/buyback";
-import { BM_LISTINGS_PAGE_SIZE, bmFetchListingsPage, bmListingsConfigFromEnv, mapBmListing, mapRefurbedOffer, refurbedFetchOffersPage, type ListingMarketplace } from "@/lib/listings";
+import { BM_LISTINGS_PAGE_SIZE, bmFetchListingsPage, bmListingsConfigFromEnv, mapBmListing, mapOctopiaOffer, mapRefurbedOffer, refurbedFetchOffersPage, type ListingMarketplace } from "@/lib/listings";
+import { getToken as octopiaGetToken, octopiaConfigFromEnv, octopiaFetchOffersPage } from "@/lib/octopia";
 import { runListingsSnapshot, type SnapshotDeps, type SnapshotResult } from "@/lib/listingsSync";
 import type { RefurbedClient } from "@/lib/refurbed";
 
 // Magazyn -> Listingi (13.10.2026): synchronizuje oferty wystawione na Back Market (GET /ws/listings) i refurbed (OfferService/ListOffers) do marketplace_listings.
 // Zapisuje KOMPLETNĄ migawkę (patrz lib/listingsSync.ts: kursor w listings_sync_meta, usuwanie ofert, których marketplace już nie zwraca, dopiero po ukończeniu).
-// GET bez parametru (cron co 30 min) = oba marketplace'y po kolei; ?marketplace=backmarket|refurbed (przycisk "Odśwież" w zakładce Listingi) = jeden, z większym budżetem czasu.
+// GET bez parametru (cron co 30 min) = wszystkie po kolei (od 16.10.2026 także Octopia/Cdiscount: GET /offers z expand=salesChannelFeedback); ?marketplace=backmarket|refurbed|octopia (przycisk "Odśwież" w zakładce Listingi) = jeden, z większym budżetem czasu.
 // Kanał bez konfiguracji (brak BACKMARKET_AUTH / REFURBED_API_TOKEN) jest pomijany z komunikatem, nie błędem — jak przy synchronizacji zamówień.
 
 export const maxDuration = 300;
 
-const BOTH_BUDGET_MS = 115_000; // dwa marketplace'y w jednym wywołaniu (2 x 115 s mieści się w 300 s)
+const BOTH_BUDGET_MS = 85_000; // trzy marketplace'y w jednym wywołaniu (3 x 85 s mieści się w 300 s)
 const SINGLE_BUDGET_MS = 230_000;
 
 type Outcome = SnapshotResult | { skipped: string };
@@ -58,8 +59,8 @@ export async function GET(request: Request) {
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) return NextResponse.json({ error: "Brak SUPABASE_SERVICE_ROLE_KEY w zmiennych środowiskowych." }, { status: 500 });
 
   const wanted = new URL(request.url).searchParams.get("marketplace");
-  if (wanted && wanted !== "backmarket" && wanted !== "refurbed") return NextResponse.json({ error: "Nieznany marketplace." }, { status: 400 });
-  const targets: ListingMarketplace[] = wanted === "backmarket" || wanted === "refurbed" ? [wanted] : ["backmarket", "refurbed"];
+  if (wanted && wanted !== "backmarket" && wanted !== "refurbed" && wanted !== "octopia") return NextResponse.json({ error: "Nieznany marketplace." }, { status: 400 });
+  const targets: ListingMarketplace[] = wanted === "backmarket" || wanted === "refurbed" || wanted === "octopia" ? [wanted] : ["backmarket", "refurbed", "octopia"];
   const budget = targets.length === 1 ? SINGLE_BUDGET_MS : BOTH_BUDGET_MS;
   const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
@@ -84,6 +85,25 @@ export async function GET(request: Request) {
               return { items, nextCursor: hasNext && items.length > 0 ? String((Number.isFinite(page) && page > 0 ? page : 1) + 1) : null };
             },
             mapBmListing
+          )
+        );
+      } else if (mp === "octopia") {
+        const cfg = octopiaConfigFromEnv();
+        if (!cfg) {
+          results[mp] = { skipped: "Octopia (Cdiscount) nie jest skonfigurowana (brak OCTOPIA_CLIENT_ID / OCTOPIA_CLIENT_SECRET / OCTOPIA_SELLER_ID) — pominięto." };
+          continue;
+        }
+        let token: string | null = null; // jeden token na przebieg (limit 500 tokenów/h)
+        results[mp] = await runListingsSnapshot(
+          deps(
+            admin,
+            mp,
+            budget,
+            async (cursor) => {
+              token ??= await octopiaGetToken(cfg);
+              return octopiaFetchOffersPage(cfg, token, cursor);
+            },
+            mapOctopiaOffer
           )
         );
       } else {

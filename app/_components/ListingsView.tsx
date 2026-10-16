@@ -11,6 +11,7 @@ import {
   listingStateLabel,
   type ListingMarketplace,
   type MarketPriceBrief,
+  type OctopiaBrief,
 } from "@/lib/listings";
 
 // Magazyn -> Listingi (13.10.2026): oferty wystawione na Back Market i refurbed (SKU, ilość, cena, stan oferty, klasa, gwarancja...). Dane z tabeli marketplace_listings
@@ -37,6 +38,7 @@ type Listing = {
 type Meta = { last_synced_at: string | null; last_count: number | null; scan_cursor: string | null; scan_started_at: string | null; last_attempt_at: string | null; last_error: string | null };
 type SortKey = "sku" | "title" | "quantity" | "price" | "state";
 type StockFilter = "all" | "live" | "zero";
+type BbFilter = "all" | "won" | "lost";
 
 const COLS = "marketplace, external_id, sku, title, quantity, price, currency, min_price, max_price, state, product_id, listing_ref, details, listed_at, snapshot_at";
 const PAGE_SIZES = [50, 100, 200];
@@ -49,6 +51,7 @@ const fmtInt = (v: number) => v.toLocaleString("pl-PL");
 
 function stateStyle(l: Listing): string {
   if (isListingLive(l)) return "bg-tealsoft text-teal";
+  if (l.marketplace === "octopia") return "bg-ambersoft text-amber";
   if (l.marketplace === "backmarket" ? l.state === "4" || l.state === "0" : l.state === "REJECTED") return "bg-rustsoft text-rust";
   return "bg-ambersoft text-amber";
 }
@@ -66,6 +69,7 @@ export default function ListingsView({ session }: { session: Session }) {
   const [search, setSearch] = useState("");
   const [stock, setStock] = useState<StockFilter>("all");
   const [stateFilter, setStateFilter] = useState("");
+  const [bbFilter, setBbFilter] = useState<BbFilter>("all");
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "sku", dir: 1 });
   const [pageSize, setPageSize] = useState(100);
   const [page, setPage] = useState(1);
@@ -106,6 +110,7 @@ export default function ListingsView({ session }: { session: Session }) {
 
   useEffect(() => {
     setStateFilter("");
+    setBbFilter("all");
     setOpen(null);
     setPage(1);
     load(mp);
@@ -154,6 +159,11 @@ export default function ListingsView({ session }: { session: Session }) {
       if (stock === "live" && !isListingLive(r)) return false;
       if (stock === "zero" && (r.quantity ?? 0) > 0) return false;
       if (stateFilter !== "" && (r.state ?? "") !== (stateFilter === "—" ? "" : stateFilter)) return false;
+      if (bbFilter !== "all") {
+        const bb = (r.details as any)?.octopia?.bb;
+        if (bbFilter === "won" && bb !== true) return false;
+        if (bbFilter === "lost" && bb !== false) return false;
+      }
       if (search) {
         const hay = `${r.sku ?? ""} ${r.title ?? ""} ${r.external_id} ${r.listing_ref ?? ""} ${r.product_id ?? ""}`.toLowerCase();
         if (!hay.includes(search)) return false;
@@ -174,7 +184,7 @@ export default function ListingsView({ session }: { session: Session }) {
       const c = typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y), "pl", { numeric: true });
       return (c || (a.sku ?? "").localeCompare(b.sku ?? "", "pl", { numeric: true })) * sort.dir;
     });
-  }, [rows, stock, stateFilter, search, sort]);
+  }, [rows, stock, stateFilter, bbFilter, search, sort]);
 
   // Sumy całej listy marketplace'u (kafelki) i bieżącego wyniku filtrów (pasek pod tabelą).
   const summarize = (list: Listing[]) => {
@@ -187,6 +197,21 @@ export default function ListingsView({ session }: { session: Session }) {
     return { offers: list.length, live, qty };
   };
   const all = useMemo(() => summarize(rows), [rows]);
+  // Cdiscount: BuyBox wśród ofert aktywnych (z danych kanału; stan może się odświeżać z opóźnieniem)
+  const bbStats = useMemo(() => {
+    if (mp !== "octopia") return null;
+    let won = 0;
+    let lost = 0;
+    let unknown = 0;
+    for (const r of rows) {
+      if (!isListingLive(r)) continue;
+      const bb = (r.details as any)?.octopia?.bb;
+      if (bb === true) won++;
+      else if (bb === false) lost++;
+      else unknown++;
+    }
+    return { won, lost, unknown };
+  }, [rows, mp]);
   const part = useMemo(() => summarize(filtered), [filtered]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
@@ -214,6 +239,7 @@ export default function ListingsView({ session }: { session: Session }) {
   }
 
   const mpLabel = LISTING_MARKETPLACES.find((m) => m.key === mp)!.label;
+  const ncols = mp === "octopia" ? 9 : 8;
   const th = "p-3 text-left text-xs font-semibold text-inksoft whitespace-nowrap";
   const thBtn = `${th} cursor-pointer select-none hover:text-ink`;
 
@@ -241,10 +267,11 @@ export default function ListingsView({ session }: { session: Session }) {
       {!error && meta?.last_error && <p className="text-amber text-xs mb-3">Ostatnia synchronizacja zakończyła się błędem: {meta.last_error}</p>}
       {note && <p className="text-inksoft text-xs mb-3">{note}</p>}
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
+      <div className={`grid grid-cols-1 gap-3 mb-5 ${bbStats ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
         <Tile label={`Oferty ${mpLabel}`} value={fmtInt(all.offers)} hint="Wszystkie listingi zwrócone przez marketplace (także offline)" />
         <Tile label="Aktywne (online, ilość > 0)" value={fmtInt(all.live)} hint={all.offers ? `${Math.round((all.live / all.offers) * 100)}% ofert` : undefined} />
         <Tile label="Ilość łącznie (szt.)" value={fmtInt(all.qty)} hint="Suma ilości ze wszystkich ofert" />
+        {bbStats && <Tile label="BuyBox (oferty aktywne)" value={`${fmtInt(bbStats.won)} z ${fmtInt(bbStats.won + bbStats.lost)}`} hint={`mamy BuyBox${bbStats.unknown ? ` · ${fmtInt(bbStats.unknown)} bez danych` : ""}`} />}
       </div>
 
       <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -254,6 +281,13 @@ export default function ListingsView({ session }: { session: Session }) {
           <button onClick={() => { setStock("live"); setPage(1); }} className={smallPill(stock === "live")}>Aktywne</button>
           <button onClick={() => { setStock("zero"); setPage(1); }} className={smallPill(stock === "zero")}>Ilość 0</button>
         </div>
+        {mp === "octopia" && (
+          <div className="flex gap-1.5">
+            <button onClick={() => { setBbFilter("all"); setPage(1); }} className={smallPill(bbFilter === "all")}>BuyBox: wszystkie</button>
+            <button onClick={() => { setBbFilter("won"); setPage(1); }} className={smallPill(bbFilter === "won")}>Mamy</button>
+            <button onClick={() => { setBbFilter("lost"); setPage(1); }} className={smallPill(bbFilter === "lost")}>Nie mamy</button>
+          </div>
+        )}
         <select value={stateFilter} onChange={(e) => { setStateFilter(e.target.value); setPage(1); }} className="border border-line bg-white px-2 py-1.5 rounded text-sm">
           <option value="">Stan oferty: wszystkie</option>
           {facets.states.map(([s, n]) => (
@@ -271,17 +305,18 @@ export default function ListingsView({ session }: { session: Session }) {
               <th className={thBtn} onClick={() => toggleSort("title")}>Produkt{arrow("title")}</th>
               <th className={`${thBtn} text-right`} onClick={() => toggleSort("quantity")}>Ilość{arrow("quantity")}</th>
               <th className={`${thBtn} text-right`} onClick={() => toggleSort("price")}>Cena{arrow("price")}</th>
-              <th className={`${th} text-right`}>Min / max</th>
+              <th className={`${th} text-right`} title={mp === "octopia" ? "Cena minimalna automatu Cdiscount (offer competition)" : undefined}>Min / max</th>
+              {mp === "octopia" && <th className={th} title="Czy oferta ma BuyBox na Cdiscount i cena oferty, która go ma">BuyBox</th>}
               <th className={thBtn} onClick={() => toggleSort("state")}>Stan oferty{arrow("state")}</th>
               <th className={th}>Oferta</th>
               <th className={th}></th>
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={8} className="p-6 text-center text-inksoft text-sm">Wczytywanie…</td></tr>}
+            {loading && <tr><td colSpan={ncols} className="p-6 text-center text-inksoft text-sm">Wczytywanie…</td></tr>}
             {!loading && visible.length === 0 && !error && (
               <tr>
-                <td colSpan={8} className="p-6 text-center text-inksoft text-sm">
+                <td colSpan={ncols} className="p-6 text-center text-inksoft text-sm">
                   {rows.length === 0 ? `Brak ofert ${mpLabel} w bazie — kliknij „Odśwież”, żeby pobrać je z marketplace’u.` : "Brak ofert spełniających filtry."}
                 </td>
               </tr>
@@ -299,6 +334,20 @@ export default function ListingsView({ session }: { session: Session }) {
                       <td className="p-3 text-right font-mono text-[11px] text-inksoft whitespace-nowrap">
                         {r.min_price !== null || r.max_price !== null ? `${r.min_price !== null ? fmtMoney(r.min_price, null) : "—"} / ${r.max_price !== null ? fmtMoney(r.max_price, null) : "—"}` : "—"}
                       </td>
+                      {mp === "octopia" && (() => {
+                        const ob = (r.details as any)?.octopia as OctopiaBrief | undefined;
+                        return (
+                          <td className="p-3 whitespace-nowrap text-xs">
+                            {ob && ob.bb !== null ? (
+                              <>
+                                <span className={`font-semibold ${ob.bb ? "text-teal" : "text-rust"}`}>{ob.bb ? "mamy" : "nie mamy"}</span>
+                                {ob.bestPrice !== null && <div className="font-mono text-[11px] text-inksoft" title="Cena oferty z BuyBox">{ob.bb ? "" : "BuyBox: "}{fmtMoney(ob.bestPrice, r.currency)}</div>}
+                              </>
+                            ) : <span className="text-inksoft">—</span>}
+                            {ob && ob.comp !== null && <div className={`text-[11px] ${ob.comp ? "text-teal" : "text-inksoft"}`} title="Wbudowany automat Cdiscount (offer competition)">automat {ob.comp ? "wł." : "wył."}</div>}
+                          </td>
+                        );
+                      })()}
                       <td className="p-3 whitespace-nowrap">
                         <span className={`text-xs font-semibold px-2 py-1 rounded ${stateStyle(r)}`} title={r.state !== null ? `Surowa wartość: ${r.state}` : undefined}>{listingStateLabel(r.marketplace, r.state)}</span>
                       </td>
@@ -315,7 +364,7 @@ export default function ListingsView({ session }: { session: Session }) {
                     </tr>
                     {isOpen && (
                       <tr className="border-b border-line bg-paper">
-                        <td colSpan={8} className="p-4"><Details l={r} /></td>
+                        <td colSpan={ncols} className="p-4"><Details l={r} /></td>
                       </tr>
                     )}
                   </Fragment>
@@ -342,7 +391,9 @@ export default function ListingsView({ session }: { session: Session }) {
       <p className="text-[11px] text-inksoft mt-3 max-w-3xl">
         Dane z API marketplace’ów, odświeżane co 30 minut (albo przyciskiem „Odśwież”). <b>Back Market:</b> cena i waluta dotyczą rynku z ustawienia <code>BACKMARKET_LANG</code> (domyślnie fr-fr); „Aktywne” = publikacja Online
         i ilość &gt; 0. <b>refurbed:</b> cena to cena referencyjna brutto (ceny na rynkach i BuyBox w szczegółach); „Aktywne” = stan Aktywna i ilość &gt; 0. Oferta, której marketplace już nie zwraca, znika z listy po
-        ukończeniu pełnej synchronizacji. To podgląd — niczego nie zmienia na marketplace’ach.
+        ukończeniu pełnej synchronizacji. <b>Cdiscount (Octopia):</b> oferty kanału CDISFR z <code>GET /offers</code>; ilość to suma ilości ofert dostawy (stan wspólny dla kanałów), „Min / max” to cena minimalna wbudowanego
+        automatu Cdiscount („offer competition” — sam obniża cenę do 0,01 € poniżej najtańszego konkurenta, ale nie poniżej minimum; ustawia się go w panelu sprzedawcy, API tylko go odczytuje), a BuyBox i konkurencja pochodzą z danych
+        kanału (mogą być opóźnione). To podgląd — niczego nie zmienia na marketplace’ach.
       </p>
     </div>
   );
@@ -358,7 +409,66 @@ function Tile({ label, value, hint }: { label: string; value: string; hint?: str
   );
 }
 
+function OctopiaDetails({ l }: { l: Listing }) {
+  const d = l.details ?? {};
+  const ob = d.octopia as OctopiaBrief | undefined;
+  const row = (label: string, value: React.ReactNode) =>
+    value === null || value === undefined || value === "" ? null : (
+      <div className="flex gap-3 py-0.5"><span className="text-inksoft w-44 shrink-0">{label}</span><span className="break-words min-w-0">{value}</span></div>
+    );
+  const gap = ob && ob.bestPrice !== null && l.price !== null ? l.price - ob.bestPrice : null;
+  return (
+    <div className="grid md:grid-cols-2 gap-x-8 gap-y-3 text-xs">
+      <div>
+        {row("ID oferty", <span className="font-mono">{l.external_id}</span>)}
+        {row("Produkt (referencja)", l.product_id ? <span className="font-mono">{l.product_id}</span> : null)}
+        {row("GTIN / EAN", l.listing_ref ? <span className="font-mono">{l.listing_ref}</span> : null)}
+        {row("Utworzona", l.listed_at ? fmtWarsawDateTime(Date.parse(l.listed_at)) : null)}
+        {row("Ostatnio widziana", fmtWarsawDateTime(Date.parse(l.snapshot_at)))}
+        {row("Czas przygotowania", d.preparation_days !== undefined ? `${d.preparation_days} dni` : null)}
+        {row("Komentarz", d.comment)}
+        {ob && row("Online na Cdiscount", ob.online === null ? null : ob.online ? "tak" : "nie")}
+        {ob && row("Powód offline", ob.offlineReason)}
+        {ob && row("Qualiscore", ob.score)}
+        {ob && row("Liczba ofert produktu", ob.offersCount)}
+        {Array.isArray(d.delivery_modes) && d.delivery_modes.length > 0 && row("Dostawa", d.delivery_modes.map((m: any) => `${m.c ?? "—"} ${m.p !== null ? fmtMoney(m.p, l.currency) : ""}${m.d !== null ? ` (do ${m.d} dni)` : ""}`).join("; "))}
+      </div>
+      <div>
+        {!ob ? (
+          <div className="text-inksoft">Brak danych kanału (BuyBox, konkurencja) — odśwież listingi.</div>
+        ) : (
+          <>
+            <div className="font-semibold text-inksoft mb-1">BUYBOX I KONKURENCJA</div>
+            {row("BuyBox", ob.bb === null ? "brak danych" : ob.bb ? <b className="text-teal">mamy</b> : <b className="text-rust">nie mamy</b>)}
+            {row("Cena oferty z BuyBox", ob.bestPrice !== null ? `${fmtMoney(ob.bestPrice, l.currency)}${ob.bestDelivery ? ` + dostawa ${fmtMoney(ob.bestDelivery, l.currency)}` : ""}` : null)}
+            {row("Nasza cena", l.price !== null ? fmtMoney(l.price, l.currency) : null)}
+            {gap !== null && !ob.bb && row("Różnica do BuyBox", <span className={gap > 0 ? "text-rust" : "text-teal"}>{gap > 0 ? "+" : ""}{fmtMoney(gap, l.currency)}</span>)}
+            {row("Automat (offer competition)", ob.comp === null ? "nie włączany" : ob.comp ? <span className="text-teal">włączony</span> : "wyłączony")}
+            {row("Cena minimalna automatu", ob.compMin !== null ? fmtMoney(ob.compMin, l.currency) : null)}
+            {ob.ext && row(`Najlepsza oferta ${ob.ext.name ?? "zewnętrzna"}`, `${ob.ext.total !== null ? fmtMoney(ob.ext.total, l.currency) : "—"}${ob.ext.idx !== null ? ` (nasz wskaźnik cenowy ${ob.ext.idx}%)` : ""}`)}
+            {ob.competing.length > 0 && (
+              <div className="mt-2">
+                <div className="font-semibold text-inksoft mb-1">OFERTY KONKURENTÓW</div>
+                <table className="w-full">
+                  <thead><tr className="text-left text-inksoft"><th className="py-0.5 pr-3 font-semibold">Sprzedawca</th><th className="py-0.5 pr-3 font-semibold text-right">Cena</th><th className="py-0.5 pr-3 font-semibold text-right">Dostawa</th><th className="py-0.5 font-semibold">BuyBox</th></tr></thead>
+                  <tbody>
+                    {ob.competing.map((c, i) => (
+                      <tr key={i}><td className="py-0.5 pr-3">{c.n ?? "—"}</td><td className="py-0.5 pr-3 text-right font-mono">{fmtMoney(c.p, null)}</td><td className="py-0.5 pr-3 text-right font-mono">{fmtMoney(c.d, null)}</td><td className="py-0.5">{c.b ? "tak" : ""}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {ob.bbAt && <div className="text-inksoft mt-1">Dane BuyBox z kanału: {fmtWarsawDateTime(Date.parse(ob.bbAt))} (kanał odświeża je z opóźnieniem)</div>}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Details({ l }: { l: Listing }) {
+  if (l.marketplace === "octopia") return <OctopiaDetails l={l} />;
   const d = l.details ?? {};
   const row = (label: string, value: React.ReactNode) =>
     value === null || value === undefined || value === "" ? null : (

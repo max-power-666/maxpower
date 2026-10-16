@@ -4,10 +4,11 @@
 
 import { REFURBED_BASE_URL, type RefurbedClient } from "./refurbed";
 
-export type ListingMarketplace = "backmarket" | "refurbed";
+export type ListingMarketplace = "backmarket" | "refurbed" | "octopia";
 export const LISTING_MARKETPLACES: { key: ListingMarketplace; label: string }[] = [
   { key: "backmarket", label: "Back Market" },
   { key: "refurbed", label: "refurbed" },
+  { key: "octopia", label: "Cdiscount" }, // Octopia, kanał CDISFR (16.10.2026)
 ];
 
 export type ListingRow = {
@@ -132,6 +133,77 @@ export function mapRefurbedOffer(o: any, snapshotAt: string): ListingRow | null 
   };
 }
 
+// ---- Octopia / Cdiscount (GET /offers z expand=salesChannelFeedback, 16.10.2026) ----
+// Specyfikacja: developer.octopia-io.net (Octopia-SellerAPI-2026-10-15.yml). offerId = SellerId_ProductId_ConditionId_SalesChannelId; SKU = sellerExternalReference; ilość = suma ilości ofert dostawy
+// (deliveryOffers[].quantity — stan jest wspólny dla kanałów); cena = cena wyświetlana na kanale (facialPrice), a gdy brak — cena integracji. Cena minimalna to offerCompetition.minimumPrice (wbudowany
+// automat Cdiscount obniża cenę do 0,01 € poniżej najtańszego konkurenta, ale nie poniżej minimum — API tylko to ODCZYTUJE). BuyBox: salesChannelFeedback.bestOfferDetails (Cdiscount), a dla innych kanałów isBestOffer.
+export type OctopiaBrief = {
+  bb: boolean | null; // czy mamy BuyBox
+  bbAt: string | null;
+  bestPrice: number | null; // cena oferty z BuyBox
+  bestDelivery: number | null;
+  comp: boolean | null; // offerCompetition.isActivated
+  compMin: number | null; // offerCompetition.minimumPrice
+  online: boolean | null;
+  offersCount: number | null;
+  score: string | null; // Qualiscore
+  offlineReason: string | null;
+  competing: { n: string | null; p: number | null; d: number | null; b: boolean | null }[];
+  ext: { name: string | null; total: number | null; idx: number | null } | null;
+};
+export function mapOctopiaOffer(o: any, snapshotAt: string): ListingRow | null {
+  const id = str(o?.offerId);
+  if (!id) return null;
+  const fb = o.salesChannelFeedback ?? {};
+  const best = fb.bestOfferDetails ?? null;
+  const bb = typeof best?.isBestOffer === "boolean" ? best.isBestOffer : typeof o.isBestOffer === "boolean" ? o.isBestOffer : null;
+  const bestOffer = best?.bestOffer ?? o.bestOffer ?? null;
+  const deliveries: any[] = Array.isArray(o.deliveryOffers) ? o.deliveryOffers : [];
+  const qty = deliveries.reduce((s, d) => s + (int(d?.quantity) ?? 0), 0);
+  const price = num(o.facialPrice?.price) ?? num(o.integrationPrice?.price);
+  const brief: OctopiaBrief = {
+    bb,
+    bbAt: str(best?.isBestOfferUpdatedAt),
+    bestPrice: num(bestOffer?.price),
+    bestDelivery: num(bestOffer?.deliveryCost),
+    comp: typeof o.offerCompetition?.isActivated === "boolean" ? o.offerCompetition.isActivated : null,
+    compMin: num(o.offerCompetition?.minimumPrice),
+    online: typeof fb.isOnline === "boolean" ? fb.isOnline : null,
+    offersCount: int(fb.productInformation?.offersCount),
+    score: str(fb.offerQuality?.offerScore),
+    offlineReason: str(fb.offlineReason?.reason),
+    competing: (Array.isArray(fb.competingOffers) ? fb.competingOffers : []).slice(0, 8).map((c: any) => ({ n: str(c?.sellerName), p: num(c?.displayedOfferPrice), d: num(c?.deliveryCost), b: typeof c?.isBestOffer === "boolean" ? c.isBestOffer : null })),
+    ext: fb.externalCompetingOffer ? { name: str(fb.externalCompetingOffer.marketplaceName), total: num(fb.externalCompetingOffer.totalPrice), idx: num(fb.externalCompetingOffer.priceIndex) } : null,
+  };
+  const details: Record<string, unknown> = { octopia: brief };
+  if (str(o.comments)) details.comment = String(o.comments).slice(0, 500);
+  const url = str(fb.productInformation?.productPageUrl);
+  if (url && /^https?:\/\//.test(url)) details.product_page_url = url;
+  const prep = deliveries.map((d) => int(d?.preparationTime)).find((x) => x !== null);
+  if (prep !== undefined && prep !== null) details.preparation_days = prep;
+  const modes = deliveries.flatMap((d) => (Array.isArray(d?.deliveryModes) ? d.deliveryModes : [])).slice(0, 6).map((m: any) => ({ c: str(m?.legacyDeliveryModeId) ?? str(m?.code), d: int(m?.maxDeliveryTime), p: num(m?.cost) }));
+  if (modes.length) details.delivery_modes = modes;
+  return {
+    marketplace: "octopia",
+    external_id: id,
+    sku: str(o.sellerExternalReference),
+    title: str(o.product?.title) ?? str(o.product?.reference) ?? str(o.product?.gtin),
+    quantity: qty,
+    price,
+    currency: str(o.facialPrice?.currencyCode) ?? str(o.integrationPrice?.currencyCode),
+    min_price: brief.compMin,
+    max_price: null,
+    state: str(o.offerState),
+    grade: str(o.condition),
+    warranty_months: null,
+    product_id: str(o.product?.reference),
+    listing_ref: str(o.product?.gtin),
+    details,
+    listed_at: str(o.createdAt),
+    snapshot_at: snapshotAt,
+  };
+}
+
 // ---- etykiety do UI (surowa wartość zostaje w bazie, więc poprawka etykiety nie wymaga ponownej synchronizacji) ----
 // Back Market publication_state: opisu nie ma w OpenAPI (przykład w dokumentacji: 2 = online); znaczenia wg starszej dokumentacji BM — do potwierdzenia na pierwszej synchronizacji.
 export const BM_PUBLICATION_LABEL: Record<string, string> = {
@@ -156,15 +228,17 @@ export const BM_GRADE_LABEL: Record<string, string> = {
   FAIR: "Przyzwoity",
   STALLONE: "Stallone",
 };
+export const OCTOPIA_STATE_LABEL: Record<string, string> = { Active: "Aktywna", Inactive: "Nieaktywna" };
+export const OCTOPIA_CONDITION_LABEL: Record<string, string> = { New: "Nowy", LikeNew: "Jak nowy", VeryGoodState: "Bardzo dobry", GoodState: "Dobry", AverageState: "Średni", Refurbished: "Odnowiony", RefurbishedLikeNew: "Odnowiony — jak nowy", RefurbishedVeryGoodState: "Odnowiony — bardzo dobry", RefurbishedCorrectState: "Odnowiony — zadowalający" };
 export function listingStateLabel(marketplace: string, state: string | null): string {
   if (state === null || state === "") return "—";
-  const map = marketplace === "backmarket" ? BM_PUBLICATION_LABEL : REFURBED_STATE_LABEL;
+  const map = marketplace === "backmarket" ? BM_PUBLICATION_LABEL : marketplace === "octopia" ? OCTOPIA_STATE_LABEL : REFURBED_STATE_LABEL;
   return map[state] ?? state;
 }
 // Czy oferta jest "żywa" (ma towar do sprzedaży) — BM: quantity > 0 i publikacja Online (2); refurbed: stock > 0 i stan OK.
 export function isListingLive(l: { marketplace: string; quantity: number | null; state: string | null }): boolean {
   if ((l.quantity ?? 0) <= 0) return false;
-  return l.marketplace === "backmarket" ? l.state === "2" : l.state === "OK";
+  return l.marketplace === "backmarket" ? l.state === "2" : l.marketplace === "octopia" ? l.state === "Active" : l.state === "OK";
 }
 
 // ---- klienci stron ----
@@ -256,7 +330,12 @@ export function slugify(title: string | null | undefined): string {
 }
 
 export type ListingLink = { label: string; url: string; hint: string };
-export function listingLinks(l: { marketplace: string; product_id: string | null; title: string | null; sku?: string | null; external_id?: string | null }): ListingLink[] {
+export function listingLinks(l: { marketplace: string; product_id: string | null; title: string | null; sku?: string | null; external_id?: string | null; details?: Record<string, any> | null }): ListingLink[] {
+  if (l.marketplace === "octopia") {
+    // Publiczna strona produktu na Cdiscount (z informacji kanału); panel sprzedawcy adresuje oferty wewnętrznymi identyfikatorami, których API nie zwraca.
+    const url = typeof l.details?.product_page_url === "string" ? l.details.product_page_url : "";
+    return url ? [{ label: "Strona produktu", url, hint: "Publiczna strona produktu na Cdiscount" }] : [];
+  }
   if (l.marketplace === "backmarket") {
     const links: ListingLink[] = [];
     if (l.product_id) links.push({ label: "Strona produktu", url: `https://www.backmarket.fr/fr-fr/p/${slugify(l.title)}/${encodeURIComponent(l.product_id)}`, hint: "Publiczna strona produktu na backmarket.fr" });
