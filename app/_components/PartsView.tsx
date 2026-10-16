@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabaseClient";
 import InlineEditCell from "./InlineEditCell";
 import ProductCardDrawer from "./ProductCardDrawer";
 import PartsImportDialog from "./PartsImportDialog";
+import PartEditDrawer from "./PartEditDrawer";
 import type { Session } from "@supabase/supabase-js";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { escapeLike } from "@/lib/search";
@@ -55,7 +56,7 @@ const STATUS_STYLE: Record<string, string> = {
 
 const pct = (part: number, whole: number) => (whole > 0 ? `${((part / whole) * 100).toLocaleString("pl-PL", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%` : "—");
 
-export default function PartsView({ members, session }: { members: MemberLite[]; session: Session }) {
+export default function PartsView({ members, session, canEditAll = false }: { members: MemberLite[]; session: Session; canEditAll?: boolean }) {
   const [rows, setRows] = useState<Part[]>([]);
   const [total, setTotal] = useState(0);
   const [sum, setSum] = useState<{ pln: number; count: number; freePln: number; freeCount: number; yearCount: number; freeYearCount: number } | null>(null);
@@ -69,6 +70,7 @@ export default function PartsView({ members, session }: { members: MemberLite[];
   const [reload, setReload] = useState(0);
   const [openSerial, setOpenSerial] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  const [editId, setEditId] = useState<number | null>(null); // Kierownik serwisu / Admin: edycja całego rekordu części
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -199,11 +201,12 @@ export default function PartsView({ members, session }: { members: MemberLite[];
               <th className="p-3">Status</th>
               <th className="p-3" title="Wpisywany w Serwis → Naprawy (kolumna Części) — tu tylko do odczytu">Numer seryjny / IMEI urządzenia</th>
               <th className="p-3">Uwagi</th>
+              {canEditAll && <th className="p-3"></th>}
             </tr>
           </thead>
           <tbody>
             {!loading && rows.length === 0 && !error && (
-              <tr><td colSpan={9} className="p-6 text-center text-inksoft text-sm">{search || filter !== "all" ? "Brak wyników." : "Brak części — załaduj dane z arkusza."}</td></tr>
+              <tr><td colSpan={canEditAll ? 10 : 9} className="p-6 text-center text-inksoft text-sm">{search || filter !== "all" ? "Brak wyników." : "Brak części — załaduj dane z arkusza."}</td></tr>
             )}
             {rows.map((r) => (
               <tr key={r.id} className="border-b border-line last:border-0 align-top">
@@ -240,6 +243,7 @@ export default function PartsView({ members, session }: { members: MemberLite[];
                 <td className="p-3">
                   <InlineEditCell value={r.usage_notes} placeholder="Uwagi" className="w-56" multiline onSave={(v) => saveField(r.id, { usage_notes: v })} />
                 </td>
+                {canEditAll && <td className="p-3"><button onClick={() => setEditId(r.id)} className="text-teal text-xs font-semibold" title="Edytuj wszystkie dane części">Edytuj</button></td>}
               </tr>
             ))}
           </tbody>
@@ -259,10 +263,11 @@ export default function PartsView({ members, session }: { members: MemberLite[];
       </div>
       <p className="text-[11px] text-inksoft mt-3 max-w-4xl">
         Cena netto PLN to cena jednostkowa części. Części przypisane do numeru seryjnego wchodzą do kosztu serwisu w zakładce Marża (części przyjęte do dnia zamówienia, bez wierszy „Demontaż”).
-        Dane zakupowe (z arkusza albo z importu faktury) są tylko do odczytu. Numer seryjny/IMEI urządzenia pojawia się automatycznie, gdy serwisant wpisze kod części w naprawie (Naprawy → kolumna „Części”) — dotyczy części z unikalnym kodem; zmieniasz tu status części i uwagi.
+        Dane zakupowe (z arkusza albo z importu faktury) może zmienić tylko Kierownik serwisu (albo Admin) — przyciskiem „Edytuj”, z zapisem w historii zmian części; pozostali zmieniają status i uwagi. Numer seryjny/IMEI urządzenia pojawia się automatycznie, gdy serwisant wpisze kod części w naprawie (Naprawy → kolumna „Części”) — dotyczy części z unikalnym kodem; zmieniasz tu status części i uwagi.
       </p>
 
       {importing && <PartsImportDialog session={session} onClose={() => setImporting(false)} onSaved={() => { setPage(1); setReload((n) => n + 1); }} />}
+      {editId !== null && <PartEditDrawer id={editId} members={members} onClose={() => setEditId(null)} onSaved={() => setReload((n) => n + 1)} />}
       {openSerial && <ProductCardDrawer serial={openSerial} members={members} onClose={() => setOpenSerial(null)} />}
     </div>
   );

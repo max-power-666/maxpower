@@ -48,7 +48,7 @@ export default function ServiceHub({ session, members, role, isAdmin, isAdminOrM
         <button onClick={() => setSub("requests")} className={pill(sub === "requests")}>Zapotrzebowanie</button>
       </div>
       {sub === "repairs" && <ServiceView session={session} members={members} isAdmin={isAdmin} isAdminOrManager={isAdminOrManager} isServiceLead={isServiceLead} />}
-      {sub === "parts" && <PartsView members={members} session={session} />}
+      {sub === "parts" && <PartsView members={members} session={session} canEditAll={isAdmin || isServiceLead} />}
       {sub === "requests" && <ServiceRequestsView session={session} members={members} role={role} canHandle={SERVICE_STAFF_ROLES.includes(role)} />}
     </div>
   );
