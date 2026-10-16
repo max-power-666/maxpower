@@ -49,6 +49,8 @@ alter table rcp_segments enable row level security;
 drop policy if exists "manager read rcp_settings" on rcp_settings;
 create policy "manager read rcp_settings" on rcp_settings for select using (rcp_is_manager());
 
+-- Kierownik serwisu (16.10.2026) widzi w "Teraz w pracy" serwisantów (rola "Serwis"): tylko odcinki otwarte albo z ostatnich 2 dni — nie pełną ewidencję. Funkcja rcp_service_lead_sees jest niżej w pliku
+-- (przy wnioskach urlopowych), dlatego polityka odczytu odcinków jest tworzona w bloku "Kierownik serwisu — czas pracy" po jej definicji.
 drop policy if exists "own or manager read rcp_segments" on rcp_segments;
 create policy "own or manager read rcp_segments" on rcp_segments for select using (user_id = auth.uid() or rcp_is_manager());
 -- Brak polityk insert/update: zapisuje serwer. Usuwanie wpisu tylko Admin, z zapisem w deleted_records.
@@ -207,3 +209,11 @@ drop policy if exists "own or manager read rcp_leave_balances" on rcp_leave_bala
 create policy "own or manager read rcp_leave_balances" on rcp_leave_balances for select using (user_id = auth.uid() or rcp_is_manager() or rcp_service_lead_sees(user_id));
 drop policy if exists "admin write rcp_leave_balances" on rcp_leave_balances;
 create policy "admin write rcp_leave_balances" on rcp_leave_balances for all using (is_admin()) with check (is_admin());
+
+-- Kierownik serwisu — czas pracy serwisantów (16.10.2026): tylko "Teraz w pracy" (odcinki otwarte lub z ostatnich 2 dni), bez pełnej ewidencji.
+create or replace function rcp_service_lead_sees_segment(target uuid, started timestamptz, ended timestamptz) returns boolean
+language sql stable security definer set search_path = public as $$
+  select rcp_service_lead_sees(target) and (ended is null or started >= now() - interval '2 days');
+$$;
+drop policy if exists "own or manager read rcp_segments" on rcp_segments;
+create policy "own or manager read rcp_segments" on rcp_segments for select using (user_id = auth.uid() or rcp_is_manager() or rcp_service_lead_sees_segment(user_id, started_at, ended_at));

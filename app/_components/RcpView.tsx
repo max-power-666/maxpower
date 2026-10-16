@@ -14,7 +14,7 @@ import {
   type RcpKind, type RcpSegment,
 } from "@/lib/rcp";
 
-// Zakładka RCP (06.10.2026, etap 1). Pracownik: "Mój czas" (dziś, miesiąc, godziny, przerwy), widzi TYLKO swoje (RLS w bazie). Admin i Manager dodatkowo: "Teraz w pracy",
+// Zakładka RCP (06.10.2026, etap 1). Pracownik: "Mój czas" (dziś, miesiąc, godziny, przerwy), widzi TYLKO swoje (RLS w bazie). Admin i Manager dodatkowo: "Teraz w pracy" (od 16.10.2026 także Kierownik serwisu — tylko serwisanci),
 // "Ewidencja" miesięczna (z korektami i eksportem CSV) i ustawienia (adresy IP komputerów w firmie — zmienia tylko Admin). Rejestracja idzie z widżetu na lewym pasku.
 
 type Sub = "mine" | "leave" | "requests" | "now" | "records" | "settings";
@@ -75,7 +75,7 @@ export default function RcpView({ session, role, members }: { session: Session; 
   return (
     <div>
       <div className="flex gap-2 mb-5 flex-wrap">
-        {isManager && <button onClick={() => setSub("now")} className={pill(sub === "now")}>Teraz w pracy</button>}
+        {(isManager || isLead) && <button onClick={() => setSub("now")} className={pill(sub === "now")}>Teraz w pracy</button>}
         {isManager && <button onClick={() => setSub("records")} className={pill(sub === "records")}>Ewidencja</button>}
         {tracksWorkTime(role) && <button onClick={() => setSub("mine")} className={pill(sub === "mine")}>Mój czas</button>}
         <button onClick={() => setSub("leave")} className={pill(sub === "leave")}>Urlopy</button>
@@ -85,7 +85,7 @@ export default function RcpView({ session, role, members }: { session: Session; 
       {sub === "leave" && <MyLeave session={session} />}
       {sub === "requests" && canSeeRequests && <Requests session={session} members={members} isAdmin={isAdmin} scope={isLead ? "service" : "all"} />}
       {sub === "mine" && <MyTime session={session} members={members} />}
-      {sub === "now" && isManager && <NowBoard members={members} />}
+      {sub === "now" && (isManager || isLead) && <NowBoard members={members} scope={isLead ? "service" : "all"} selfId={session.user.id} />}
       {sub === "records" && isManager && <Records session={session} members={members} isAdmin={isAdmin} />}
       {sub === "settings" && isManager && <Settings session={session} isAdmin={isAdmin} />}
     </div>
@@ -206,7 +206,8 @@ function MyTime({ session, members }: { session: Session; members: MemberLite[] 
 
 /* ---------------- Teraz w pracy ---------------- */
 
-function NowBoard({ members }: { members: MemberLite[] }) {
+// scope "service" (Kierownik serwisu, 16.10.2026): tylko serwisanci (rola Serwis) i on sam; baza i tak oddaje mu tylko otwarte odcinki i z ostatnich 2 dni (rcp_service_lead_sees_segment).
+function NowBoard({ members, scope = "all", selfId }: { members: MemberLite[]; scope?: "all" | "service"; selfId?: string }) {
   const [open, setOpen] = useState<RcpSegment[]>([]);
   const [todaySegs, setTodaySegs] = useState<RcpSegment[]>([]);
   const [list, setList] = useState<{ user_id: string; email: string; role: string }[]>([]);
@@ -224,9 +225,9 @@ function NowBoard({ members }: { members: MemberLite[] }) {
     setError("");
     setOpen((o.data as RcpSegment[]) || []);
     setTodaySegs((t.data as RcpSegment[]) || []);
-    setList(((m.data as { user_id: string; email: string; role: string }[]) || []).filter((x) => x.role));
+    setList(((m.data as { user_id: string; email: string; role: string }[]) || []).filter((x) => x.role && (scope === "all" || x.role === "Serwis" || x.user_id === selfId)));
     setNow(Date.now());
-  }, []);
+  }, [scope, selfId]);
   useEffect(() => {
     load();
     const t = setInterval(load, 30_000);
