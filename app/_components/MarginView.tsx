@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useRef, useState } from "react";
 import BmInvoicesView from "./BmInvoicesView";
+import MarketplaceFeesView from "./MarketplaceFeesView";
 import type { Session } from "@supabase/supabase-js";
 import { MARKETPLACES } from "@/lib/salesOrders";
 import type { MemberLite } from "@/lib/displayName";
@@ -30,6 +31,8 @@ const FILTERS = [
   { key: "backmarket", label: "Back Market" },
   { key: "refurbed", label: "Refurbed" },
   { key: "octopia", label: "Octopia" },
+  { key: "allegro", label: "Allegro" },
+  { key: "erli", label: "Erli" },
 ];
 
 const fmtPLN = (n: number | null) => (n === null ? "—" : n.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
@@ -53,7 +56,7 @@ export default function MarginView({ session, members }: { session: Session; mem
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [section, setSection] = useState<"margin" | "invoices">("margin"); // pigułki: Marża / Faktury BM (08.10.2026)
+  const [section, setSection] = useState<"margin" | "invoices" | "fees">("margin"); // pigułki: Marża / Faktury BM (08.10.2026)
   const [expanded, setExpanded] = useState<Set<string>>(new Set()); // rozwinięte wiersze (szczegółowe wyliczenie marży)
   const [openOrder, setOpenOrder] = useState<{ marketplace: string; externalId: string } | null>(null);
   const [openSerial, setOpenSerial] = useState<string | null>(null); // karta produktu po numerze seryjnym
@@ -105,8 +108,11 @@ export default function MarginView({ session, members }: { session: Session; mem
       <div className="flex gap-2 mb-4">
         <button onClick={() => setSection("margin")} className={pill(section === "margin")}>Marża</button>
         <button onClick={() => setSection("invoices")} className={pill(section === "invoices")}>Faktury BM</button>
+        <button onClick={() => setSection("fees")} className={pill(section === "fees")} title="Średnia prowizja Allegro i Erli z faktur kosztowych">Prowizje Allegro / Erli</button>
       </div>
-      {section === "invoices" ? (
+      {section === "fees" ? (
+        <MarketplaceFeesView session={session} />
+      ) : section === "invoices" ? (
         <BmInvoicesView session={session} members={members} bmRates={bmRates} invoiceCount={invoiceCount} onUploaded={load} />
       ) : (
       <>
@@ -221,6 +227,7 @@ export default function MarginView({ session, members }: { session: Session; mem
                 <td className="p-3 text-right font-mono whitespace-nowrap">
                   {fmtPLN(r.commissionPln)}
                   {r.commissionSource === "szacunek" && <div className="text-[10px] text-amber font-sans" title="Zamówienie jeszcze nie jest na wgranej fakturze — prowizja ze średnich stawek">szacunek</div>}
+                  {r.commissionSource === "srednia" && <div className="text-[10px] text-amber font-sans" title="Prowizja szacowana średnią stawką z faktur kosztowych (3 ostatnie kompletne miesiące) — zakładka Prowizje Allegro / Erli">średnia z faktur</div>}
                 </td>
                 <td className={`p-3 text-right font-mono ${r.servicePln === null ? "text-inksoft" : ""}`} title="Części przypisane do numeru seryjnego (Serwis → Części), cena netto">{fmtPLN(r.servicePln)}</td>
                 <td className={`p-3 text-right font-mono font-semibold whitespace-nowrap ${marginCls(r.marginPln)}`}>

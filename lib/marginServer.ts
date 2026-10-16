@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { isCountedOrder } from "@/lib/salesOrders";
 import { computeMargin, deriveBmRates, inPeriod, MARGIN_MARKETPLACES, type BmLine, type BmRates, type MarginDbRow, type MarginResult, type ServicePart } from "@/lib/margin";
 import type { NbpRate } from "@/lib/nbp";
+import { loadFeeRates, type FeeRateResult } from "@/lib/feeRates";
 
 async function fetchAll<T>(build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
   const out: T[] = [];
@@ -55,7 +56,7 @@ async function loadPartsBySerial(db: SupabaseClient<any, any, any>, serials: str
 }
 
 export type MarginRange = { from: string; to: string } | null;
-type Loaded = { results: MarginResult[]; bmRates: BmRates | null; invoiceCount: number; purchasesCount: number };
+type Loaded = { results: MarginResult[]; bmRates: BmRates | null; invoiceCount: number; purchasesCount: number; feeRates: Record<string, FeeRateResult> | null };
 // Pamięć podręczna wyniku (16.10.2026): przejście na kolejną stronę / zmiana filtra w Marży woła serwer ponownie, a liczenie trwa kilka sekund — wynik trzymamy w pamięci instancji przez 60 s
 // (klucz = zakres dat) i z całego okresu wyprowadzamy zakresy. Przycisk "Odśwież" w Marży pomija pamięć (fresh). Po zmianie ceny w Towarze zmiana widoczna najpóźniej po minucie.
 const CACHE_TTL_MS = 60_000;
@@ -84,17 +85,21 @@ export async function loadMarginResults(db: SupabaseClient<any, any, any>, opts:
     fetchAll<BmLine & { invoice_ref: string }>((from, to) => db.from("bm_invoice_lines").select("invoice_ref, invoice_key, order_id, amount, sku, designation").order("id").range(from, to)).catch(() => [] as (BmLine & { invoice_ref: string })[]),
   ]);
   const counted = rowsRaw.filter((r) => isCountedOrder(r.marketplace, r.status));
-  const [parts, purchases] = await Promise.all([
+  const [parts, purchases, fees] = await Promise.all([
     loadPartsBySerial(db, Array.from(new Set(counted.map((r) => (r.serial_number || "").trim().toUpperCase()).filter(Boolean)))),
     // ile pozycji ma rejestr Towar (źródło cen zakupu od 14.10.2026) — gdy 0, zakładka podpowiada, że ceny zakupu są puste
     db.from("goods_register").select("id", { count: "exact", head: true }),
+    // średnie stawki prowizji Allegro/Erli z faktur kosztowych (tylko gdy w wyniku są pozycje tych kanałów); błąd tego liczenia nie psuje reszty marży
+    counted.some((r) => r.marketplace === "allegro" || r.marketplace === "erli") ? loadFeeRates(db).catch(() => null) : Promise.resolve(null),
   ]);
   const toRates = (cur: string): NbpRate[] => rateRows.filter((r) => r.currency === cur).map((r) => ({ currency: r.currency, rateDate: r.rate_date, mid: Number(r.mid) }));
   const bmRates = deriveBmRates(lines);
-  const ctx = { eurRates: toRates("EUR"), dkkRates: toRates("DKK"), bmRates, partsBySerial: parts.available ? parts.map : undefined };
+  const feeRates: Record<string, { pct: number; window: string[] }> = {};
+  if (fees) for (const r of Object.values(fees.rates)) if (r.pct !== null) feeRates[r.marketplace] = { pct: r.pct, window: r.window };
+  const ctx = { eurRates: toRates("EUR"), dkkRates: toRates("DKK"), bmRates, partsBySerial: parts.available ? parts.map : undefined, feeRates };
   // tylko zamówienia, które liczą się jako sprzedaż (bez anulowanych/zwróconych/nieopłaconych — ten sam isCountedOrder co Przegląd)
   const results = counted.map((r) => computeMargin(r, ctx)).filter((r) => inPeriod(r.orderDate, range));
-  const data: Loaded = { results, bmRates, invoiceCount: new Set(lines.map((l) => l.invoice_ref)).size, purchasesCount: purchases.count ?? 0 };
+  const data: Loaded = { results, bmRates, invoiceCount: new Set(lines.map((l) => l.invoice_ref)).size, purchasesCount: purchases.count ?? 0, feeRates: fees ? fees.rates : null };
   cache.set(rangeKey(range), { at: now, data });
   return data;
 }

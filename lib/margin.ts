@@ -4,7 +4,8 @@
 //   − prowizja marketplace'u − koszty serwisu. VAT liczony OD MARŻY: (cena sprzedaży − cena zakupu, BEZ kosztów dodatkowych) × 23/123,
 //   nigdy ujemny. Koszty serwisu na razie zawsze puste (decyzja: dodamy po wprowadzeniu kosztów części).
 // Zakres: Back Market, refurbed i Octopia (tam mamy rzetelne źródło prowizji): BM z wgranych faktur tygodniowych (dokładnie dla zamówień z faktury,
-// resztę szacujemy średnią z faktur), refurbed z danych zamówienia. Inne kanały nie są na liście, dopóki nie znamy ich prowizji.
+// resztę szacujemy średnią z faktur), refurbed i Octopia z danych zamówienia; od 16.10.2026 także Allegro i Erli — prowizja SZACOWANA średnią stawką z faktur kosztowych z 3 ostatnich
+// kompletnych miesięcy (lib/feeRates.ts). Amazon i Swopify nie są na liście, dopóki nie znamy ich prowizji.
 //
 // Koszty poziomu ZAMÓWIENIA (wysyłka, opłaty z faktury BM) dzielimy na pozycje proporcjonalnie do ceny pozycji.
 
@@ -60,7 +61,7 @@ export function bmCommissionPct(o: { sku: string | null | undefined; title: stri
 
 
 export const MARGIN_VAT_RATE = 23; // % — VAT od marży (23/123 marży brutto), ta sama stała stawka co faktury (INVOICE_VAT_RATE)
-export const MARGIN_MARKETPLACES = ["backmarket", "refurbed", "octopia"] as const;
+export const MARGIN_MARKETPLACES = ["backmarket", "refurbed", "octopia", "allegro", "erli"] as const;
 
 export type MarginDbRow = {
   marketplace: string;
@@ -128,7 +129,7 @@ export type MarginResult = {
   shippingPln: number | null;
   extraPln: number | null;
   commissionPln: number | null;
-  commissionSource: "faktura" | "szacunek" | "refurbed" | "octopia" | null;
+  commissionSource: "faktura" | "szacunek" | "refurbed" | "octopia" | "srednia" | null;
   servicePln: number | null; // koszt części wbudowanych w sztukę (Serwis -> Części); null = brak przypisanych części
   marginPln: number | null;
   marginPct: number | null; // marża / cena sprzedaży
@@ -216,6 +217,7 @@ export type MarginContext = {
   dkkRates: NbpRate[];
   bmRates: BmRates | null;
   partsBySerial?: Map<string, ServicePart[]>; // klucz: numer seryjny WIELKIMI literami
+  feeRates?: Record<string, { pct: number; window: string[] }>; // Allegro/Erli: średnia stawka z faktur kosztowych (% ceny sprzedaży brutto) i miesiące, z których pochodzi
 };
 
 function toPln(amount: number, currency: string | null | undefined, date: string, ctx: MarginContext): number | null {
@@ -387,6 +389,14 @@ export function computeMargin(row: MarginDbRow, ctx: MarginContext): MarginResul
       const ri = ccur === "PLN" ? null : rateOf(ccur);
       commNote = `Z danych zamówienia Octopia (prowizja pozycji z API, liczona od ceny i dostawy zapłaconej przez kupującego; bez VAT): ${f2(c)} ${ccur}${ri ? ` × kurs NBP ${f4(ri.mid)} (z ${dm(ri.rateDate)})` : ""}.`;
     } else commNote = "Brak kwoty prowizji w danych zamówienia Octopia.";
+  } else if (row.marketplace === "allegro" || row.marketplace === "erli") {
+    // Allegro/Erli (16.10.2026): nie mamy prowizji per zamówienie — stawka uśredniona z faktur kosztowych z 3 ostatnich kompletnych miesięcy × cena sprzedaży brutto (lib/feeRates.ts)
+    const fr = ctx.feeRates?.[row.marketplace];
+    if (fr && salePln !== null) {
+      commissionPln = round2(salePln * (fr.pct / 100));
+      commissionSource = "srednia";
+      commNote = `SZACUNEK: średnia stawka ${f2(fr.pct)}% z faktur kosztowych ${row.marketplace === "allegro" ? "Allegro (miesięczne faktury opłat dla Polski)" : "Erli (FV-A + FV-P)"} za ${fr.window.join(", ")} × cena sprzedaży ${f2(salePln)} zł. Nie zależy od kategorii produktu ani opcji sprzedaży konkretnego zamówienia.`;
+    } else if (!fr) commNote = "Brak średniej stawki — nie ma kompletnych miesięcy z fakturami kosztowymi (Finanse → Faktury kosztowe).";
   } else if (row.marketplace === "backmarket" && date) {
     const salesFees = num(row.bm_sales_fees);
     const ri = rateOf("EUR");
@@ -427,6 +437,7 @@ export function computeMargin(row: MarginDbRow, ctx: MarginContext): MarginResul
   }
   if (commissionPln === null) flags.push("brak prowizji");
   else if (commissionSource === "szacunek") flags.push("prowizja szacowana wg reguł");
+  else if (commissionSource === "srednia") flags.push("prowizja szacowana średnią z faktur");
   details.push({ key: "commission", label: "Prowizja marketplace", sign: "-", amountPln: commissionPln === null ? null : round2(commissionPln), note: commNote });
 
   // --- koszty serwisu: części z rejestru Serwis -> Części przypisane do numeru seryjnego sztuki (cena netto w PLN).
