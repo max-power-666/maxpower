@@ -111,11 +111,14 @@ export type PzDocument = {
   warehouse_id: string;
   issue_date: string;
   client_name?: string;
-  warehouse_actions: { product_id: string; purchase_tax: number; price_net: number; quantity: number }[];
+  warehouse_actions: ({ product_id: string; purchase_tax: number; quantity: number } & ({ purchase_price_net: number } | { price_net: number }))[];
 };
 // Dokument PZ (przyjęcie na stan) dla jednego produktu: 1 szt., cena zakupu netto z payloadu produktu, stawka 23 dla V23 i 0 dla VM (cena netto = brutto);
 // "klient" = dostawca z Towaru (Buyback, Allegro…). Format wg dokumentacji API ("Dodanie dokumentu magazynowego PZ dla istniejącego produktu").
-export function buildPzDocument(g: Pick<GoodsForFakturownia, "vat" | "supplier">, product: Pick<FakturowniaProduct, "purchase_price_net">, productId: number, warehouseId: number, issueDate: string): PzDocument | null {
+// Pole ceny na pozycji PZ (16.10.2026, uwaga księgowej: cena sprzedaży produktu po PZ dezorientuje przy WZ): `purchase_price_net` wypełnia WYŁĄCZNIE ceny zakupu (rząd "zak" w dokumencie),
+// a dotąd wysyłane `price_net` Fakturownia wpisywała też jako zwykłą cenę pozycji. `legacyPriceField` wraca do starego pola (zmienna środowiskowa FAKTUROWNIA_PZ_LEGACY=1), gdyby Fakturownia
+// nie przyjmowała ceny zakupu dla istniejącego produktu.
+export function buildPzDocument(g: Pick<GoodsForFakturownia, "vat" | "supplier">, product: Pick<FakturowniaProduct, "purchase_price_net">, productId: number, warehouseId: number, issueDate: string, legacyPriceField = false): PzDocument | null {
   const vat = exportVat(g.vat);
   if (vat === null) return null;
   const supplier = (g.supplier || "").trim();
@@ -125,7 +128,7 @@ export function buildPzDocument(g: Pick<GoodsForFakturownia, "vat" | "supplier">
     warehouse_id: String(warehouseId),
     issue_date: issueDate,
     ...(supplier ? { client_name: supplier } : {}),
-    warehouse_actions: [{ product_id: String(productId), purchase_tax: vat === "V23" ? 23 : 0, price_net: Number(product.purchase_price_net), quantity: 1 }],
+    warehouse_actions: [{ product_id: String(productId), purchase_tax: vat === "V23" ? 23 : 0, ...(legacyPriceField ? { price_net: Number(product.purchase_price_net) } : { purchase_price_net: Number(product.purchase_price_net) }), quantity: 1 }],
   };
 }
 
@@ -148,4 +151,18 @@ export function salePriceState(product: { price_net?: unknown; price_gross?: unk
   // skopiowana z zakupu: sprzedażowe netto = zakupowe netto (VM i V23) albo sprzedażowe brutto = zakupowe brutto
   if ((net > 0 && same(net, pNet)) || (gross > 0 && same(gross, pGross))) return "copied_from_purchase";
   return "custom";
+}
+
+// Weryfikacja PZ po utworzeniu: cena zakupu netto na pozycji ma być taka jak w Towarze. Odpowiedź/odczyt dokumentu niesie `warehouse_actions` z polami cen (nazwy wg dokumentacji API: purchase_price_net, price_net);
+// zwracamy też to, co Fakturownia wpisała w zwykłą cenę pozycji, żeby było widać, czy rząd sprzedażowy został pusty.
+export type PzCheck = { ok: boolean; purchaseNet: number | null; priceNet: number | null; message: string };
+export function checkPzDocument(doc: any, expectedPurchaseNet: number): PzCheck {
+  const a = Array.isArray(doc?.warehouse_actions) ? doc.warehouse_actions[0] : null;
+  if (!a) return { ok: false, purchaseNet: null, priceNet: null, message: "odpowiedź Fakturowni nie zawiera pozycji dokumentu — sprawdź PZ w panelu" };
+  const purchaseNet = toNum(a.purchase_price_net);
+  const priceNet = toNum(a.price_net);
+  if (purchaseNet === null || Math.abs(purchaseNet - expectedPurchaseNet) > 0.01) {
+    return { ok: false, purchaseNet, priceNet, message: `cena zakupu na PZ to ${purchaseNet ?? "brak"}, a w Towarze ${expectedPurchaseNet} — popraw PZ w panelu Fakturowni` };
+  }
+  return { ok: true, purchaseNet, priceNet, message: `cena zakupu ${purchaseNet}${priceNet ? `, cena pozycji ${priceNet}` : ", cena pozycji pusta"}` };
 }

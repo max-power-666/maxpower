@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { admin } from "@/lib/parcelServer";
 import { requireRole } from "@/lib/serverAuth";
-import { buildFakturowniaProduct, buildPzDocument, exportVat, nameKeys, purchaseGrossForCache, purchaseNetFromGoods, salePriceState, serialKey, VAT_BLOCK_MESSAGE, type GoodsForFakturownia } from "@/lib/fakturowniaGoods";
+import { buildFakturowniaProduct, buildPzDocument, checkPzDocument, exportVat, nameKeys, purchaseGrossForCache, purchaseNetFromGoods, salePriceState, serialKey, VAT_BLOCK_MESSAGE, type GoodsForFakturownia } from "@/lib/fakturowniaGoods";
 import { warsawYmd } from "@/lib/warsawDate";
 
 // Towar -> Fakturownia (15.10.2026): wysyła wybrane pozycje Towaru do magazynu Fakturowni jako produkty (POST /products.json). Półautomat: przycisk w zakładce Towar
@@ -228,7 +228,7 @@ export async function POST(request: Request) {
       }
 
       // PZ (przyjęcie na stan): magazyn wg VAT, dostawca z Towaru, 1 szt. po cenie zakupu netto
-      const doc = buildPzDocument(g, payload, productId, warehouseId, today);
+      const doc = buildPzDocument(g, payload, productId, warehouseId, today, process.env.FAKTUROWNIA_PZ_LEGACY === "1");
       if (!doc) {
         res("error", `Produkt ${productId} jest w Fakturowni, ale nie zbudowano PZ (brak VAT) — uzupełnij VAT i kliknij „Wystaw PZ”.`, { productId });
         continue;
@@ -255,6 +255,17 @@ export async function POST(request: Request) {
       await db.from("fakturownia_purchases").upsert({ id: productId, name: payload.name, description: payload.description, purchase_price_gross: purchaseGrossForCache(payload), category_name: catName, stock_level: 1, product_created_at: nowIso, updated_at: nowIso });
       await db.from("fakturownia_stock_cache").upsert({ id: productId, category_id: cat ? cat.id : null, category_name: catName, purchase_price_gross: purchaseGrossForCache(payload), name: payload.name, description: payload.description, product_created_at: nowIso, updated_at: nowIso });
       // cena sprzedaży produktu po PZ zostaje pusta (księgowa: dezorientuje przy WZ); przy niepowodzeniu jedna próba na paczkę (pozostałe pozycje bez ponawiania)
+      // weryfikacja PZ: odpowiedź (a gdy nie niesie pozycji — odczyt dokumentu) musi mieć cenę zakupu z Towaru; wynik trafia do komunikatu (UWAGA przy rozbieżności)
+      let pzNote = "";
+      {
+        let pzDoc: any = zjson;
+        if (!Array.isArray(pzDoc?.warehouse_actions) || pzDoc.warehouse_actions.length === 0) {
+          const gr = await fetch(`${base}/warehouse_documents/${zjson.id}.json?api_token=${encodeURIComponent(token)}`, { cache: "no-store" }).catch(() => null);
+          pzDoc = gr && gr.ok ? await gr.json().catch(() => null) : null;
+        }
+        const chk = checkPzDocument(pzDoc, Number(payload.purchase_price_net));
+        pzNote = chk.ok ? ` PZ: ${chk.message}.` : ` UWAGA PZ: ${chk.message}.`;
+      }
       let saleNote = "";
       if (!saleClearBroken) {
         const f = await clearSalePrice(base, token, productId, Number(payload.purchase_price_net));
@@ -263,7 +274,7 @@ export async function POST(request: Request) {
           saleNote = ` UWAGA: ${f.message}.`;
         }
       } else saleNote = " UWAGA: cena sprzedaży w produkcie może być skopiowana z zakupu — wyczyść ją ręcznie.";
-      res("sent", `${pzOnly ? "Wystawiono PZ" : `Wysłano (produkt ${productId}), PZ`}${zjson.number ? ` ${zjson.number}` : ` ${zjson.id}`}, magazyn ${whName}${warn}.${saleNote}${ue ? ` (nie zapisano znacznika w Towarze: ${ue.message})` : ""}`, { productId });
+      res("sent", `${pzOnly ? "Wystawiono PZ" : `Wysłano (produkt ${productId}), PZ`}${zjson.number ? ` ${zjson.number}` : ` ${zjson.id}`}, magazyn ${whName}${warn}.${pzNote}${saleNote}${ue ? ` (nie zapisano znacznika w Towarze: ${ue.message})` : ""}`, { productId });
       await new Promise((r) => setTimeout(r, 150));
     }
     for (const id of ids) if (!goods.some((g) => g.id === id)) results.push({ id, serial: null, status: "skipped", message: "Pozycja nie istnieje." });
