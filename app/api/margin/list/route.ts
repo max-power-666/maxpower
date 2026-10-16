@@ -25,7 +25,7 @@ export async function GET(request: Request) {
   const range = periodRange(url.searchParams.get("period") || "all"); // all (null) | current | previous — miesiące kalendarzowe wg czasu polskiego
 
   try {
-    const { results: all, bmRates, invoiceCount, purchasesCount } = await loadMarginResults(db);
+    const { results: all, bmRates, invoiceCount, purchasesCount } = await loadMarginResults(db, { range, fresh: url.searchParams.get("fresh") === "1" });
     let results: MarginResult[] = all;
     if (marketplace) results = results.filter((r) => r.marketplace === marketplace);
     if (range) results = results.filter((r) => inPeriod(r.orderDate, range));

@@ -46,7 +46,7 @@ export default function MarginView({ session, members }: { session: Session; mem
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [marketplace, setMarketplace] = useState("");
-  const [period, setPeriod] = useState<"all" | "current" | "previous">("all");
+  const [period, setPeriod] = useState<"all" | "current" | "previous">("current"); // domyślnie bieżący miesiąc (16.10.2026) — mniej danych = szybciej
   const [skuCategory, setSkuCategory] = useState("");
   const [skuCategories, setSkuCategories] = useState<{ category: string; count: number }[]>([]);
   const [searchInput, setSearchInput] = useState("");
@@ -68,12 +68,12 @@ export default function MarginView({ session, members }: { session: Session; mem
     return () => clearTimeout(t);
   }, [searchInput]);
 
-  async function load() {
+  async function load(fresh = false) {
     const mySeq = ++seq.current;
     setLoading(true);
     setError("");
     try {
-      const qs = new URLSearchParams({ page: String(page), pageSize: String(pageSize), search, marketplace, period, skuCategory });
+      const qs = new URLSearchParams({ page: String(page), pageSize: String(pageSize), search, marketplace, period, skuCategory, ...(fresh ? { fresh: "1" } : {}) });
       const res = await fetch(`/api/margin/list?${qs}`, { headers: auth });
       const data = await res.json().catch(() => ({}));
       if (mySeq !== seq.current) return;
@@ -150,6 +150,7 @@ export default function MarginView({ session, members }: { session: Session; mem
             placeholder="Szukaj: numer seryjny, zamówienie, SKU"
             className="w-72 border border-line bg-white px-3 py-2 rounded text-sm ml-2"
           />
+          <button onClick={() => load(true)} disabled={loading} className="border border-line bg-white px-3 py-2 rounded text-sm font-semibold disabled:opacity-50 ml-2" title="Policz od nowa (pomija pamięć podręczną serwera, która trzyma wynik przez 60 s)">{loading ? "Liczę…" : "Odśwież"}</button>
           <label className="text-xs text-inksoft ml-2">Pokaż</label>
           <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }} className="border border-line bg-white px-2 py-1.5 rounded text-sm font-semibold">
             {PAGE_SIZES.map((n) => <option key={n} value={n}>{n}</option>)}
