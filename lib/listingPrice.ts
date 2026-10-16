@@ -50,8 +50,10 @@ export type Assumptions = {
   bmPaymentPct: number; // opłata płatnicza BM (regulamin 1%)
   rfCommissionPct: number; // refurbed: prowizja bazowa (z danych zamówień: 12%)
   rfPaymentPct: number; // refurbed: opłata płatnicza (z danych zamówień: 1,5%)
+  rfMarket: string; // refurbed: rynek, którego BuyBox bierzemy do strategii cen (oferta ma jedną cenę referencyjną dla wielu rynków)
+  undercutEur: number; // o ile € schodzimy poniżej ceny do wygrania BuyBox (0 = dokładnie cena do wygrania; max marża)
 };
-export const DEFAULT_ASSUMPTIONS: Assumptions = { targetMinPct: 20, targetMaxPct: 25, shippingPln: 37, bmCountry: "FR", bmPaymentPct: 1, rfCommissionPct: 12, rfPaymentPct: 1.5 };
+export const DEFAULT_ASSUMPTIONS: Assumptions = { targetMinPct: 20, targetMaxPct: 25, shippingPln: 37, bmCountry: "FR", bmPaymentPct: 1, rfCommissionPct: 12, rfPaymentPct: 1.5, rfMarket: "DE", undercutEur: 0 };
 export const BM_CCBM_EUR = { main: 6.99, accessory: 1.99 }; // stała opłata CCBM za pozycję (regulamin; średnie z faktur w Marży są zbliżone)
 
 export function bmRules(sku: string, a: Assumptions, today: string): { rules: MarketRules; kind: BmKind; note: string } {

@@ -9,6 +9,9 @@ import { skuCategoryOf } from "@/lib/skuParts";
 import { summarizeShippingCosts, type ShipmentCostRow } from "@/lib/shippingCosts";
 import { warsawYmd } from "@/lib/warsawDate";
 import { DEFAULT_ASSUMPTIONS, normListingSku, bmRules, refurbedRules, suggestPrice, type Assumptions, type PriceInputs, type Suggestion, type VatMode } from "@/lib/listingPrice";
+import { decidePrice } from "@/lib/pricingStrategy";
+import { marginAtPrice } from "@/lib/listingPrice";
+import type { MarketInfo } from "@/lib/marketPricing";
 import ProductCardDrawer from "./ProductCardDrawer";
 
 // Magazyn -> "Do wystawienia" (16.10.2026, na prośbę właściciela): urządzenia gotowe do wystawienia na sprzedaż wprowadzane skanerem (numer seryjny + SKU). Cena zakupu i koszty
@@ -19,8 +22,9 @@ import ProductCardDrawer from "./ProductCardDrawer";
 type Entry = { id: number; serial_number: string; sku: string; notes: string | null; created_by_email: string | null; created_at: string; listed_at: string | null; listed_by_email: string | null };
 type Goods = { serial: string | null; name: string | null; kind: string | null; vat: string | null; price_pln: number | string | null; total_pln: number | string | null; costs: number | string | null; commission_pcc: number | string | null; purchased_on: string | null };
 type Filter = "todo" | "done" | "all";
-type ListingRow = { marketplace: string; sku: string | null; quantity: number | null; price: number | null; currency: string | null; state: string | null };
-type ListingInfo = { count: number; quantity: number; prices: number[]; currency: string | null; skus: string[] };
+type ListingRow = { marketplace: string; external_id: string; sku: string | null; quantity: number | null; price: number | null; currency: string | null; state: string | null };
+type Offer = { externalId: string; sku: string; quantity: number; price: number | null; currency: string | null };
+type ListingInfo = { count: number; quantity: number; prices: number[]; currency: string | null; skus: string[]; offers: Offer[] };
 type Pair = { lo: Suggestion | null; hi: Suggestion | null };
 
 const LS_KEY = "listing-queue-assumptions";
@@ -64,22 +68,27 @@ async function fetchListings(skus: string[]): Promise<Map<string, { backmarket: 
   for (let i = 0; i < want.length; i += 15) {
     const chunk = want.slice(i, i + 15);
     const or = chunk.map((k) => `sku.ilike."${escapeLike(k).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}%"`).join(",");
-    const { data } = await supabase.from("marketplace_listings").select("marketplace, sku, quantity, price, currency, state").or(or).limit(2000);
+    const { data } = await supabase.from("marketplace_listings").select("marketplace, external_id, sku, quantity, price, currency, state").or(or).limit(2000);
     for (const l of (data as ListingRow[]) || []) {
       const k = normListingSku(l.sku);
       const slot = out.get(k);
       if (!slot || (l.marketplace !== "backmarket" && l.marketplace !== "refurbed")) continue;
-      const cur = (slot[l.marketplace] ??= { count: 0, quantity: 0, prices: [], currency: l.currency, skus: [] });
+      const cur = (slot[l.marketplace] ??= { count: 0, quantity: 0, prices: [], currency: l.currency, skus: [], offers: [] });
       cur.count += 1;
       cur.quantity += Number(l.quantity) || 0;
       if (l.price !== null && l.price !== undefined) cur.prices.push(Number(l.price));
       cur.skus.push(`${l.sku} ×${Number(l.quantity) || 0}`);
+      cur.offers.push({ externalId: l.external_id, sku: l.sku || "", quantity: Number(l.quantity) || 0, price: l.price === null || l.price === undefined ? null : Number(l.price), currency: l.currency });
     }
   }
   return out;
 }
 
-export default function ListingQueueView({ session, members }: { session: Session; members: MemberLite[] }) {
+type Group = { key: string; sku: string; rows: Entry[] };
+// Oferta "własna" grupy: SKU oferty = SKU z listy (z ewentualną końcówką -nM). Oferty z dodatkiem ("PS4-500-BK-B+GTA5") to inne produkty (zestawy z grą) — ich ceny nie ruszamy.
+const isOwnOffer = (o: Offer, groupSku: string) => o.sku.trim().toUpperCase().replace(/-\d+M$/, "") === groupSku;
+
+export default function ListingQueueView({ session, members, canPrice = false }: { session: Session; members: MemberLite[]; canPrice?: boolean }) {
   const [rows, setRows] = useState<Entry[]>([]);
   const [goods, setGoods] = useState<Map<string, Goods>>(new Map());
   const [listings, setListings] = useState<Map<string, { backmarket: ListingInfo | null; refurbed: ListingInfo | null }>>(new Map());
@@ -96,6 +105,12 @@ export default function ListingQueueView({ session, members }: { session: Sessio
   const [openSerial, setOpenSerial] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [reload, setReload] = useState(0);
+  // Ceny BuyBox z marketplace'ów (na żądanie) i zmiana cen ofert (16.10.2026)
+  const [mkt, setMkt] = useState<Map<string, { markets: MarketInfo[]; error?: string }>>(new Map());
+  const [bmLang, setBmLang] = useState<string | null>(null);
+  const [fetchingMkt, setFetchingMkt] = useState(false);
+  const [pricing, setPricing] = useState<string | null>(null);
+  const [priceNote, setPriceNote] = useState<{ ok: boolean; text: string } | null>(null);
   const [eurRate, setEurRate] = useState<{ mid: number; date: string } | null>(null);
   const [shipAvg, setShipAvg] = useState<number | null>(null);
   const [showParams, setShowParams] = useState(false);
@@ -209,6 +224,76 @@ export default function ListingQueueView({ session, members }: { session: Sessio
     else setReload((n) => n + 1);
   }
 
+  // ---- Ceny BuyBox z marketplace'ów i zmiana cen ofert (16.10.2026) ----
+  const offerKey = (mp: string, id: string) => `${mp}:${id}`;
+  const marketFor = (mp: "backmarket" | "refurbed", markets: MarketInfo[]): MarketInfo | null => {
+    if (markets.length === 0) return null;
+    const want = mp === "backmarket" ? (bmLang?.split("-")[1] || a.bmCountry).toUpperCase() : a.rfMarket.toUpperCase();
+    return markets.find((m) => m.market.toUpperCase() === want) ?? markets[0];
+  };
+
+  async function fetchBuybox() {
+    const items: { marketplace: string; externalId: string }[] = [];
+    for (const g of groups) {
+      const l = listings.get(g.key);
+      for (const mp of ["backmarket", "refurbed"] as const) for (const o of l?.[mp]?.offers ?? []) if (isOwnOffer(o, g.key)) items.push({ marketplace: mp, externalId: o.externalId });
+    }
+    if (items.length === 0) return setPriceNote({ ok: false, text: "Brak ofert z tymi SKU — nie ma czego sprawdzać." });
+    setFetchingMkt(true);
+    setPriceNote(null);
+    try {
+      const next = new Map(mkt);
+      let fails = 0;
+      for (let i = 0; i < items.length; i += 24) {
+        const res = await fetch("/api/listings/market-info", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ items: items.slice(i, i + 24) }) });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.error || "Błąd pobierania cen BuyBox.");
+        if (data.bmLang) setBmLang(data.bmLang);
+        for (const r of data.results as { marketplace: string; externalId: string; ok: boolean; markets: MarketInfo[]; error?: string }[]) {
+          if (!r.ok) fails++;
+          next.set(offerKey(r.marketplace, r.externalId), { markets: r.markets, error: r.error });
+        }
+      }
+      setMkt(next);
+      setPriceNote({ ok: fails === 0, text: fails === 0 ? `Pobrano dane BuyBox dla ${items.length} ofert.` : `Pobrano dane BuyBox; ${fails} z ${items.length} ofert zwróciło błąd (szczegóły przy ofercie).` });
+    } catch (e: any) {
+      setPriceNote({ ok: false, text: e.message || String(e) });
+    } finally {
+      setFetchingMkt(false);
+    }
+  }
+
+  async function applyPrice(g: Group, mp: "backmarket" | "refurbed", o: Offer, target: number, reason: string, marginsTxt: string) {
+    const label = mp === "backmarket" ? "Back Market" : "refurbed";
+    if (!confirm(`Zmienić cenę oferty na ${label}?\n\nSKU: ${o.sku}\nCena teraz: ${o.price ?? "—"} ${o.currency || "EUR"}\nNowa cena: ${target} ${o.currency || "EUR"}\nPowód: ${reason}\n${marginsTxt ? `Zysk przy nowej cenie: ${marginsTxt}\n` : ""}\nTo zmienia PRAWDZIWĄ cenę na marketplace'ie (kupujący zobaczą ją od razu).`)) return;
+    const key = offerKey(mp, o.externalId);
+    setPricing(key);
+    setPriceNote(null);
+    const call = async (force: boolean) => {
+      const res = await fetch("/api/listings/update-price", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ marketplace: mp, externalId: o.externalId, price: target, confirm: true, force, reason }) });
+      return { res, data: await res.json() };
+    };
+    try {
+      let { res, data } = await call(false);
+      if (res.status === 409 && data?.needsForce) {
+        if (!confirm(`${data.error}\n\nCzy na pewno ustawić ${target} ${o.currency || "EUR"}?`)) return;
+        ({ res, data } = await call(true));
+      }
+      if (!res.ok) throw new Error(data?.error || "Nie udało się zmienić ceny.");
+      setPriceNote({ ok: !data.mismatch && !data.logWarning, text: `${label}: cena oferty ${o.sku} ustawiona na ${data.applied} ${o.currency || "EUR"}${data.mismatch ? ` (marketplace zwrócił inną cenę niż wysłana: ${data.applied} zamiast ${data.requested})` : ""}.${data.logWarning ? ` ${data.logWarning}` : ""}` });
+      setMkt((p) => {
+        const n = new Map(p);
+        n.delete(key); // dane BuyBox sprzed zmiany są nieaktualne
+        return n;
+      });
+      setReload((n) => n + 1);
+    } catch (e: any) {
+      setPriceNote({ ok: false, text: `${label}: ${e.message || e}` });
+    } finally {
+      setPricing(null);
+    }
+  }
+
   // Wyliczenia na wiersz
   const calc = useMemo(() => {
     const out = new Map<number, { g: Goods | null; input: PriceInputs | null; bm: Pair | null; rf: Pair | null; bmNote: string; rfNote: string; cat: string; vatMissing: boolean }>();
@@ -306,6 +391,120 @@ export default function ListingQueueView({ session, members }: { session: Sessio
   const listedCount = rows.length - todoCount;
   const visible = rows.filter((r) => (filter === "all" ? true : filter === "todo" ? !isListed(r) : isListed(r)));
   const anyGoods = goods.size > 0;
+  // Grupy sztuk z tym samym SKU: na marketplace'ie jest jedna oferta (jedna cena) dla wszystkich sztuk, więc cenę liczymy dla grupy.
+  const groups = useMemo(() => {
+    const m = new Map<string, Group>();
+    for (const r of visible) {
+      const key = normListingSku(r.sku) || r.sku;
+      const g = m.get(key) ?? { key, sku: key, rows: [] };
+      g.rows.push(r);
+      m.set(key, g);
+    }
+    return Array.from(m.values());
+  }, [visible]);
+
+  // Widełki grupy: dolna = najwyższa z cen minimalnych (zysk 20%) wśród sztuk, górna = najwyższa z cen maksymalnych (zysk 25%) — żadna sztuka nie schodzi poniżej celu.
+  const bandsOf = (g: Group, mp: "bm" | "rf") => {
+    let floor = 0;
+    let ceil = 0;
+    let n = 0;
+    for (const r of g.rows) {
+      const p = calc.get(r.id)?.[mp];
+      if (!p?.lo || !p.hi) continue;
+      floor = Math.max(floor, p.lo.eur);
+      ceil = Math.max(ceil, p.hi.eur);
+      n++;
+    }
+    return n > 0 ? { floor, ceil, n } : null;
+  };
+
+  const renderOffers = (g: Group, mp: "backmarket" | "refurbed") => {
+    const band = bandsOf(g, mp === "backmarket" ? "bm" : "rf");
+    const info = listings.get(g.key)?.[mp] ?? null;
+    const rules = mp === "backmarket" ? bmRules(g.sku, a, today).rules : refurbedRules(a).rules;
+    const title = mp === "backmarket" ? "Back Market" : "refurbed";
+    return (
+      <div className="text-xs">
+        <div className="font-semibold mb-1">{title}{band ? <span className="font-normal text-inksoft"> — widełki grupy: {band.floor === band.ceil ? `${band.floor} €` : `${band.floor} – ${band.ceil} €`}</span> : <span className="font-normal text-inksoft"> — brak cen zakupu w Towarze</span>}</div>
+        {!info || info.offers.filter((o) => isOwnOffer(o, g.sku)).length === 0 ? (
+          <div className="text-inksoft">Brak oferty z tym SKU — utwórz ją w panelu marketplace'u (aplikacja ofert nie tworzy).</div>
+        ) : (
+          info.offers.filter((o) => isOwnOffer(o, g.sku)).slice(0, 6).map((o) => {
+            const m = mkt.get(offerKey(mp, o.externalId));
+            const mi = m ? marketFor(mp, m.markets) : null;
+            const eurOk = (o.currency || "EUR").toUpperCase() === "EUR";
+            const dec = band && eurOk ? decidePrice({ floorEur: band.floor, ceilingEur: band.ceil, currentEur: o.price, won: mi?.won ?? null, priceToWinEur: mi && (mi.currency || "EUR") === "EUR" ? mi.priceToWin : null, undercutEur: a.undercutEur }) : null;
+            const unitMargins = dec && eurRate ? g.rows.map((r) => { const c = calc.get(r.id); return c?.input ? marginAtPrice(dec.targetEur * eurRate.mid, c.input, rules).marginPct : null; }) : [];
+            const marginsTxt = unitMargins.filter((x): x is number => x !== null).map(pct1).join(" · ");
+            return (
+              <div key={o.externalId} className="border border-line bg-white p-2 mb-1.5">
+                <div className="flex flex-wrap items-baseline gap-x-3">
+                  <span className="font-mono">{o.sku}</span>
+                  <span className={o.quantity > 0 ? "text-teal" : "text-amber"}>ilość {o.quantity}</span>
+                  <span>cena teraz: <b className="font-mono">{o.price ?? "—"} {o.currency || ""}</b></span>
+                </div>
+                {m?.error ? (
+                  <div className="text-rust mt-1">BuyBox: {m.error}</div>
+                ) : m ? (
+                  mi ? (
+                    <div className="mt-1" title={m.markets.map((x) => `${x.market}: ${x.won === null ? "?" : x.won ? "mamy" : "nie mamy"}${x.priceToWin !== null ? `, do wygrania ${x.priceToWin}` : ""}`).join(" | ")}>
+                      BuyBox ({mi.market}): {mi.won === null ? <span className="text-inksoft">brak danych</span> : mi.won ? <span className="text-teal font-semibold">mamy</span> : <span className="text-rust font-semibold">nie mamy</span>}
+                      {mi.priceToWin !== null && <> · cena do wygrania: <b className="font-mono">{mi.priceToWin} {mi.currency || ""}</b></>}
+                      {mi.winnerPrice !== null && <span className="text-inksoft"> · {mp === "refurbed" ? "cena zwycięzcy (z wysyłką)" : "cena zwycięzcy"}: {mi.winnerPrice}</span>}
+                    </div>
+                  ) : (
+                    <div className="mt-1 text-inksoft">BuyBox: marketplace nie zwrócił danych dla tej oferty.</div>
+                  )
+                ) : (
+                  canPrice && <div className="mt-1 text-inksoft">BuyBox: kliknij „Sprawdź BuyBox”.</div>
+                )}
+                {dec ? (
+                  <div className="mt-1">
+                    Strategia: <b className="font-mono">{dec.targetEur} €</b>{" "}
+                    <span className={dec.action === "hold" ? "text-inksoft" : dec.action === "lower" ? "text-rust" : "text-teal"}>({dec.action === "hold" ? "bez zmiany" : dec.action === "lower" ? "obniż" : "podnieś"})</span>
+                    <span className="text-inksoft"> — {dec.reason}</span>
+                    {dec.warning && <div className="text-amber">⚠ {dec.warning}</div>}
+                    {marginsTxt && <div className="text-inksoft">zysk przy tej cenie (sztuki z grupy): {marginsTxt}</div>}
+                    {canPrice && dec.action !== "hold" && (
+                      <button onClick={() => applyPrice(g, mp, o, dec.targetEur, dec.reason, marginsTxt)} disabled={pricing === offerKey(mp, o.externalId)} className="mt-1 bg-ink text-paper px-3 py-1 rounded text-xs font-semibold disabled:opacity-50">
+                        {pricing === offerKey(mp, o.externalId) ? "Zmieniam…" : `Ustaw ${dec.targetEur} € na ${title}`}
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="mt-1 text-inksoft">{!eurOk ? `Oferta w walucie ${o.currency} — strategia liczy tylko EUR.` : "Brak cen zakupu w Towarze — nie wyliczę strategii."}</div>
+                )}
+              </div>
+            );
+          })
+        )}
+        {info && info.offers.some((o) => !isOwnOffer(o, g.sku)) && (
+          <div className="text-inksoft mt-1" title="Oferty z dodatkiem (np. zestaw z grą) to inne produkty — cen nie zmieniamy z aplikacji">
+            Powiązane oferty z dodatkiem (bez zmiany ceny): {info.offers.filter((o) => !isOwnOffer(o, g.sku)).slice(0, 4).map((o) => `${o.sku} ×${o.quantity} ${o.price ?? "—"} ${o.currency || ""}`).join("; ")}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderGroupPanel = (g: Group) => {
+    const costs = g.rows.map((r) => { const c = calc.get(r.id); return c?.input ? c.input.purchasePln + c.input.extraPln : null; }).filter((x): x is number => x !== null);
+    return (
+      <tr key={`${g.key}-panel`} className="border-b border-line bg-paper">
+        <td colSpan={8} className="p-3">
+          <div className="text-xs mb-2">
+            <b className="font-mono">{g.sku}</b> · {g.rows.length} {g.rows.length === 1 ? "sztuka" : "szt."}
+            {costs.length > 0 && <span className="text-inksoft"> · koszt (zakup + koszty): {costs.length > 1 && Math.min(...costs) !== Math.max(...costs) ? `${pln(Math.min(...costs))} – ${pln(Math.max(...costs))}` : pln(costs[0])} zł</span>}
+            {g.rows.length > 1 && <span className="text-inksoft"> · jedna oferta = jedna cena dla wszystkich sztuk, więc widełki liczone są po najdroższej sztuce</span>}
+          </div>
+          <div className="grid md:grid-cols-2 gap-4">
+            {renderOffers(g, "backmarket")}
+            {renderOffers(g, "refurbed")}
+          </div>
+        </td>
+      </tr>
+    );
+  };
 
   return (
     <div>
@@ -360,12 +559,13 @@ export default function ListingQueueView({ session, members }: { session: Sessio
           <button key={k} onClick={() => setFilter(k)} className={pill(filter === k)} title={k === "done" ? "Mają ofertę z tym SKU i ilością > 0 na Back Market albo refurbed (Magazyn → Listingi)" : undefined}>{label}<span className="ml-1.5 text-xs font-normal opacity-70">{n}</span></button>
         ))}
         <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="Szukaj: numer seryjny albo SKU" className={`${inp} w-64 ml-2`} />
-        <button onClick={() => setShowParams((v) => !v)} className="ml-auto border border-line bg-white px-3 py-1.5 rounded text-sm font-semibold">{showParams ? "Ukryj założenia" : "Założenia cen"}</button>
+        {canPrice && <button onClick={fetchBuybox} disabled={fetchingMkt || groups.length === 0} className="ml-auto border border-line bg-white px-3 py-1.5 rounded text-sm font-semibold disabled:opacity-50" title="Pobierz z marketplace'ów ceny BuyBox/Backbox dla ofert z tymi SKU (tylko odczyt)">{fetchingMkt ? "Sprawdzam…" : "Sprawdź BuyBox"}</button>}
+        <button onClick={() => setShowParams((v) => !v)} className={`${canPrice ? "" : "ml-auto "}border border-line bg-white px-3 py-1.5 rounded text-sm font-semibold`}>{showParams ? "Ukryj założenia" : "Założenia cen"}</button>
       </div>
 
       {showParams && (
         <div className="border border-line bg-white p-4 mb-3 text-sm">
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <div className="text-xs font-semibold text-inksoft">Widełki zysku netto (% ceny)
               <div className="flex items-center gap-1 mt-1">
                 <input type="number" step="0.5" value={a.targetMinPct} onChange={(e) => setParam({ targetMinPct: Number(e.target.value) || 0 })} className={`${inp} w-full font-mono`} title="Od (cena minimalna)" />
@@ -388,6 +588,14 @@ export default function ListingQueueView({ session, members }: { session: Sessio
             <label className="text-xs font-semibold text-inksoft">refurbed: prowizja (%)
               <input type="number" step="0.1" value={a.rfCommissionPct} onChange={(e) => setParam({ rfCommissionPct: Number(e.target.value) || 0 })} className={`${inp} w-full mt-1 font-mono`} />
             </label>
+            <label className="text-xs font-semibold text-inksoft">refurbed: rynek dla BuyBox
+              <select value={a.rfMarket} onChange={(e) => setParam({ rfMarket: e.target.value })} className={`${inp} w-full mt-1`}>
+                {["DE", "FR", "AT", "ES", "IT", "NL", "BE", "PL"].map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </label>
+            <label className="text-xs font-semibold text-inksoft" title="O ile € schodzimy poniżej ceny do wygrania BuyBox (0 = dokładnie cena do wygrania — największa marża)">Poniżej ceny do wygrania BuyBox (€)
+              <input type="number" step="1" min="0" value={a.undercutEur} onChange={(e) => setParam({ undercutEur: Math.max(0, Number(e.target.value) || 0) })} className={`${inp} w-full mt-1 font-mono`} />
+            </label>
             <label className="text-xs font-semibold text-inksoft">refurbed: opłata płatnicza (%)
               <input type="number" step="0.1" value={a.rfPaymentPct} onChange={(e) => setParam({ rfPaymentPct: Number(e.target.value) || 0 })} className={`${inp} w-full mt-1 font-mono`} />
             </label>
@@ -402,6 +610,7 @@ export default function ListingQueueView({ session, members }: { session: Sessio
       )}
 
       {error && <p className="text-rust text-xs mb-3">{error}</p>}
+      {priceNote && <p className={`text-xs mb-3 ${priceNote.ok ? "text-teal" : "text-rust"}`}>{priceNote.text}</p>}
       {!loading && rows.length > 0 && !anyGoods && <p className="text-amber text-xs mb-3">Nie znaleziono tych numerów w Towarze (albo nie masz dostępu do zakładki Towar) — ceny zakupu i sugestie są niedostępne.</p>}
 
       <div className="bg-white border border-line overflow-x-auto">
@@ -420,7 +629,10 @@ export default function ListingQueueView({ session, members }: { session: Sessio
           </thead>
           <tbody>
             {!loading && visible.length === 0 && !error && <tr><td colSpan={8} className="p-6 text-center text-inksoft text-sm">{search ? "Brak wyników." : filter === "done" ? "Żadne urządzenie z listy nie ma jeszcze oferty z ilością > 0." : filter === "todo" && rows.length > 0 ? "Wszystkie urządzenia z listy mają już aktywne oferty." : "Lista jest pusta — zeskanuj pierwsze urządzenie powyżej."}</td></tr>}
-            {visible.map((r) => {
+            {groups.map((g) => (
+              <Fragment key={g.key}>
+              {renderGroupPanel(g)}
+              {g.rows.map((r) => {
               const c = calc.get(r.id)!;
               const open = expanded.has(r.id);
               return (
@@ -468,6 +680,8 @@ export default function ListingQueueView({ session, members }: { session: Sessio
                 </Fragment>
               );
             })}
+              </Fragment>
+            ))}
           </tbody>
         </table>
       </div>
