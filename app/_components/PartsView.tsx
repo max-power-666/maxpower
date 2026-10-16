@@ -153,7 +153,7 @@ export default function PartsView({ members, session, canEditAll = false }: { me
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, filter, reload]);
 
-  async function saveField(id: number, patch: Partial<Pick<Part, "usage_notes" | "status">>) {
+  async function saveField(id: number, patch: Partial<Pick<Part, "usage_notes" | "status" | "part_code">>) {
     setError("");
     const { error: err } = await supabase.from("service_parts").update(patch).eq("id", id);
     if (err) setError(`Nie udało się zapisać: ${err.message}`);
@@ -212,7 +212,11 @@ export default function PartsView({ members, session, canEditAll = false }: { me
               <tr key={r.id} className="border-b border-line last:border-0 align-top">
                 <td className="p-3 text-xs whitespace-nowrap">{fmtDate(r.received_at)}</td>
                 <td className="p-3 max-w-xs">{r.name || "—"}</td>
-                <td className="p-3 font-mono text-xs">{r.part_code || "—"}</td>
+                <td className="p-3 font-mono text-xs">
+                  {canEditAll
+                    ? <InlineEditCell value={r.part_code} placeholder="Kod" className="w-28 font-mono" onSave={(v) => saveField(r.id, { part_code: v })} />
+                    : r.part_code || "—"}
+                </td>
                 <td className="p-3 text-xs">
                   <div>{r.supplier || "—"}</div>
                   {r.invoice_no && <div className="text-inksoft font-mono">{r.invoice_no}</div>}
