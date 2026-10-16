@@ -15,8 +15,7 @@ import { refurbedListOrders } from "./refurbed";
 
 // Szybka ścieżka (16.10.2026, "zmiana stanu musi się odbywać szybciej"): Back Market nie ma webhooków, więc przy każdym przebiegu (cron co minutę) pytamy oba marketplace'y WPROST o świeże
 // zamówienia (BM: zmienione w ostatnich 30 min, refurbed: złożone w ostatnich 30 min) i nie czekamy na 15-minutową synchronizację zamówień do bazy. Te same mappery co synchronizacja,
-// więc klucze pozycji są identyczne i późniejszy zapis z synchronizacji niczego nie dubluje (pozycje są w dzienniku listing_stock_synced). refurbed ma dodatkowo webhook ION
-// (app/api/webhooks/refurbed-ion): zgłasza numer nowego zamówienia w kilka sekund — wtedy pobieramy je przez GetOrder.
+// więc klucze pozycji są identyczne i późniejszy zapis z synchronizacji niczego nie dubluje (pozycje są w dzienniku listing_stock_synced).
 type FastItem = PendingItem & { order_status: string; order_date: string | null };
 const FAST_WINDOW_MS = 30 * 60_000;
 

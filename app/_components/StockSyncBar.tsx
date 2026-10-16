@@ -33,7 +33,7 @@ export default function StockSyncBar({ session, isAdmin, canRun }: { session: Se
   }
   async function toggle() {
     const turnOn = !st?.enabled;
-    if (turnOn && !confirm("Włączyć synchronizację stanów Back Market ↔ refurbed?\n\nOd teraz każda sprzedaż sztuki na jednym marketplace'ie zmniejszy ilość oferty z tym samym SKU na drugim (sprawdzane co minutę; sprzedaż na refurbed po zgłoszeniu webhooka — w kilka sekund). Dotychczasowe zamówienia nie zmienią żadnych stanów.")) return;
+    if (turnOn && !confirm("Włączyć synchronizację stanów Back Market ↔ refurbed?\n\nOd teraz każda sprzedaż sztuki na jednym marketplace'ie zmniejszy ilość oferty z tym samym SKU na drugim (sprawdzane co minutę). Dotychczasowe zamówienia nie zmienią żadnych stanów.")) return;
     setBusy(true);
     setNote(null);
     try {
