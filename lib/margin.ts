@@ -395,7 +395,7 @@ export function computeMargin(row: MarginDbRow, ctx: MarginContext): MarginResul
     if (fr && salePln !== null) {
       commissionPln = round2(salePln * (fr.pct / 100));
       commissionSource = "srednia";
-      commNote = `SZACUNEK: średnia stawka ${f2(fr.pct)}% z faktur kosztowych ${row.marketplace === "allegro" ? "Allegro (miesięczne faktury opłat dla Polski)" : "Erli (FV-A + FV-P)"} za ${fr.window.join(", ")} × cena sprzedaży ${f2(salePln)} zł. Nie zależy od kategorii produktu ani opcji sprzedaży konkretnego zamówienia.`;
+      commNote = `SZACUNEK: średnia stawka ${f2(fr.pct)}% z faktur kosztowych ${row.marketplace === "allegro" ? "Allegro (miesięczne faktury opłat dla Polski)" : "Erli (faktury FV-P — opłaty platformy; reklama Erli Campaigns nie wchodzi)"} za ${fr.window.join(", ")} × cena sprzedaży ${f2(salePln)} zł. Nie zależy od kategorii produktu ani opcji sprzedaży konkretnego zamówienia.`;
     } else if (!fr) commNote = "Brak średniej stawki — nie ma kompletnych miesięcy z fakturami kosztowymi (Finanse → Faktury kosztowe).";
   } else if (row.marketplace === "backmarket" && date) {
     const salesFees = num(row.bm_sales_fees);

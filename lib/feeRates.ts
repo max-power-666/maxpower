@@ -3,12 +3,13 @@
 //  - Stawka = SUMA faktur netto z 3 ostatnich kompletnych miesięcy ÷ SUMA sprzedaży (cena brutto pozycji zamówień liczonych jako sprzedaż, w PLN) z tych samych miesięcy. Prowizja marketplace'u jest
 //    naliczana od ceny brutto, więc stawka jest wprost mnożnikiem ceny sprzedaży brutto w Marży (tak jak stawki Back Market).
 //  - Miesiąc faktury = miesiąc rozliczenia z numeru faktury (Allegro: .../2026/09, Erli: FV-A-2026-08-...), a nie data wystawienia (faktury za miesiąc przychodzą 1.–3. dnia następnego).
-//  - Allegro: liczymy tylko miesięczną fakturę opłat dla Polski w PLN (seria "/PL/N/PLN/"). Pomijamy małe faktury zaliczkowe/korekty (serie P, NP, NC — razem poniżej 2% kwoty), faktury w walutach i
-//    krajach innych niż PL (CZ, SK, HU — marginalne) oraz faktury "FV26-…"/"ET26-…" (kwoty okrągłe 220/660/1100 zł brutto — wyglądają na doładowania Allegro Ads, czyli reklamę, nie prowizję;
-//    wyświetlamy je osobno jako pominięte).
-//  - Erli: dwie miesięczne faktury, FV-A-… i FV-P-… — liczymy obie razem (koszty marketplace'u), a w tabeli pokazujemy każdą osobno; faktury nie mają opisu pozycji w naszej bazie, więc nie wiemy, która
-//    to dokładnie prowizja, a która np. opłata za przesyłki — dlatego nazywamy wynik "prowizją i opłatami".
-//  - Miesiąc jest kompletny, gdy ma wszystkie wymagane faktury (Allegro: seria N; Erli: A i P) i sprzedaż; w oknie bierzemy 3 najnowsze kompletne miesiące przed bieżącym.
+//  - Co jest na fakturze, widać w polu product_cache dokumentu z Fakturowni (nazwa pozycji) — klasyfikujemy PO NIM (numer faktury jest tylko wsparciem). Poprawka z 16.10.2026: wcześniejsza wersja zgadywała
+//    po numerach i kwotach i się MYLIŁA — FV26-… od Allegro to ZAKUPY TOWARU (gra "Mario Kart 8 Deluxe Switch"), a Erli FV-A-… to REKLAMA ("Zakup Erli Campaigns - pobranie automatyczne"), nie prowizja.
+//  - Allegro: liczymy tylko miesięczną fakturę opłat dla Polski w PLN ("Zapewnienie funkcjonalności i usług dostępnych na platformie handlowej Allegro (allegro.pl)", seria "/PL/N/PLN/"). Pomijamy: faktury
+//    zaliczkowe/korygujące (serie P, NP, NC — drobne kwoty), faktury CZ/SK/HU w innych walutach (już tam nie sprzedajemy — decyzja właściciela), "FV26-…" (zakup towaru od Allegro) i "ET26-…" (usługa zwrotu).
+//  - Erli: tylko faktura FV-P-… ("Zapewnienie funkcjonalności i usług dostępnych na platformie handlowej ERLI.pl" — opłaty platformy). FV-A-… to Erli Campaigns (reklama) — nie jest prowizją, pokazujemy ją osobno
+//    (kolumna "reklama") i nie wchodzi do stawki.
+//  - Miesiąc jest kompletny, gdy ma wymaganą fakturę opłat (Allegro: seria N; Erli: FV-P) i sprzedaż; w oknie bierzemy 3 najnowsze kompletne miesiące przed bieżącym.
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isCountedOrder } from "./salesOrders";
 import { warsawDate } from "./nbp";
@@ -17,8 +18,8 @@ export const FEE_MARKETPLACES = ["allegro", "erli"] as const;
 export type FeeMarketplace = (typeof FEE_MARKETPLACES)[number];
 export const FEE_WINDOW_MONTHS = 3;
 
-export type FeeInvoiceRow = { number: string | null; issue_date: string | null; price_net: number | string | null; supplier_name: string | null; supplier_tax_no?: string | null; currency: string | null };
-export type FeeClass = { marketplace: FeeMarketplace; series: string; ym: string | null; include: boolean; why: string };
+export type FeeInvoiceRow = { number: string | null; issue_date: string | null; price_net: number | string | null; supplier_name: string | null; supplier_tax_no?: string | null; currency: string | null; product?: string | null };
+export type FeeClass = { marketplace: FeeMarketplace; series: string; ym: string | null; include: boolean; why: string; ads?: boolean };
 
 const num = (v: unknown): number => {
   const n = Number(v);
@@ -28,27 +29,34 @@ const num = (v: unknown): number => {
 export function classifyFeeInvoice(inv: FeeInvoiceRow): FeeClass | null {
   const name = (inv.supplier_name || "").toLowerCase();
   const number = (inv.number || "").trim();
+  const product = (inv.product || "").toLowerCase();
+  const isPlatformFee = /funkcjonalno/.test(product); // "Zapewnienie funkcjonalności i usług dostępnych na platformie handlowej …"
   if (/erli/.test(name)) {
     const m = number.match(/^FV-([AP])-(\d{4})-(\d{2})-/i);
-    if (!m) return { marketplace: "erli", series: "?", ym: null, include: false, why: "numer faktury Erli w nieznanym formacie" };
-    return { marketplace: "erli", series: m[1].toUpperCase(), ym: `${m[2]}-${m[3]}`, include: (inv.currency || "PLN").toUpperCase() === "PLN", why: "" };
+    const ym = m ? `${m[2]}-${m[3]}` : null;
+    if (/campaigns|reklam/.test(product) || (!product && m?.[1].toUpperCase() === "A")) return { marketplace: "erli", series: "A", ym, include: false, ads: true, why: "Erli Campaigns — reklama, nie prowizja" };
+    if (!ym) return { marketplace: "erli", series: "?", ym: null, include: false, why: "numer faktury Erli w nieznanym formacie" };
+    if (!isPlatformFee && product) return { marketplace: "erli", series: m![1].toUpperCase(), ym, include: false, why: `inna usługa: ${inv.product}` };
+    return { marketplace: "erli", series: "P", ym, include: (inv.currency || "PLN").toUpperCase() === "PLN", why: "" };
   }
   if (/allegro/.test(name)) {
     const m = number.match(/^\d+\/([A-Z]{2})\/([A-Z]{1,2})\/([A-Z]{3})\/(\d{4})\/(\d{2})$/);
     if (!m) {
-      return { marketplace: "allegro", series: number.startsWith("FV") || number.startsWith("ET") ? "FV" : "?", ym: null, include: false, why: "faktura spoza serii opłat (prawdopodobnie Allegro Ads / doładowanie) — nie jest prowizją" };
+      const why = /zwrot/.test(product) ? "usługa zwrotu — drobna opłata, nie prowizja" : product && !isPlatformFee ? `zakup towaru od Allegro (${inv.product}) — nie jest kosztem prowizji` : "faktura spoza serii opłat — pominięta";
+      return { marketplace: "allegro", series: "FV", ym: null, include: false, why };
     }
     const [, country, series, cur, y, mo] = m;
     const ym = `${y}-${mo}`;
-    if (country !== "PL" || cur !== "PLN") return { marketplace: "allegro", series, ym, include: false, why: `faktura ${country}/${cur} — poza sprzedażą w PLN (marginalna)` };
-    if (series !== "N") return { marketplace: "allegro", series, ym, include: false, why: `seria ${series} (faktura zaliczkowa/korekta) — drobne kwoty, pominięte` };
+    if (country !== "PL" || cur !== "PLN") return { marketplace: "allegro", series, ym, include: false, why: `faktura ${country}/${cur} — poza sprzedażą do Polski w PLN (tam już nie sprzedajemy)` };
+    if (series !== "N") return { marketplace: "allegro", series, ym, include: false, why: `seria ${series} (${/zaliczk/.test(product) ? "zaliczka na dostawę towaru" : "faktura zaliczkowa/korekta"}) — drobne kwoty, pominięte` };
+    if (product && !isPlatformFee) return { marketplace: "allegro", series, ym, include: false, why: `inna usługa: ${inv.product}` };
     return { marketplace: "allegro", series, ym, include: true, why: "" };
   }
   return null;
 }
 
 export type FeeSales = { marketplace: FeeMarketplace; ym: string; gmv: number; orders: number };
-export type FeeMonth = { ym: string; net: number; gmv: number; orders: number; pct: number | null; complete: boolean; missing: string; invoices: { number: string; series: string; net: number }[] };
+export type FeeMonth = { ym: string; net: number; adsNet: number; gmv: number; orders: number; pct: number | null; complete: boolean; missing: string; invoices: { number: string; series: string; net: number }[] };
 export type FeeRateResult = {
   marketplace: FeeMarketplace;
   pct: number | null; // uśredniona stawka (% ceny sprzedaży brutto); null = brak kompletnych miesięcy
@@ -60,7 +68,7 @@ export type FeeRateResult = {
   note: string;
 };
 
-const REQUIRED: Record<FeeMarketplace, string[]> = { allegro: ["N"], erli: ["A", "P"] };
+const REQUIRED: Record<FeeMarketplace, string[]> = { allegro: ["N"], erli: ["P"] };
 
 export function computeFeeRates(invoices: FeeInvoiceRow[], sales: FeeSales[], now: Date = new Date()): Record<FeeMarketplace, FeeRateResult> {
   const currentYm = warsawDate(now.toISOString()).slice(0, 7);
@@ -70,12 +78,16 @@ export function computeFeeRates(invoices: FeeInvoiceRow[], sales: FeeSales[], no
     const excluded: FeeRateResult["excluded"] = [];
     const month = (ym: string) => {
       let m = byMonth.get(ym);
-      if (!m) byMonth.set(ym, (m = { ym, net: 0, gmv: 0, orders: 0, pct: null, complete: false, missing: "", invoices: [], series: new Set() }));
+      if (!m) byMonth.set(ym, (m = { ym, net: 0, adsNet: 0, gmv: 0, orders: 0, pct: null, complete: false, missing: "", invoices: [], series: new Set() }));
       return m;
     };
     for (const inv of invoices) {
       const c = classifyFeeInvoice(inv);
       if (!c || c.marketplace !== mp) continue;
+      if (c.ads && c.ym) {
+        month(c.ym).adsNet += num(inv.price_net); // reklama (Erli Campaigns): pokazujemy osobno, poza stawką prowizji
+        continue;
+      }
       if (!c.include || !c.ym) {
         excluded.push({ number: inv.number || "(bez numeru)", issueDate: inv.issue_date, net: num(inv.price_net), currency: (inv.currency || "PLN").toUpperCase(), why: c.why || "poza zakresem" });
         continue;
@@ -98,6 +110,7 @@ export function computeFeeRates(invoices: FeeInvoiceRow[], sales: FeeSales[], no
       m.complete = m.missing === "";
       m.pct = m.complete ? (m.net / m.gmv) * 100 : null;
       m.net = Math.round(m.net * 100) / 100;
+      m.adsNet = Math.round(m.adsNet * 100) / 100;
     }
     const window = months.filter((m) => m.complete).slice(0, FEE_WINDOW_MONTHS);
     const windowNet = window.reduce((s, m) => s + m.net, 0);
@@ -166,7 +179,7 @@ export async function loadFeeRates(db: SupabaseClient<any, any, any>, now: Date 
   let error: string | null = null;
   try {
     invoices = await fetchAll<FeeInvoiceRow>((from, to) =>
-      db.from("cost_invoices").select("number, issue_date, price_net, supplier_name, supplier_tax_no, currency").or("supplier_name.ilike.%allegro%,supplier_name.ilike.%erli%").gte("issue_date", since).order("fakturownia_id").range(from, to)
+      db.from("cost_invoices").select("number, issue_date, price_net, supplier_name, supplier_tax_no, currency, product:raw->>product_cache").or("supplier_name.ilike.%allegro%,supplier_name.ilike.%erli%").gte("issue_date", since).order("fakturownia_id").range(from, to)
     );
   } catch (e: any) {
     error = /cost_invoices/.test(String(e?.message)) ? "Brak faktur kosztowych — uruchom supabase/cost-invoices.sql i pobierz faktury w Finanse -> Faktury kosztowe." : String(e?.message || e);

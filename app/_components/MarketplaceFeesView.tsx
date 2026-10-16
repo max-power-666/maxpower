@@ -39,7 +39,7 @@ export default function MarketplaceFeesView({ session }: { session: Session }) {
   return (
     <div className="max-w-5xl">
       <p className="text-sm text-inksoft mb-4">
-        Marża zamówień Allegro i Erli używa <b>średniej stawki z faktur kosztowych</b> (pobieranych z KSeF w Finanse → Faktury kosztowe) z 3 ostatnich kompletnych miesięcy: suma faktur netto ÷ suma sprzedaży brutto (zamówienia liczone jako sprzedaż,
+        Marża zamówień Allegro i Erli używa <b>średniej stawki prowizji (opłat platformy) z faktur kosztowych</b> (pobieranych z KSeF w Finanse → Faktury kosztowe) z 3 ostatnich kompletnych miesięcy: suma faktur netto ÷ suma sprzedaży brutto (zamówienia liczone jako sprzedaż,
         w PLN) z tych samych miesięcy. Stawka jest mnożnikiem ceny sprzedaży brutto. To szacunek — nie zależy od kategorii produktu ani opcji sprzedaży konkretnego zamówienia.
       </p>
       {loading && <p className="text-inksoft text-sm">Liczenie…</p>}
@@ -62,6 +62,7 @@ export default function MarketplaceFeesView({ session }: { session: Session }) {
                   <th className="p-3">Miesiąc</th>
                   <th className="p-3">Faktury (netto)</th>
                   <th className="p-3 text-right">Faktury razem</th>
+                  {Object.values(rates ?? {}).some((x) => x.marketplace === r.marketplace && x.months.some((m) => m.adsNet > 0)) && <th className="p-3 text-right" title="Erli Campaigns (reklama) — poza prowizją">Reklama</th>}
                   <th className="p-3 text-right">Sprzedaż brutto</th>
                   <th className="p-3 text-right">Zamówień</th>
                   <th className="p-3 text-right">Stawka</th>
@@ -73,9 +74,10 @@ export default function MarketplaceFeesView({ session }: { session: Session }) {
                   <tr key={m.ym} className="border-b border-line last:border-0 align-top">
                     <td className="p-3 whitespace-nowrap">{monthLabel(m.ym)}</td>
                     <td className="p-3 text-xs font-mono">
-                      {m.invoices.length === 0 ? <span className="text-inksoft">—</span> : m.invoices.map((i) => <div key={i.number} title={i.number}>{r.marketplace === "erli" ? `FV-${i.series}` : "opłaty"}: {money(i.net)} zł</div>)}
+                      {m.invoices.length === 0 ? <span className="text-inksoft">—</span> : m.invoices.map((i) => <div key={i.number} title={i.number}>{r.marketplace === "erli" ? "FV-P (opłaty platformy)" : "opłaty"}: {money(i.net)} zł</div>)}
                     </td>
                     <td className="p-3 text-right font-mono">{money(m.net)}</td>
+                    {r.months.some((x) => x.adsNet > 0) && <td className="p-3 text-right font-mono text-inksoft">{m.adsNet ? money(m.adsNet) : "—"}</td>}
                     <td className="p-3 text-right font-mono">{m.gmv ? money(m.gmv) : "—"}</td>
                     <td className="p-3 text-right font-mono">{m.orders || "—"}</td>
                     <td className="p-3 text-right font-mono font-semibold">{pct(m.pct)}</td>
@@ -105,8 +107,9 @@ export default function MarketplaceFeesView({ session }: { session: Session }) {
           </div>
         ))}
       <p className="text-[11px] text-inksoft">
-        Allegro: tylko sprzedaż do Polski i miesięczna faktura opłat w PLN (seria „/PL/N/PLN/”; faktury w HUF/CZK/EUR pomijamy — tam już nie sprzedajemy); faktury „FV26-…” o okrągłych kwotach (220/660/1100 zł brutto) wyglądają na doładowania Allegro Ads, czyli reklamę, i nie są prowizją.
-        Erli: obie miesięczne faktury (FV-A i FV-P) liczymy razem jako „prowizję i opłaty” — w bazie nie ma opisów pozycji, więc nie rozdzielamy ich na prowizję i np. przesyłki. Miesiąc faktury to miesiąc rozliczenia z numeru faktury.
+        Co jest na fakturze, rozpoznajemy po nazwie pozycji z Fakturowni. <b>Allegro:</b> tylko sprzedaż do Polski i miesięczna faktura „Zapewnienie funkcjonalności i usług… (allegro.pl)” w PLN (seria „/PL/N/PLN/”); pomijamy faktury w HUF/CZK/EUR
+        (tam już nie sprzedajemy), drobne faktury zaliczkowe/korygujące, usługę zwrotu oraz faktury „FV26-…”, które są <b>zakupami towaru od Allegro</b> (gra Mario Kart 8 Deluxe), a nie kosztem prowizji. <b>Erli:</b> tylko faktura FV-P
+        („Zapewnienie funkcjonalności i usług… ERLI.pl”); faktura FV-A to <b>Erli Campaigns — reklama</b>, pokazana osobno w kolumnie „Reklama” i niewliczana do prowizji. Miesiąc faktury to miesiąc rozliczenia z numeru faktury.
       </p>
     </div>
   );
