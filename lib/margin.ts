@@ -60,6 +60,9 @@ export function bmCommissionPct(o: { sku: string | null | undefined; title: stri
 }
 
 
+// Domyślny koszt wysyłki do Polski dla zamówień ALLEGRO i ERLI (16.10.2026, na prośbę właściciela — "jeśli nie ma kosztu wysyłki do polski w naszym systemie, przyjmijmy 15 zł netto"; "chodzi o zamówienia z erli i allegro"): gdy zamówienie jedzie do Polski, a w systemie nie ma
+// ani ceny z wyceny przewoźnika, ani ręcznego kosztu, przyjmujemy 15 zł netto NA ZAMÓWIENIE (dzielone na pozycje jak każdy koszt zamówienia) i oznaczamy jako szacunek.
+export const DEFAULT_PL_SHIPPING_NET = 15;
 export const MARGIN_VAT_RATE = 23; // % — VAT od marży (23/123 marży brutto), ta sama stała stawka co faktury (INVOICE_VAT_RATE)
 export const MARGIN_MARKETPLACES = ["backmarket", "refurbed", "octopia", "allegro", "erli"] as const;
 
@@ -332,8 +335,16 @@ export function computeMargin(row: MarginDbRow, ctx: MarginContext): MarginResul
     shippingTotal = num(row.shipping_manual);
     shipNote = `Ręcznie wpisany koszt wysyłki z karty zamówienia: ${f2(shippingTotal!)} zł.`;
   }
+  // tylko zamówienia Allegro i Erli (doprecyzowanie właściciela: "chodzi o zamówienia z erli i allegro"), do Polski: kraj PL albo pusty (te kanały nie zawsze go mają) — domyślnie 15 zł netto
+  let shippingEstimated = false;
+  if (shippingTotal === null && (row.marketplace === "allegro" || row.marketplace === "erli") && (!row.country_code || row.country_code.toUpperCase() === "PL")) {
+    shippingTotal = DEFAULT_PL_SHIPPING_NET;
+    shippingEstimated = true;
+    shipNote = `SZACUNEK: w systemie nie ma kosztu wysyłki tego zamówienia (brak ceny z wyceny przewoźnika i kosztu ręcznego), więc przyjęto domyślne ${f2(DEFAULT_PL_SHIPPING_NET)} zł netto za zamówienie do Polski.`;
+  }
   const shippingPln = shippingTotal === null ? null : shippingTotal * share;
   if (shippingPln === null) flags.push("brak kosztu wysyłki");
+  else if (shippingEstimated) flags.push(`wysyłka szacowana (${DEFAULT_PL_SHIPPING_NET} zł netto)`);
   details.push({ key: "shipping", label: "Wysyłka", sign: "-", amountPln: shippingPln === null ? null : round2(shippingPln), note: shippingPln === null ? shipNote : shipNote + shareNote });
 
   // --- koszty dodatkowe = Trade-in (prowizja BM + logistyka wg regulaminu + PCC); sztuka spoza Trade-in (np. faktura "VAT marża") nie ma ich w ogóle (0)
