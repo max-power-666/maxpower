@@ -8,7 +8,9 @@ import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { colorForUser } from "@/lib/userColors";
 import InlineEditCell from "./InlineEditCell";
 import ProductCardDrawer from "./ProductCardDrawer";
-import { INTERVALS, TEST_STATUSES as STATUSES, TEST_KINDS, TEST_RESULTS, TEST_KIND_COLORS, TEST_RESULT_COLORS, fmtDuration, rangeStart, type Interval } from "@/lib/workLog";
+import { TEST_STATUSES as STATUSES, TEST_KINDS, TEST_RESULTS, TEST_KIND_COLORS, TEST_RESULT_COLORS, fmtDuration } from "@/lib/workLog";
+import { fetchAllPaged, inPeriod, periodKey, type Period } from "@/lib/period";
+import PeriodPicker from "./PeriodPicker";
 
 // Rejestr testów urządzeń wg Regulaminu premiowania (§2, 12.10.2026, zaktualizowany 01.10.2026):
 // 15 pkt flat za prawidłowo przetestowane urządzenie (wartość ustawia default w bazie). Stare
@@ -49,9 +51,6 @@ function fmtPoints(n: number | string) {
 }
 
 const btnPrimary = "bg-ink text-paper px-4 py-2 rounded text-sm font-semibold disabled:opacity-50";
-const pill = (active: boolean) =>
-  `px-3 py-1.5 rounded-full text-sm font-semibold border ${active ? "bg-ink text-paper border-ink" : "bg-white border-line"}`;
-
 export default function TestsView({
   session,
   members,
@@ -63,7 +62,7 @@ export default function TestsView({
   isAdmin: boolean;
   isAdminOrManager: boolean;
 }) {
-  const [interval, setInterval] = useState<Interval>("today");
+  const [period, setPeriod] = useState<Period>({ kind: "today" });
   const [rangeRows, setRangeRows] = useState<{ employee_email: string | null; points: number }[]>([]);
   const [recent, setRecent] = useState<TestRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -92,7 +91,7 @@ export default function TestsView({
       supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [interval, search]);
+  }, [periodKey(period), search]);
 
   async function load() {
     setLoading(true);
@@ -100,7 +99,7 @@ export default function TestsView({
     try {
       // Punkty po points_awarded_at (pierwsze zaliczenie, trigger w bazie) — zmiana statusu nie przesuwa testu do innego dnia. Przed uruchomieniem
       // aktualizacji tests.sql kolumny nie ma — wtedy awaryjnie po finished_at (stare zachowanie).
-      const rangeQuery = (col: string) => supabase.from("test_log").select("employee_email, points").eq("status", "przetestowane").gte(col, rangeStart(interval));
+      const rangeQuery = (col: string) => fetchAllPaged<{ employee_email: string | null; points: number }>(() => inPeriod(supabase.from("test_log").select("employee_email, points").eq("status", "przetestowane"), col, period));
       const [rangeRes, { data: recentData, error: recentErr }] = await Promise.all([
         rangeQuery("points_awarded_at"),
         (() => {
@@ -236,11 +235,7 @@ export default function TestsView({
     <div>
       <div className="flex items-center justify-between mb-2">
         <h2 className="text-xs font-semibold text-inksoft">PODSUMOWANIE PUNKTACJI (przetestowane)</h2>
-        <div className="flex gap-2">
-          {INTERVALS.map((i) => (
-            <button key={i.key} onClick={() => setInterval(i.key)} className={pill(interval === i.key)}>{i.label}</button>
-          ))}
-        </div>
+        <PeriodPicker value={period} onChange={setPeriod} className="justify-end" title="Okres podsumowania punktacji" />
       </div>
       <div className="border border-line bg-white mb-6">
         <table className="w-full text-sm">

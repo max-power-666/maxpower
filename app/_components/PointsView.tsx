@@ -6,6 +6,7 @@ import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { SERVICE_TASKS } from "@/lib/workLog";
 import { emptyMonth, monthCount, monthTotal, POINTS_AREAS, type EmployeeMonth } from "@/lib/points";
 import { fmtHm } from "@/lib/rcp";
+import { defaultRange, todayYmd } from "@/lib/period";
 
 // Punktacja pracowników (06.10.2026, Admin i Manager): miesięczne podsumowanie punktów z Serwisu, Testów i Trade-in wg Regulaminu premiowania —
 // punkty tylko za prawidłowo zakończony proces, każda paczka/urządzenie raz (data zaliczenia), obszary sumują się w jeden wynik miesięczny (§2 ust. 6).
@@ -14,6 +15,7 @@ import { fmtHm } from "@/lib/rcp";
 type Employee = { email: string; months: Record<string, EmployeeMonth>; hours?: Record<string, { workMs: number; adminMs: number }> };
 const PPH_NORM = 45; // norma wydajności z regulaminu (§4): 45 pkt/h — tylko podpowiedź kolorem, bez liczenia premii
 const MONTH_NAMES = ["sty", "lut", "mar", "kwi", "maj", "cze", "lip", "sie", "wrz", "paź", "lis", "gru"];
+const fmtYmd = (ymd: string) => `${ymd.slice(8, 10)}.${ymd.slice(5, 7)}.${ymd.slice(0, 4)}`;
 const monthLabel = (key: string) => `${MONTH_NAMES[Number(key.slice(5, 7)) - 1]} ${key.slice(0, 4)}`;
 const fmtPts = (n: number) => n.toLocaleString("pl-PL", { minimumFractionDigits: 0, maximumFractionDigits: 1 });
 const pill = (active: boolean) => `px-3 py-1.5 rounded-full text-sm font-semibold border ${active ? "bg-ink text-paper border-ink" : "bg-white border-line"}`;
@@ -27,6 +29,11 @@ export default function PointsView({ session, members }: { session: Session; mem
   const [error, setError] = useState("");
   const [fallback, setFallback] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // Dowolny zakres dat (16.10.2026): zamiast miesiąca — punkty i godziny z dni od–do (włącznie, czas polski); dane dociąga ten sam endpoint z ?from=&to=.
+  const [custom, setCustom] = useState<{ from: string; to: string } | null>(null);
+  const [customEmployees, setCustomEmployees] = useState<Employee[]>([]);
+  const [customLoading, setCustomLoading] = useState(false);
+  const [customError, setCustomError] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -47,16 +54,51 @@ export default function PointsView({ session, members }: { session: Session; mem
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (!custom) return;
+    let alive = true;
+    setCustomLoading(true);
+    setCustomError("");
+    (async () => {
+      try {
+        const res = await fetch(`/api/points/summary?from=${custom.from}&to=${custom.to}`, { headers: { Authorization: `Bearer ${session.access_token}` } });
+        const data = await res.json();
+        if (!res.ok || data?.error) throw new Error(data?.error || "Nie udało się wczytać punktacji.");
+        if (alive) {
+          setCustomEmployees(data.employees);
+          setFallback(!!data.fallbackDate);
+        }
+      } catch (e: any) {
+        if (alive) {
+          setCustomEmployees([]);
+          setCustomError(e.message || "Błąd wczytywania.");
+        }
+      } finally {
+        if (alive) setCustomLoading(false);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [custom?.from, custom?.to]);
+
+  // Widok = wybrany miesiąc (z 6 ostatnich) albo własny zakres dat (jeden klucz "range", bez trendu miesięcznego).
+  const viewEmployees = custom ? customEmployees : employees;
+  const viewMonths = custom ? ["range"] : months;
+  const viewKey = custom ? "range" : month;
+  const viewLabel = custom ? (custom.from === custom.to ? fmtYmd(custom.from) : `${fmtYmd(custom.from)} – ${fmtYmd(custom.to)}`) : monthLabel(month);
+
   const rows = useMemo(() => {
-    return employees
+    return viewEmployees
       .map((e) => {
-        const h = e.hours?.[month];
+        const h = e.hours?.[viewKey];
         const netMs = h ? Math.max(0, h.workMs - h.adminMs) : 0; // czas pracy bez prac administracyjnych
-        return { email: e.email, netMs, adminMs: h?.adminMs ?? 0, m: e.months[month] ?? emptyMonth(), trend: months.map((k) => monthTotal(e.months[k] ?? emptyMonth())) };
+        return { email: e.email, netMs, adminMs: h?.adminMs ?? 0, m: e.months[viewKey] ?? emptyMonth(), trend: viewMonths.map((k) => monthTotal(e.months[k] ?? emptyMonth())) };
       })
       .filter((r) => monthCount(r.m) > 0)
       .sort((a, b) => monthTotal(b.m) - monthTotal(a.m));
-  }, [employees, month, months]);
+  }, [viewEmployees, viewKey, custom]);
 
   const totals = useMemo(() => {
     const t = emptyMonth();
@@ -78,18 +120,30 @@ export default function PointsView({ session, members }: { session: Session; mem
 
   if (loading) return <p className="text-inksoft text-sm">Liczenie punktacji…</p>;
   if (error) return <p className="text-rust text-sm">{error}</p>;
+  const today = todayYmd();
 
   return (
     <div>
       <div className="flex items-center gap-2 flex-wrap mb-4">
         <span className="text-xs font-semibold text-inksoft mr-1">MIESIĄC</span>
         {months.slice().reverse().map((k) => (
-          <button key={k} onClick={() => setMonth(k)} className={pill(month === k)}>{monthLabel(k)}</button>
+          <button key={k} onClick={() => { setCustom(null); setMonth(k); }} className={pill(!custom && month === k)}>{monthLabel(k)}</button>
         ))}
+        <button onClick={() => setCustom(custom ?? defaultRange())} className={pill(!!custom)} title="Wybierz dowolny zakres dat">Zakres</button>
+        {custom && (
+          <span className="flex items-center gap-1.5 text-sm">
+            <span className="text-xs text-inksoft">od</span>
+            <input type="date" value={custom.from} max={today} onChange={(e) => e.target.value && setCustom({ from: e.target.value, to: e.target.value > custom.to ? e.target.value : custom.to })} className="border border-line bg-white px-2 py-1 rounded text-sm" />
+            <span className="text-xs text-inksoft">do</span>
+            <input type="date" value={custom.to} max={today} onChange={(e) => e.target.value && setCustom({ from: e.target.value < custom.from ? e.target.value : custom.from, to: e.target.value })} className="border border-line bg-white px-2 py-1 rounded text-sm" />
+            {customLoading && <span className="text-xs text-inksoft">liczenie…</span>}
+          </span>
+        )}
       </div>
+      {custom && customError && <p className="text-rust text-xs mb-3">{customError}</p>}
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-px bg-line border border-line mb-px">
-        <div className="bg-white p-5"><div className="text-xs text-inksoft mb-2">PUNKTY RAZEM — {monthLabel(month).toUpperCase()}</div><div className="text-2xl font-bold font-mono">{fmtPts(monthTotal(totals))}</div></div>
+        <div className="bg-white p-5"><div className="text-xs text-inksoft mb-2">PUNKTY RAZEM — {viewLabel.toUpperCase()}</div><div className="text-2xl font-bold font-mono">{fmtPts(monthTotal(totals))}</div></div>
         {POINTS_AREAS.map((a) => (
           <div key={a.key} className="bg-white p-5">
             <div className="text-xs text-inksoft mb-2">{a.label.toUpperCase()}</div>
@@ -118,11 +172,11 @@ export default function PointsView({ session, members }: { session: Session; mem
               <th className="p-3 text-right" title="Czas pracy z RCP w tym miesiącu (praca + wyjścia służbowe), BEZ prac administracyjnych">Godziny</th>
               <th className="p-3 text-right" title={`Punkty razem ÷ godziny pracy; norma z regulaminu ${PPH_NORM} pkt/h`}>Pkt/h</th>
               <th className="p-3 w-48"></th>
-              <th className="p-3">Ostatnie {months.length} mies.</th>
+              {!custom && <th className="p-3">Ostatnie {months.length} mies.</th>}
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 && <tr><td colSpan={11} className="p-6 text-center text-inksoft text-sm">Brak zaliczonych punktów w tym miesiącu.</td></tr>}
+            {rows.length === 0 && <tr><td colSpan={custom ? 10 : 11} className="p-6 text-center text-inksoft text-sm">{custom && customLoading ? "Liczenie punktacji…" : custom ? "Brak zaliczonych punktów w tym zakresie dat." : "Brak zaliczonych punktów w tym miesiącu."}</td></tr>}
             {rows.map((r) => {
               const open = expanded.has(r.email);
               const total = monthTotal(r.m);
@@ -147,17 +201,17 @@ export default function PointsView({ session, members }: { session: Session; mem
                     <td className="p-3">
                       <div className="bg-paper rounded h-3 w-full overflow-hidden"><div className="h-full bg-teal rounded" style={{ width: `${(total / maxTotal) * 100}%` }} /></div>
                     </td>
-                    <td className="p-3">
+                    {!custom && <td className="p-3">
                       <div className="flex items-end gap-1 h-6" title={months.map((k, i) => `${monthLabel(k)}: ${fmtPts(r.trend[i])}`).join(" · ")}>
                         {r.trend.map((v, i) => (
                           <div key={months[i]} className={`w-3 rounded-sm ${months[i] === month ? "bg-teal" : "bg-line"}`} style={{ height: `${Math.max(2, (v / trendMax) * 24)}px` }} />
                         ))}
                       </div>
-                    </td>
+                    </td>}
                   </tr>
                   {open && (
                     <tr className="border-b border-line bg-paper">
-                      <td colSpan={11} className="p-3 text-xs">
+                      <td colSpan={custom ? 10 : 11} className="p-3 text-xs">
                         <ul className="space-y-0.5 max-w-md">
                           {Object.entries(r.m.serviceByTask).sort((a, b) => b[1].points - a[1].points).map(([task, v]) => (
                             <li key={task} className="flex justify-between"><span>Serwis — {TASK_LABEL[task] || task}</span><span className="font-mono">{v.count} × → {fmtPts(v.points)} pkt</span></li>
@@ -175,7 +229,7 @@ export default function PointsView({ session, members }: { session: Session; mem
 
       <div className="text-[11px] text-inksoft mt-3 max-w-4xl space-y-1">
         <p>W nawiasie liczba zaliczonych sztuk. Liczą się wyłącznie prawidłowo zakończone procesy (Regulamin §2 ust. 4): Serwis — „naprawiony”, Testy — „przetestowane”, Trade-in — obsłużona / kontroferta / ok. dok. / problem. Każda paczka i urządzenie raz — miesiąc to data pierwszego zaliczenia (zmiana statusu jej nie przesuwa); miesiące wg czasu polskiego. Punkty z obszarów sumują się w jeden wynik miesięczny (§2 ust. 6).</p>
-        <p>Godziny i pkt/h: czas pracy z RCP (praca + wyjścia służbowe, bez przerw, wyjść prywatnych i prac administracyjnych) w danym miesiącu; pkt/h = punkty razem ÷ godziny. Kolor: zielony od {PPH_NORM} pkt/h (norma z regulaminu §4), pomarańczowy poniżej. RCP działa od 06.10.2026 i nie obejmuje Admina/Managera — dla wcześniejszych miesięcy i osób bez ewidencji pokazujemy „—”. Jeszcze nie uwzględnione: obsługa zwrotów (17 pkt — zakładka Zwroty to szkielet) oraz wskaźnik kwalifikacyjny 80%, kwota premii i rozliczenie niepełnego miesiąca (§5–§7).</p>
+        <p>Zakres dat: dni od–do włącznie wg czasu polskiego (max 366 dni); liczy punkty zaliczone w tych dniach i godziny z RCP z tych samych dni. Godziny i pkt/h: czas pracy z RCP (praca + wyjścia służbowe, bez przerw, wyjść prywatnych i prac administracyjnych) w danym miesiącu lub zakresie; pkt/h = punkty razem ÷ godziny. Kolor: zielony od {PPH_NORM} pkt/h (norma z regulaminu §4), pomarańczowy poniżej. RCP działa od 06.10.2026 i nie obejmuje Admina/Managera — dla wcześniejszych miesięcy i osób bez ewidencji pokazujemy „—”. Jeszcze nie uwzględnione: obsługa zwrotów (17 pkt — zakładka Zwroty to szkielet) oraz wskaźnik kwalifikacyjny 80%, kwota premii i rozliczenie niepełnego miesiąca (§5–§7).</p>
         {fallback && <p className="text-amber">Uwaga: daty zaliczenia liczone jeszcze po dacie zakończenia — uruchom service.sql, tests.sql i buyback-orders.sql, żeby punkty nie przeskakiwały między miesiącami przy zmianie statusu.</p>}
       </div>
     </div>

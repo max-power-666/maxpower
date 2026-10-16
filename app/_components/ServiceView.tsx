@@ -8,15 +8,14 @@ import { escapeLike } from "@/lib/search";
 import InlineEditCell from "./InlineEditCell";
 import PartsCell from "./PartsCell";
 import ProductCardDrawer from "./ProductCardDrawer";
+import PeriodPicker from "./PeriodPicker";
 import {
-  INTERVALS,
   SERVICE_ACTIVE_STATUSES,
   SERVICE_STATUSES as STATUSES,
   SERVICE_TASKS,
   fmtDuration,
-  rangeStart,
-  type Interval,
 } from "@/lib/workLog";
+import { fetchAllPaged, inPeriod, orInPeriod, periodKey, type Period } from "@/lib/period";
 
 // Rejestracja pracy serwisanta wg tabeli punktowej z Regulaminu premiowania (§2, 12.10.2026).
 // Nie liczy premii w zł (Regulamin §4-§7) — wymagałoby to danych o czasie pracy/urlopach,
@@ -61,9 +60,6 @@ function fmtDateTime(iso: string) {
 }
 
 const btnPrimary = "bg-ink text-paper px-4 py-2 rounded text-sm font-semibold disabled:opacity-50";
-const pill = (active: boolean) =>
-  `px-3 py-1.5 rounded-full text-sm font-semibold border ${active ? "bg-ink text-paper border-ink" : "bg-white border-line"}`;
-
 export default function ServiceView({
   session,
   members,
@@ -81,7 +77,7 @@ export default function ServiceView({
   const ownOnly = !isAdminOrManager && !isServiceLead;
   const canEditAnyStatus = isServiceLead || isAdminOrManager; // edycja numeru seryjnego/części/uwag poza statusem "W naprawie" (08.10.2026: dla wszystkich kierowników)
   const canDelete = isAdmin || isServiceLead; // usuwanie wpisów: Admin i Kierownik serwisu
-  const [interval, setInterval] = useState<Interval>("today");
+  const [period, setPeriod] = useState<Period>({ kind: "today" });
   const [rangeRows, setRangeRows] = useState<{ employee_email: string | null; points: number; task_type: string }[]>([]);
   const [recent, setRecent] = useState<LogRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -132,7 +128,7 @@ export default function ServiceView({
       supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [interval, search, employeeFilter]);
+  }, [periodKey(period), search, employeeFilter]);
 
   async function load() {
     setLoading(true);
@@ -141,11 +137,12 @@ export default function ServiceView({
       // Punkty po points_awarded_at (pierwsze zaliczenie, trigger w bazie) — zmiana statusu nie przesuwa naprawy do innego dnia. Przed uruchomieniem
       // aktualizacji service.sql kolumny nie ma — wtedy awaryjnie po finished_at (stare zachowanie).
       const rangeQuery = (col: string) => {
-        const q = supabase.from("service_log").select("employee_email, points, task_type").eq("status", "naprawiony").gte(col, rangeStart(interval));
+        const q = inPeriod(supabase.from("service_log").select("employee_email, points, task_type").eq("status", "naprawiony"), col, period);
         return ownOnly ? q.eq("employee_user_id", session.user.id) : q;
       };
+      const rangeAll = (col: string) => fetchAllPaged<{ employee_email: string | null; points: number; task_type: string }>(() => rangeQuery(col));
       const [rangeRes, { data: recentData, error: recentErr }] = await Promise.all([
-        rangeQuery("points_awarded_at"),
+        rangeAll("points_awarded_at"),
         (() => {
           let q = supabase
             .from("service_log")
@@ -155,16 +152,13 @@ export default function ServiceView({
           if (search) q = q.ilike("device_ref", `%${escapeLike(search)}%`);
           // Okres (Dziś / 7 / 30 dni) zawęża też listę: naprawy rozpoczęte lub zakończone w okresie oraz wciąż trwające (bez daty zakończenia). Wyszukiwanie po numerze seryjnym
           // szuka w całej historii, więc okresu wtedy nie stosujemy.
-          else {
-            const from = rangeStart(interval);
-            q = q.or(`started_at.gte.${from},finished_at.gte.${from},finished_at.is.null`);
-          }
+          else q = q.or(orInPeriod("started_at", "finished_at", period));
           // Przy wyszukiwaniu limit rośnie — szukany wpis mógł dawno wypaść poza najświeższe 50.
           return q.order("started_at", { ascending: false }).limit(search ? 200 : 50);
         })(),
       ]);
       let { data: rangeData, error: rangeErr } = rangeRes;
-      if (rangeErr && rangeErr.code === "42703") ({ data: rangeData, error: rangeErr } = await rangeQuery("finished_at"));
+      if (rangeErr && rangeErr.code === "42703") ({ data: rangeData, error: rangeErr } = await rangeAll("finished_at"));
       if (rangeErr) throw rangeErr;
       if (recentErr) throw recentErr;
       setRangeRows(rangeData || []);
@@ -336,11 +330,7 @@ export default function ServiceView({
           placeholder="Szukaj po numerze seryjnym…"
           className="border border-line bg-white px-3 py-1.5 rounded text-sm w-64"
         />
-        <div className="flex gap-2 ml-auto" title="Okres podsumowania punktacji u góry">
-          {INTERVALS.map((i) => (
-            <button key={i.key} onClick={() => setInterval(i.key)} className={pill(interval === i.key)}>{i.label}</button>
-          ))}
-        </div>
+        <PeriodPicker value={period} onChange={setPeriod} className="ml-auto justify-end" title="Okres podsumowania punktacji u góry i listy napraw" />
       </div>
       <div className="border border-line bg-white overflow-x-auto">
         <table className="w-full text-sm">

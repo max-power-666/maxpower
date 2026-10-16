@@ -65,9 +65,10 @@ export function lastMonths(n: number, now: Date = new Date()): string[] {
 export type PointRow = { email: string | null; at: string | null; points: number | string | null; task?: string | null };
 
 // Agregacja punktów jednego obszaru do struktury pracownik -> miesiąc. Wiersze poza listą miesięcy są pomijane.
-export function addAreaRows(acc: Map<string, Record<string, EmployeeMonth>>, area: PointsArea, rows: PointRow[], months: string[]) {
+// keyOf (domyślnie miesiąc wg czasu polskiego) pozwala zebrać wszystko pod jednym kluczem — tak liczymy dowolny zakres dat (klucz "range").
+export function addAreaRows(acc: Map<string, Record<string, EmployeeMonth>>, area: PointsArea, rows: PointRow[], months: string[], keyOf: (iso: string | null | undefined) => string | null = monthKeyOf) {
   for (const r of rows) {
-    const key = monthKeyOf(r.at);
+    const key = keyOf(r.at);
     if (!key || !months.includes(key)) continue;
     const email = (r.email || "—").trim().toLowerCase() || "—";
     const byMonth = acc.get(email) ?? {};

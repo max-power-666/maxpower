@@ -11,7 +11,9 @@ import DefectsCell from "./DefectsCell";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { computeTradeInCosts, TRADEIN_CATEGORY_LABELS, TRADEIN_COMMISSION_RATE, PCC_RATE, PCC_THRESHOLD_PLN } from "@/lib/buybackCosts";
 import { rateBeforeDate, warsawDate, type NbpRate } from "@/lib/nbp";
-import { INTAKE_CHANNELS, INTAKE_STATUSES, INTERVALS, fmtDuration, intakeChannelLabel, rangeStart, type Interval } from "@/lib/workLog";
+import { INTAKE_CHANNELS, INTAKE_STATUSES, fmtDuration, intakeChannelLabel } from "@/lib/workLog";
+import { fetchAllPaged, inPeriod, orInPeriod, periodKey, type Period } from "@/lib/period";
+import PeriodPicker from "./PeriodPicker";
 import { escapeLike } from "@/lib/search";
 import { buybackStatusLabel, buybackStatusStyle } from "@/lib/buybackOrders";
 import { colorForUser } from "@/lib/userColors";
@@ -205,7 +207,7 @@ function IntakeView({
   isAdminOrManager: boolean;
   onOpenOrder: (id: string) => void;
 }) {
-  const [interval, setInterval] = useState<Interval>("today");
+  const [period, setPeriod] = useState<Period>({ kind: "today" });
   const [rangeRows, setRangeRows] = useState<{ entered_by_email: string | null; points: number }[]>([]);
   const [entries, setEntries] = useState<IntakeEntry[]>([]);
   const entriesRef = useRef<IntakeEntry[]>([]);
@@ -247,7 +249,7 @@ function IntakeView({
       supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [interval, search, page, pageSize]);
+  }, [periodKey(period), search, page, pageSize]);
 
   async function load() {
     setLoading(true);
@@ -258,8 +260,7 @@ function IntakeView({
       else {
         // Okres (Dziś / 7 / 30 dni) zawęża też listę paczek (15.10.2026, jak w Serwisie): paczki rozpoczęte lub zakończone w okresie oraz wciąż trwające (bez daty
         // zakończenia). Wyszukiwanie po numerze szuka w całej historii, więc okresu wtedy nie stosujemy.
-        const since = rangeStart(interval);
-        listQuery = listQuery.or(`entered_at.gte.${since},finished_at.gte.${since},finished_at.is.null`);
+        listQuery = listQuery.or(orInPeriod("entered_at", "finished_at", period));
       }
       const from = (page - 1) * pageSize;
       listQuery = listQuery.range(from, from + pageSize - 1);
@@ -267,7 +268,9 @@ function IntakeView({
       // punktowanymi nie liczy paczki ponownie ani nie przesuwa jej do innego dnia. Przed uruchomieniem aktualizacji buyback-orders.sql
       // kolumny jeszcze nie ma — wtedy awaryjnie po finished_at (stare zachowanie), żeby podsumowanie nie zniknęło.
       const rangeQuery = (col: string) =>
-        supabase.from("buyback_order_intake").select("entered_by_email, points").in("status", POINTS_STATUSES).gte(col, rangeStart(interval));
+        fetchAllPaged<{ entered_by_email: string | null; points: number }>(() =>
+          inPeriod(supabase.from("buyback_order_intake").select("entered_by_email, points").in("status", POINTS_STATUSES), col, period)
+        );
       const [rangeRes, { data: listData, error: listErr, count: listCount }] = await Promise.all([rangeQuery("points_awarded_at"), listQuery]);
       let { data: rangeData, error: rangeErr } = rangeRes;
       if (rangeErr && rangeErr.code === "42703") ({ data: rangeData, error: rangeErr } = await rangeQuery("finished_at"));
@@ -558,11 +561,7 @@ function IntakeView({
   return (
     <div>
       <h2 className="text-xs font-semibold text-inksoft mb-2">PODSUMOWANIE PUNKTACJI (obsłużone, kontroferty, ok. dok. i problemy)</h2>
-      <div className="flex gap-2 mb-2">
-        {INTERVALS.map((i) => (
-          <button key={i.key} onClick={() => { setInterval(i.key); setPage(1); }} className={pill(interval === i.key)} title="Okres punktacji i listy paczek poniżej">{i.label}</button>
-        ))}
-      </div>
+      <PeriodPicker value={period} onChange={(p) => { setPeriod(p); setPage(1); }} className="mb-2" title="Okres punktacji i listy paczek poniżej" />
       <div className="border border-line bg-white mb-6">
         <table className="w-full text-sm">
           <thead>

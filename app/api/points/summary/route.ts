@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { requireRole } from "@/lib/serverAuth";
 import { addAreaRows, lastMonths, monthRange, type EmployeeMonth, type PointRow } from "@/lib/points";
 import { summarizeDays, type RcpSegment } from "@/lib/rcp";
+import { isYmd, ymdRange } from "@/lib/period";
 
 // Podsumowanie punktacji pracowników (zakładka Punktacja, 06.10.2026) — Admin i Manager (też po stronie serwera, nie tylko ukrycie zakładki).
 // Ostatnie 6 miesięcy kalendarzowych wg czasu polskiego, punkty z Serwisu ("naprawiony"), Testów ("przetestowane") i Trade-in (obsłużona/kontroferta/ok. dok./problem)
@@ -36,7 +37,7 @@ async function fetchRows(db: ReturnType<typeof admin>, s: Src, col: string, from
 
 // Godziny pracy z RCP (09.10.2026) per pracownik i miesiąc (wg czasu polskiego): czas pracy = praca + wyjścia służbowe + prace administracyjne; do pkt/h bierzemy czas BEZ administracji
 // (workMs − adminMs). Brak tabel RCP albo brak wpisów danej osoby = brak godzin (UI pokazuje "—"). RCP działa od 06.10.2026, więc wcześniejsze miesiące nie mają godzin.
-async function fetchHours(db: ReturnType<typeof admin>, from: string, to: string): Promise<Record<string, Record<string, { workMs: number; adminMs: number }>> | null> {
+async function fetchHours(db: ReturnType<typeof admin>, from: string, to: string, bucketOf: (day: string) => string | null = (d) => d.slice(0, 7)): Promise<Record<string, Record<string, { workMs: number; adminMs: number }>> | null> {
   const segs: RcpSegment[] = [];
   for (let off = 0; ; off += 1000) {
     const { data, error } = await db
@@ -64,7 +65,8 @@ async function fetchHours(db: ReturnType<typeof admin>, from: string, to: string
   for (const [email, list] of byEmail) {
     const perMonth: Record<string, { workMs: number; adminMs: number }> = {};
     for (const d of summarizeDays(list, now).values()) {
-      const m = d.day.slice(0, 7);
+      const m = bucketOf(d.day);
+      if (!m) continue;
       const cur = (perMonth[m] ??= { workMs: 0, adminMs: 0 });
       cur.workMs += d.workMs;
       cur.adminMs += d.adminMs;
@@ -77,9 +79,20 @@ async function fetchHours(db: ReturnType<typeof admin>, from: string, to: string
 export async function GET(request: Request) {
   const db = admin();
   if (!(await requireRole(request, db, ["Admin", "Manager", "Księgowa"]))) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
-  const months = lastMonths(6);
-  const from = monthRange(months[0]).from;
-  const to = monthRange(months[months.length - 1]).to;
+  // Dowolny zakres dat (16.10.2026): ?from=YYYY-MM-DD&to=YYYY-MM-DD (dni włącznie, czas polski, max 366 dni) — wynik pod jednym kluczem "range" zamiast 6 miesięcy.
+  const url = new URL(request.url);
+  const qFrom = url.searchParams.get("from");
+  const qTo = url.searchParams.get("to");
+  const custom = qFrom !== null || qTo !== null;
+  let dayFrom = "";
+  let dayTo = "";
+  if (custom) {
+    if (!isYmd(qFrom) || !isYmd(qTo)) return NextResponse.json({ error: "Podaj zakres dat w formacie RRRR-MM-DD." }, { status: 400 });
+    [dayFrom, dayTo] = qFrom <= qTo ? [qFrom, qTo] : [qTo, qFrom];
+    if ((Date.parse(`${dayTo}T00:00:00Z`) - Date.parse(`${dayFrom}T00:00:00Z`)) / 86_400_000 > 365) return NextResponse.json({ error: "Zakres może obejmować maksymalnie 366 dni." }, { status: 400 });
+  }
+  const months = custom ? ["range"] : lastMonths(6);
+  const { from, to } = custom ? ymdRange(dayFrom, dayTo) : { from: monthRange(months[0]).from, to: monthRange(months[months.length - 1]).to };
   try {
     const acc = new Map<string, Record<string, EmployeeMonth>>();
     let usedFallback = false;
@@ -89,11 +102,11 @@ export async function GET(request: Request) {
         usedFallback = true; // SQL z points_awarded_at jeszcze nie uruchomiony — liczymy po finished_at
         res = await fetchRows(db, s, "finished_at", from, to);
       }
-      addAreaRows(acc, s.area, res.rows || [], months);
+      addAreaRows(acc, s.area, res.rows || [], months, custom ? () => "range" : undefined);
     }
-    const hours = await fetchHours(db, from, to);
+    const hours = await fetchHours(db, from, to, custom ? (d) => (d >= dayFrom && d <= dayTo ? "range" : null) : undefined);
     const employees = Array.from(acc.entries()).map(([email, byMonth]) => ({ email, months: byMonth, hours: hours?.[email] ?? {} }));
-    return NextResponse.json({ ok: true, months, employees, fallbackDate: usedFallback, hasHours: hours !== null });
+    return NextResponse.json({ ok: true, months, employees, fallbackDate: usedFallback, hasHours: hours !== null, ...(custom ? { custom: { from: dayFrom, to: dayTo } } : {}) });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "Błąd liczenia punktacji." }, { status: 500 });
   }
