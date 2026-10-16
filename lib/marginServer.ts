@@ -84,7 +84,8 @@ export async function loadMarginResults(db: SupabaseClient<any, any, any>, opts:
     fetchAll<{ currency: string; rate_date: string; mid: number | string }>((from, to) => db.from("nbp_rates").select("currency, rate_date, mid").in("currency", ["EUR", "DKK"]).range(from, to)),
     fetchAll<BmLine & { invoice_ref: string }>((from, to) => db.from("bm_invoice_lines").select("invoice_ref, invoice_key, order_id, amount, sku, designation").order("id").range(from, to)).catch(() => [] as (BmLine & { invoice_ref: string })[]),
   ]);
-  const counted = rowsRaw.filter((r) => isCountedOrder(r.marketplace, r.status));
+  // Allegro: tylko sprzedaż do Polski w PLN (16.10.2026, na prośbę właściciela — zagranicznej sprzedaży w HUF/CZK/EUR już nie prowadzimy); starsze zamówienia zagraniczne nie wchodzą do Marży
+  const counted = rowsRaw.filter((r) => isCountedOrder(r.marketplace, r.status) && (r.marketplace !== "allegro" || (String(r.currency || "PLN").toUpperCase() === "PLN" && (!r.country_code || r.country_code.toUpperCase() === "PL"))));
   const [parts, purchases, fees] = await Promise.all([
     loadPartsBySerial(db, Array.from(new Set(counted.map((r) => (r.serial_number || "").trim().toUpperCase()).filter(Boolean)))),
     // ile pozycji ma rejestr Towar (źródło cen zakupu od 14.10.2026) — gdy 0, zakładka podpowiada, że ceny zakupu są puste

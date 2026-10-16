@@ -105,7 +105,7 @@ export default function MarketplaceFeesView({ session }: { session: Session }) {
           </div>
         ))}
       <p className="text-[11px] text-inksoft">
-        Allegro: liczymy miesięczną fakturę opłat dla Polski w PLN (seria „/PL/N/PLN/”); faktury „FV26-…” o okrągłych kwotach (220/660/1100 zł brutto) wyglądają na doładowania Allegro Ads, czyli reklamę, i nie są prowizją.
+        Allegro: tylko sprzedaż do Polski i miesięczna faktura opłat w PLN (seria „/PL/N/PLN/”; faktury w HUF/CZK/EUR pomijamy — tam już nie sprzedajemy); faktury „FV26-…” o okrągłych kwotach (220/660/1100 zł brutto) wyglądają na doładowania Allegro Ads, czyli reklamę, i nie są prowizją.
         Erli: obie miesięczne faktury (FV-A i FV-P) liczymy razem jako „prowizję i opłaty” — w bazie nie ma opisów pozycji, więc nie rozdzielamy ich na prowizję i np. przesyłki. Miesiąc faktury to miesiąc rozliczenia z numeru faktury.
       </p>
     </div>

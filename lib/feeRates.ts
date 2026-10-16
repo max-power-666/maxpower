@@ -127,12 +127,12 @@ async function fetchAll<T>(build: (from: number, to: number) => PromiseLike<{ da
   return out;
 }
 
-// Sprzedaż Allegro i Erli: zamówienia liczone jako sprzedaż (isCountedOrder), tylko pozycje w PLN, miesiąc wg czasu polskiego z daty zamówienia.
+// Sprzedaż Allegro i Erli: zamówienia liczone jako sprzedaż (isCountedOrder), tylko pozycje w PLN (Allegro: tylko dostawa do Polski), miesiąc wg czasu polskiego z daty zamówienia.
 export async function loadMarketplaceSales(db: SupabaseClient<any, any, any>, sinceYmd: string): Promise<FeeSales[]> {
   const out: FeeSales[] = [];
   for (const mp of FEE_MARKETPLACES) {
-    const orders = await fetchAll<{ external_id: string; order_date: string | null; status: string }>((from, to) =>
-      db.from("sales_orders").select("external_id, order_date, status").eq("marketplace", mp).gte("order_date", `${sinceYmd}T00:00:00Z`).order("external_id").range(from, to)
+    const orders = await fetchAll<{ external_id: string; order_date: string | null; status: string; country_code: string | null }>((from, to) =>
+      db.from("sales_orders").select("external_id, order_date, status, country_code").eq("marketplace", mp).gte("order_date", `${sinceYmd}T00:00:00Z`).order("external_id").range(from, to)
     );
     const items = await fetchAll<{ external_id: string; item_key: string; price: number | string | null; currency: string | null }>((from, to) =>
       db.from("sales_order_items").select("external_id, item_key, price, currency").eq("marketplace", mp).order("external_id").order("item_key").range(from, to)
@@ -145,6 +145,7 @@ export async function loadMarketplaceSales(db: SupabaseClient<any, any, any>, si
     const agg = new Map<string, { gmv: number; orders: number }>();
     for (const o of orders) {
       if (!o.order_date || !isCountedOrder(mp, o.status)) continue;
+      if (mp === "allegro" && o.country_code && o.country_code.toUpperCase() !== "PL") continue; // tylko sprzedaż do Polski
       const v = byOrder.get(o.external_id);
       if (v === undefined) continue;
       const ym = warsawDate(o.order_date).slice(0, 7);
