@@ -10,15 +10,69 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { bmListingsConfigFromEnv } from "./listings";
 import { bmGetQuantity, bmSetQuantity, groupSold, ownOffers, reducedQuantity, refurbedGetStock, refurbedSetStock, type PendingItem } from "./marketStock";
 import type { RefurbedClient } from "./refurbed";
-import { isCountedOrder, statusBucket } from "./salesOrders";
+import { isCountedOrder, mapBmItems, mapBmToSales, mapRefurbedItems, mapRefurbedToSales, statusBucket } from "./salesOrders";
+import { refurbedListOrders } from "./refurbed";
+
+// Szybka ścieżka (16.10.2026, "zmiana stanu musi się odbywać szybciej"): Back Market nie ma webhooków, więc przy każdym przebiegu (cron co minutę) pytamy oba marketplace'y WPROST o świeże
+// zamówienia (BM: zmienione w ostatnich 30 min, refurbed: złożone w ostatnich 30 min) i nie czekamy na 15-minutową synchronizację zamówień do bazy. Te same mappery co synchronizacja,
+// więc klucze pozycji są identyczne i późniejszy zapis z synchronizacji niczego nie dubluje (pozycje są w dzienniku listing_stock_synced). refurbed ma dodatkowo webhook ION
+// (app/api/webhooks/refurbed-ion): zgłasza numer nowego zamówienia w kilka sekund — wtedy pobieramy je przez GetOrder.
+type FastItem = PendingItem & { order_status: string; order_date: string | null };
+const FAST_WINDOW_MS = 30 * 60_000;
+
+async function fetchBmRecent(): Promise<FastItem[]> {
+  const cfg = bmListingsConfigFromEnv();
+  if (!cfg) return [];
+  const since = new Date(Date.now() - FAST_WINDOW_MS).toISOString().replace(/\.\d{3}Z$/, "Z");
+  const out: FastItem[] = [];
+  for (let page = 1; page <= 3; page++) {
+    const params = new URLSearchParams({ "page-size": "50", page: String(page), date_modification: since });
+    const res = await (cfg.fetchImpl ?? fetch)(`${cfg.baseUrl}/ws/orders?${params.toString()}`, { headers: { Accept: "application/json", "Accept-Language": cfg.lang, Authorization: cfg.auth, "User-Agent": cfg.userAgent }, cache: "no-store", signal: AbortSignal.timeout(20_000) });
+    if (!res.ok) throw new Error(`Back Market (świeże zamówienia): błąd ${res.status}`);
+    const data = await res.json();
+    for (const o of (data.results as any[]) || []) {
+      const sales = mapBmToSales(o);
+      for (const it of mapBmItems(o)) out.push({ marketplace: "backmarket", external_id: it.external_id, item_key: it.item_key, sku: it.sku, order_status: sales.status, order_date: sales.order_date ?? null });
+    }
+    if (!data.next) break;
+  }
+  return out;
+}
+
+async function fetchRefurbedRecent(extraIds: string[]): Promise<FastItem[]> {
+  const token = process.env.REFURBED_API_TOKEN;
+  if (!token) return [];
+  const c: RefurbedClient = { token, userAgent: process.env.REFURBED_UA || "recoo-erp", baseUrl: process.env.REFURBED_BASE_URL || undefined };
+  const orders: any[] = [];
+  let after: string | null = null;
+  for (let page = 0; page < 2; page++) {
+    const r = await refurbedListOrders(c, { filter: { released_at: { ge: new Date(Date.now() - FAST_WINDOW_MS).toISOString() } }, startAfter: after });
+    orders.push(...r.orders);
+    if (!r.hasMore || r.orders.length === 0) break;
+    after = String(r.orders[r.orders.length - 1].id);
+  }
+  for (const id of extraIds) {
+    if (orders.some((o) => String(o.id) === id)) continue;
+    const res = await fetch(`${c.baseUrl ?? "https://api.refurbed.com"}/refb.merchant.v1.OrderService/GetOrder`, { method: "POST", headers: { Authorization: `Plain ${c.token.trim().replace(/^Plain\s+/i, "")}`, "Content-Type": "application/json", Accept: "application/json", "User-Agent": c.userAgent }, body: JSON.stringify({ id }), cache: "no-store", signal: AbortSignal.timeout(20_000) });
+    if (!res.ok) throw new Error(`refurbed (GetOrder ${id}): błąd ${res.status}`);
+    const data = await res.json();
+    if (data?.order) orders.push(data.order);
+  }
+  const out: FastItem[] = [];
+  for (const o of orders) {
+    const sales = mapRefurbedToSales(o);
+    for (const it of mapRefurbedItems(o)) out.push({ marketplace: "refurbed", external_id: it.external_id, item_key: it.item_key, sku: it.sku, order_status: sales.status, order_date: sales.order_date ?? null });
+  }
+  return out;
+}
 
 export type StockSyncSummary = { ran: boolean; reason?: string; processed: number; applied: number; skipped: number; waiting: number; errors: string[] };
 
 const key = (i: { marketplace: string; external_id: string; item_key: string }) => ({ marketplace: i.marketplace, external_id: i.external_id, item_key: i.item_key });
 
-export async function runStockSync(db: SupabaseClient<any, any, any>): Promise<StockSyncSummary> {
+export async function runStockSync(db: SupabaseClient<any, any, any>, opts: { refurbedOrderIds?: string[] } = {}): Promise<StockSyncSummary> {
   const sum: StockSyncSummary = { ran: false, processed: 0, applied: 0, skipped: 0, waiting: 0, errors: [] };
-  const { data: st, error: se } = await db.from("listing_stock_settings").select("enabled").eq("id", 1).maybeSingle();
+  const { data: st, error: se } = await db.from("listing_stock_settings").select("enabled, activated_at").eq("id", 1).maybeSingle();
   if (se) return { ...sum, reason: /listing_stock_settings/.test(se.message) ? "Brak tabel — uruchom supabase/listing-stock-sync.sql." : se.message };
   if (!st?.enabled) return { ...sum, reason: "Synchronizacja stanów jest wyłączona." };
   // blokada
@@ -28,7 +82,29 @@ export async function runStockSync(db: SupabaseClient<any, any, any>): Promise<S
   try {
     const { data: pend, error: pe } = await db.rpc("listing_stock_pending", { p_limit: 500 });
     if (pe) throw new Error(`Odczyt pozycji: ${pe.message}`);
-    const rows = (pend as (PendingItem & { order_status: string })[]) || [];
+    const byKey = new Map<string, PendingItem & { order_status: string }>();
+    for (const r of ((pend as (PendingItem & { order_status: string })[]) || [])) byKey.set(`${r.marketplace}|${r.external_id}|${r.item_key}`, r);
+    // szybka ścieżka: świeże zamówienia wprost z marketplace'ów (tylko złożone po włączeniu synchronizacji i jeszcze nieobsłużone)
+    try {
+      const activatedMs = st.activated_at ? Date.parse(st.activated_at as string) : Date.now();
+      const fast = [...(await fetchBmRecent().catch((e) => { sum.errors.push(String(e.message || e)); return [] as FastItem[]; })), ...(await fetchRefurbedRecent(opts.refurbedOrderIds ?? []).catch((e) => { sum.errors.push(String(e.message || e)); return [] as FastItem[]; }))]
+        .filter((f) => f.order_date && Date.parse(f.order_date) >= activatedMs - 60_000 && !byKey.has(`${f.marketplace}|${f.external_id}|${f.item_key}`));
+      const done = new Set<string>();
+      for (const mp of ["backmarket", "refurbed"]) {
+        const ids = Array.from(new Set(fast.filter((f) => f.marketplace === mp).map((f) => f.external_id)));
+        for (let i = 0; i < ids.length; i += 100) {
+          const { data: led } = await db.from("listing_stock_synced").select("marketplace, external_id, item_key").eq("marketplace", mp).in("external_id", ids.slice(i, i + 100));
+          for (const l of (led as any[]) || []) done.add(`${l.marketplace}|${l.external_id}|${l.item_key}`);
+        }
+      }
+      for (const f of fast) {
+        const k = `${f.marketplace}|${f.external_id}|${f.item_key}`;
+        if (!done.has(k)) byKey.set(k, f);
+      }
+    } catch (e: any) {
+      sum.errors.push(`Szybka ścieżka: ${String(e?.message || e)}`);
+    }
+    const rows = [...byKey.values()];
     const sold: PendingItem[] = [];
     const skipRows: { marketplace: string; external_id: string; item_key: string; action: string; note: string }[] = [];
     for (const r of rows) {

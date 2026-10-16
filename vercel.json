@@ -38,7 +38,7 @@
     },
     {
       "path": "/api/listings/stock-sync",
-      "schedule": "5,20,35,50 * * * *"
+      "schedule": "* * * * *"
     },
     {
       "path": "/api/nbp/sync",

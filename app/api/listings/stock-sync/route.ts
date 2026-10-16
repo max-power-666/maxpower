@@ -4,9 +4,9 @@ import { admin } from "@/lib/parcelServer";
 import { requireRole } from "@/lib/serverAuth";
 import { runStockSync } from "@/lib/stockSyncServer";
 
-// Synchronizacja stanów BM <-> refurbed (16.10.2026). GET = cron co 15 min (Bearer CRON_SECRET; działa tylko po włączeniu przez Admina). POST (Admin/Manager/Księgowa): { run: true } uruchamia przebieg teraz;
+// Synchronizacja stanów BM <-> refurbed (16.10.2026). GET = cron co minutę (Bearer CRON_SECRET; działa tylko po włączeniu przez Admina). POST (Admin/Manager/Księgowa): { run: true } uruchamia przebieg teraz;
 // POST (tylko Admin): { enabled: true|false } włącza/wyłącza synchronizację (włączenie oznacza całą dotychczasową historię zamówień jako obsłużoną).
-export const maxDuration = 120;
+export const maxDuration = 60;
 
 export async function GET(request: Request) {
   if (!(await isAuthorized(request))) return NextResponse.json({ error: "Brak autoryzacji." }, { status: 401 });

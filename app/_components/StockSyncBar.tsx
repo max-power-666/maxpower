@@ -5,7 +5,7 @@ import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 
 // Pasek synchronizacji stanów Back Market <-> refurbed (16.10.2026, Magazyn -> Do wystawienia). Pokazuje, czy automat jest włączony i co zrobił ostatnio; Admin go włącza/wyłącza,
-// Admin/Manager/Księgowa mogą uruchomić przebieg od razu. Logika w lib/stockSyncServer.ts (cron co 15 min).
+// Admin/Manager/Księgowa mogą uruchomić przebieg od razu. Logika w lib/stockSyncServer.ts (sprawdzane co minutę).
 type Settings = { enabled: boolean; activated_at: string | null; activated_by: string | null; last_run_at: string | null; last_result: string | null };
 const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—");
 
@@ -33,7 +33,7 @@ export default function StockSyncBar({ session, isAdmin, canRun }: { session: Se
   }
   async function toggle() {
     const turnOn = !st?.enabled;
-    if (turnOn && !confirm("Włączyć synchronizację stanów Back Market ↔ refurbed?\n\nOd teraz każda sprzedaż sztuki na jednym marketplace'ie zmniejszy ilość oferty z tym samym SKU na drugim (sprawdzane co 15 minut). Dotychczasowe zamówienia nie zmienią żadnych stanów.")) return;
+    if (turnOn && !confirm("Włączyć synchronizację stanów Back Market ↔ refurbed?\n\nOd teraz każda sprzedaż sztuki na jednym marketplace'ie zmniejszy ilość oferty z tym samym SKU na drugim (sprawdzane co minutę; sprzedaż na refurbed po zgłoszeniu webhooka — w kilka sekund). Dotychczasowe zamówienia nie zmienią żadnych stanów.")) return;
     setBusy(true);
     setNote(null);
     try {
@@ -64,7 +64,7 @@ export default function StockSyncBar({ session, isAdmin, canRun }: { session: Se
   if (!st) return null;
   return (
     <div className="text-xs mb-3 flex flex-wrap items-center gap-x-3 gap-y-1">
-      <span title="Sprzedaż sztuki z SKU na jednym marketplace'ie zmniejsza ilość oferty z tym samym SKU na drugim (cron co 15 min).">
+      <span title="Sprzedaż sztuki z SKU na jednym marketplace'ie zmniejsza ilość oferty z tym samym SKU na drugim (sprawdzane co minutę).">
         Synchronizacja stanów BM ↔ refurbed:{" "}
         {st.enabled ? <b className="text-teal">włączona</b> : <b className="text-amber">wyłączona</b>}
         {st.enabled && <span className="text-inksoft"> (od {fmt(st.activated_at)}; ostatni przebieg {fmt(st.last_run_at)}{st.last_result ? ` — ${st.last_result}` : ""})</span>}
