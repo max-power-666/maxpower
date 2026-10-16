@@ -81,7 +81,7 @@ export async function loadMarginResults(db: SupabaseClient<any, any, any>, opts:
       if (range) q = q.gte("order_date", dayBefore(range.from, -1)).lt("order_date", dayBefore(range.to, 2));
       return q.order("order_id").order("position").range(from, to);
     }),
-    fetchAll<{ currency: string; rate_date: string; mid: number | string }>((from, to) => db.from("nbp_rates").select("currency, rate_date, mid").in("currency", ["EUR", "DKK"]).range(from, to)),
+    fetchAll<{ currency: string; rate_date: string; mid: number | string }>((from, to) => db.from("nbp_rates").select("currency, rate_date, mid").in("currency", ["EUR", "DKK", "CZK"]).range(from, to)),
     fetchAll<BmLine & { invoice_ref: string }>((from, to) => db.from("bm_invoice_lines").select("invoice_ref, invoice_key, order_id, amount, sku, designation").order("id").range(from, to)).catch(() => [] as (BmLine & { invoice_ref: string })[]),
   ]);
   // Allegro: tylko sprzedaż do Polski w PLN (16.10.2026, na prośbę właściciela — zagranicznej sprzedaży w HUF/CZK/EUR już nie prowadzimy); starsze zamówienia zagraniczne nie wchodzą do Marży
@@ -97,7 +97,7 @@ export async function loadMarginResults(db: SupabaseClient<any, any, any>, opts:
   const bmRates = deriveBmRates(lines);
   const feeRates: Record<string, { pct: number; window: string[] }> = {};
   if (fees) for (const r of Object.values(fees.rates)) if (r.pct !== null) feeRates[r.marketplace] = { pct: r.pct, window: r.window };
-  const ctx = { eurRates: toRates("EUR"), dkkRates: toRates("DKK"), bmRates, partsBySerial: parts.available ? parts.map : undefined, feeRates };
+  const ctx = { eurRates: toRates("EUR"), dkkRates: toRates("DKK"), czkRates: toRates("CZK"), bmRates, partsBySerial: parts.available ? parts.map : undefined, feeRates };
   // tylko zamówienia, które liczą się jako sprzedaż (bez anulowanych/zwróconych/nieopłaconych — ten sam isCountedOrder co Przegląd)
   const results = counted.map((r) => computeMargin(r, ctx)).filter((r) => inPeriod(r.orderDate, range));
   const data: Loaded = { results, bmRates, invoiceCount: new Set(lines.map((l) => l.invoice_ref)).size, purchasesCount: purchases.count ?? 0, feeRates: fees ? fees.rates : null };

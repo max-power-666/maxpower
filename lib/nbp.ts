@@ -1,10 +1,10 @@
 import { warsawYmd } from "./warsawDate";
 // Kursy walut NBP (zakładka NBP, 01.10.2026) — tabela A (kursy średnie), api.nbp.pl, bez klucza/autoryzacji.
 // Dziś potrzebne do przeliczania wartości zamówień z różnych kanałów na PLN na Przeglądzie (Back Market/
-// refurbed/Octopia/Amazon głównie EUR, część refurbed w DKK, Allegro/Erli w PLN — sprawdzone na żywych danych,
+// refurbed/Octopia/Amazon głównie EUR, część refurbed w DKK i CZK, Allegro/Erli w PLN — sprawdzone na żywych danych,
 // 01.10.2026), ale to osobna, reużywalna zakładka — przydadzą się gdzie indziej.
 
-export const NBP_CURRENCIES = ["EUR", "DKK"] as const;
+export const NBP_CURRENCIES = ["EUR", "DKK", "CZK"] as const; // CZK od 16.10.2026 (zamówienia refurbed z Czech)
 export type NbpCurrency = (typeof NBP_CURRENCIES)[number];
 
 export type NbpRate = { currency: string; rateDate: string; mid: number };

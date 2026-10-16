@@ -5,7 +5,7 @@ import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { NBP_CURRENCIES } from "@/lib/nbp";
 
-// Zakładka NBP (01.10.2026): kursy średnie NBP (tabela A), tylko EUR i DKK na razie (jedyne obce waluty w
+// Zakładka NBP (01.10.2026): kursy średnie NBP (tabela A), EUR, DKK i CZK (od 16.10.2026) (jedyne obce waluty w
 // zamówieniach — patrz lib/salesOrders.ts). Dziś używane do przeliczania wartości zamówień na PLN na Przeglądzie
 // (OverviewSalesDashboard.tsx), ale to osobna, reużywalna zakładka — przydadzą się gdzie indziej. Synchronizacja:
 // cron raz dziennie (vercel.json) + przycisk "Odśwież" tutaj. Zapis tylko przez serwer (service_role).

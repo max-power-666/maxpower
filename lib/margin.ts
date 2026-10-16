@@ -215,6 +215,7 @@ export type ServicePart = { name: string | null; pln: number | null; receivedAt:
 export type MarginContext = {
   eurRates: NbpRate[];
   dkkRates: NbpRate[];
+  czkRates?: NbpRate[]; // korona czeska (zamówienia refurbed z Czech, 16.10.2026)
   bmRates: BmRates | null;
   partsBySerial?: Map<string, ServicePart[]>; // klucz: numer seryjny WIELKIMI literami
   feeRates?: Record<string, { pct: number; window: string[] }>; // Allegro/Erli: średnia stawka z faktur kosztowych (% ceny sprzedaży brutto) i miesiące, z których pochodzi
@@ -223,7 +224,7 @@ export type MarginContext = {
 function toPln(amount: number, currency: string | null | undefined, date: string, ctx: MarginContext): number | null {
   const cur = (currency || "PLN").toUpperCase();
   if (cur === "PLN") return amount;
-  const rates = cur === "EUR" ? ctx.eurRates : cur === "DKK" ? ctx.dkkRates : null;
+  const rates = cur === "EUR" ? ctx.eurRates : cur === "DKK" ? ctx.dkkRates : cur === "CZK" ? ctx.czkRates ?? null : null;
   if (!rates) return null;
   const r = rateBeforeDate(rates, date);
   return r === null ? null : amount * r;
@@ -250,7 +251,7 @@ export function computeMargin(row: MarginDbRow, ctx: MarginContext): MarginResul
   const shareNote = items > 1 ? ` Zamówienie ma ${items} pozycje — koszt zamówienia dzielony wg ceny pozycji (udział ${f2(share * 100)}%).` : "";
   const cur = (row.currency || "PLN").toUpperCase();
   const rateOf = (c: string) => {
-    const rs = c === "EUR" ? ctx.eurRates : c === "DKK" ? ctx.dkkRates : null;
+    const rs = c === "EUR" ? ctx.eurRates : c === "DKK" ? ctx.dkkRates : c === "CZK" ? ctx.czkRates ?? null : null;
     return rs && date ? rateInfoBeforeDate(rs, date) : null;
   };
 
