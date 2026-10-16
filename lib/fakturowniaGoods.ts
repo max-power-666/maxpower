@@ -128,3 +128,24 @@ export function buildPzDocument(g: Pick<GoodsForFakturownia, "vat" | "supplier">
     warehouse_actions: [{ product_id: String(productId), purchase_tax: vat === "V23" ? 23 : 0, price_net: Number(product.purchase_price_net), quantity: 1 }],
   };
 }
+
+// Cena SPRZEDAŻY produktu w Fakturowni (16.10.2026, uwaga księgowej: przy wystawianiu WZ produkt z PZ miał cenę sprzedaży równą cenie zakupu i to dezorientowało). Wysyłamy
+// tylko ceny ZAKUPU, ale Fakturownia po PZ (pozycja z price_net) uzupełnia "Cena netto"/"Cena brutto" produktu. Decyzja: cenę sprzedaży zostawiamy PUSTĄ — wystawiający WZ/fakturę
+// wpisuje ją sam. Czyścimy ją tylko wtedy, gdy wygląda na skopiowaną z zakupu (równa cenie zakupu) — cena wpisana ręcznie przez człowieka nie jest ruszana.
+const toNum = (v: unknown): number | null => {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(String(v).replace(",", "."));
+  return Number.isFinite(n) ? n : null;
+};
+export type SalePriceState = "empty" | "copied_from_purchase" | "custom";
+export function salePriceState(product: { price_net?: unknown; price_gross?: unknown; purchase_price_net?: unknown; purchase_price_gross?: unknown } | null | undefined, expectedPurchaseNet: number | null = null): SalePriceState {
+  const net = toNum(product?.price_net) ?? 0;
+  const gross = toNum(product?.price_gross) ?? 0;
+  if (net <= 0 && gross <= 0) return "empty";
+  const pNet = toNum(product?.purchase_price_net) ?? expectedPurchaseNet; // gdy odpowiedź nie niesie ceny zakupu — cena z Towaru
+  const pGross = toNum(product?.purchase_price_gross);
+  const same = (a: number, b: number | null) => b !== null && Math.abs(a - b) <= 0.01;
+  // skopiowana z zakupu: sprzedażowe netto = zakupowe netto (VM i V23) albo sprzedażowe brutto = zakupowe brutto
+  if ((net > 0 && same(net, pNet)) || (gross > 0 && same(gross, pGross))) return "copied_from_purchase";
+  return "custom";
+}

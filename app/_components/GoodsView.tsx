@@ -365,6 +365,40 @@ export default function GoodsView({ session, members, isAdmin, canSend = false }
     }
   }
 
+  // Naprawa dla pozycji już wysłanych (16.10.2026, uwaga księgowej: cena sprzedaży produktu w Fakturowni skopiowana z zakupu dezorientuje przy WZ): serwer czyści ją tylko tam,
+  // gdzie jest równa cenie zakupu (ręcznie ustawiona zostaje). Paczkami po 20 produktów; po pierwszym błędzie Fakturowni przerywamy.
+  async function clearSalePrices() {
+    if (sending) return;
+    setSending(true);
+    setError("");
+    setSendNote(null);
+    try {
+      const { data, error: err } = await supabase.from("goods_register").select("id").not("fakturownia_product_id", "is", null).order("id").limit(1000);
+      if (err) throw new Error(err.message);
+      const ids = (data || []).map((r: { id: number }) => r.id);
+      if (ids.length === 0) return setSendNote({ ok: true, lines: ["Nie ma pozycji wysłanych do Fakturowni."] });
+      if (!confirm(`Wyczyścić cenę sprzedaży w Fakturowni w ${ids.length} produktach wysłanych z aplikacji?\n\nCzyszczona jest tylko cena skopiowana z ceny zakupu — cena sprzedaży wpisana ręcznie zostaje bez zmian.`)) return;
+      let fixed = 0, skipped = 0, errors = 0;
+      const problems: string[] = [];
+      for (let i = 0; i < ids.length && errors === 0; i += 20) {
+        const res = await fetch("/api/fakturownia/push-goods", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({ ids: ids.slice(i, i + 20), fixSalePrice: true }),
+        });
+        const out = await res.json();
+        if (!res.ok) throw new Error(out?.error || "Błąd Fakturowni.");
+        fixed += out.fixed; skipped += out.skipped; errors += out.errors;
+        for (const r of out.results as { serial: string | null; status: string; message: string }[]) if (r.status === "error" || /ręcznie/.test(r.message)) problems.push(`${r.serial || "?"} — ${r.message}`);
+      }
+      setSendNote({ ok: errors === 0, lines: [`Wyczyszczono cenę sprzedaży: ${fixed}, bez zmian: ${skipped}, błędy: ${errors}${errors ? " (przerwano po pierwszym błędzie)" : ""}.`, ...problems] });
+    } catch (e: any) {
+      setError(e.message || String(e));
+    } finally {
+      setSending(false);
+    }
+  }
+
   // Edycja: dociągamy cały wiersz razem z historią zmian (lista jej nie niesie; bez kolumny history — sam wiersz).
   async function startEdit(r: Row) {
     setError("");
@@ -428,6 +462,7 @@ export default function GoodsView({ session, members, isAdmin, canSend = false }
           </button>
         ))}
         {tab === "skup" && <button onClick={syncBuyback} disabled={syncing} className="ml-auto border border-line bg-white px-3 py-1.5 rounded text-sm font-semibold disabled:opacity-50" title="Dopisz opłacone zamówienia Buyback (to samo robi automat co 15 min)">{syncing ? "Synchronizacja…" : "Odśwież z Buyback"}</button>}
+        {tab === "all" && canPush && <button onClick={clearSalePrices} disabled={sending} className="ml-auto border border-line bg-white px-3 py-1.5 rounded text-sm font-semibold disabled:opacity-50" title="Wyczyść w Fakturowni cenę sprzedaży produktów wysłanych z aplikacji, jeśli jest skopiowana z ceny zakupu (dezorientuje przy WZ)">Wyczyść ceny sprzedaży w Fakturowni</button>}
         {tab !== "all" && <button onClick={() => { setEditRow(null); setAdding((a) => !a); }} className={`${tab === "skup" ? "" : "ml-auto"} bg-ink text-paper px-4 py-1.5 rounded text-sm font-semibold`}>{adding ? "Zamknij formularz" : "+ Dodaj towar"}</button>}
       </div>
 

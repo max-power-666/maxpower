@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { admin } from "@/lib/parcelServer";
 import { requireRole } from "@/lib/serverAuth";
-import { buildFakturowniaProduct, buildPzDocument, exportVat, nameKeys, purchaseGrossForCache, serialKey, VAT_BLOCK_MESSAGE, type GoodsForFakturownia } from "@/lib/fakturowniaGoods";
+import { buildFakturowniaProduct, buildPzDocument, exportVat, nameKeys, purchaseGrossForCache, purchaseNetFromGoods, salePriceState, serialKey, VAT_BLOCK_MESSAGE, type GoodsForFakturownia } from "@/lib/fakturowniaGoods";
 import { warsawYmd } from "@/lib/warsawDate";
 
 // Towar -> Fakturownia (15.10.2026): wysyła wybrane pozycje Towaru do magazynu Fakturowni jako produkty (POST /products.json). Półautomat: przycisk w zakładce Towar
@@ -26,6 +26,35 @@ async function fetchAll<T>(build: (a: number, b: number) => PromiseLike<{ data: 
   return out;
 }
 
+// Cena sprzedaży produktu po PZ (patrz salePriceState): czyta produkt, a gdy cena sprzedaży jest skopiowana z zakupu — czyści ją (PUT price_gross = "") i sprawdza wynik.
+// Nie testowane na żywym koncie: Fakturownia może nie pozwolić na wyczyszczenie ceny przez API — wtedy zwracamy "failed" z opisem, a niczego innego w produkcie nie ruszamy.
+type SaleFix = { state: "cleared" | "already_empty" | "kept_custom" | "failed"; message: string };
+async function clearSalePrice(base: string, token: string, productId: number, expectedPurchaseNet: number | null): Promise<SaleFix> {
+  const url = `${base}/products/${productId}.json`;
+  const get = async () => {
+    const r = await fetch(`${url}?api_token=${encodeURIComponent(token)}`, { cache: "no-store" });
+    if (!r.ok) throw new Error(`odczyt produktu (${r.status})`);
+    return (await r.json()) as Record<string, unknown>;
+  };
+  try {
+    const before = await get();
+    const st = salePriceState(before, expectedPurchaseNet);
+    if (st === "empty") return { state: "already_empty", message: "cena sprzedaży pusta" };
+    if (st === "custom") return { state: "kept_custom", message: `cena sprzedaży ustawiona ręcznie (${before.price_net} netto / ${before.price_gross} brutto) — nie ruszam` };
+    const put = await fetch(url, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ api_token: token, product: { price_gross: "" } }),
+    });
+    if (!put.ok) return { state: "failed", message: `Fakturownia odrzuciła wyczyszczenie ceny sprzedaży (${put.status}): ${(await put.text()).slice(0, 200)}` };
+    const after = await get();
+    if (salePriceState(after, expectedPurchaseNet) === "empty") return { state: "cleared", message: "cena sprzedaży wyczyszczona" };
+    return { state: "failed", message: `Fakturownia nie wyczyściła ceny sprzedaży (zostało ${after.price_net} netto / ${after.price_gross} brutto) — wyczyść ją ręcznie w produkcie` };
+  } catch (e: any) {
+    return { state: "failed", message: `nie udało się sprawdzić/wyczyścić ceny sprzedaży: ${e?.message || e}` };
+  }
+}
+
 export async function POST(request: Request) {
   const db = admin();
   const uid = await requireRole(request, db, ["Admin", "Manager", "Księgowa"]);
@@ -34,7 +63,7 @@ export async function POST(request: Request) {
   const token = process.env.FAKTUROWNIA_API_TOKEN;
   if (!domain || !token) return NextResponse.json({ error: "Brak FAKTUROWNIA_DOMAIN / FAKTUROWNIA_API_TOKEN." }, { status: 500 });
 
-  let body: { ids?: unknown; dryRun?: unknown };
+  let body: { ids?: unknown; dryRun?: unknown; fixSalePrice?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -49,6 +78,26 @@ export async function POST(request: Request) {
     const base = `https://${domain}.fakturownia.pl`;
     const { data: me } = await db.from("members").select("email").eq("user_id", uid).maybeSingle();
     const who = (me?.email as string | undefined) || "app";
+
+    // Tryb naprawczy (16.10.2026): dla pozycji już wysłanych — wyczyść skopiowaną cenę sprzedaży produktu w Fakturowni (nic więcej nie rusza).
+    if (body.fixSalePrice === true) {
+      const { data: sent, error: se } = await db.from("goods_register").select("id, serial, price_pln, fakturownia_product_id").in("id", ids).not("fakturownia_product_id", "is", null);
+      if (se) throw new Error(se.message);
+      const out: Result[] = [];
+      let broken = false;
+      for (const r of (sent || []) as { id: number; serial: string | null; price_pln: number | string | null; fakturownia_product_id: number }[]) {
+        if (broken) {
+          out.push({ id: r.id, serial: r.serial, status: "skipped", message: "Pominięte — poprzednia próba wyczyszczenia nie powiodła się." });
+          continue;
+        }
+        const f = await clearSalePrice(base, token, Number(r.fakturownia_product_id), purchaseNetFromGoods(r));
+        out.push({ id: r.id, serial: r.serial, status: f.state === "failed" ? "error" : f.state === "cleared" ? "sent" : "skipped", message: f.message, productId: Number(r.fakturownia_product_id) });
+        if (f.state === "failed") broken = true;
+        await new Promise((x) => setTimeout(x, 150));
+      }
+      const c = (st: Result["status"]) => out.filter((x) => x.status === st).length;
+      return NextResponse.json({ ok: true, fixed: c("sent"), skipped: c("skipped"), errors: c("error"), results: out });
+    }
 
     const { data: rows, error: re } = await db
       .from("goods_register")
@@ -92,6 +141,7 @@ export async function POST(request: Request) {
 
     const results: Result[] = [];
     const seen = new Set<string>(); // ten sam numer dwa razy w jednej paczce
+    let saleClearBroken = false; // wyczyszczenie ceny sprzedaży nie powiodło się — nie ponawiamy dla kolejnych pozycji paczki
     for (const g of goods) {
       const serial = (g.serial || "").trim();
       const res = (status: Result["status"], message: string, extra: Partial<Result> = {}) => results.push({ id: g.id, serial: serial || null, status, message, ...extra });
@@ -204,7 +254,16 @@ export async function POST(request: Request) {
       // PZ daje stan 1 — od razu do cache magazynu i historii (kolejna synchronizacja potwierdzi)
       await db.from("fakturownia_purchases").upsert({ id: productId, name: payload.name, description: payload.description, purchase_price_gross: purchaseGrossForCache(payload), category_name: catName, stock_level: 1, product_created_at: nowIso, updated_at: nowIso });
       await db.from("fakturownia_stock_cache").upsert({ id: productId, category_id: cat ? cat.id : null, category_name: catName, purchase_price_gross: purchaseGrossForCache(payload), name: payload.name, description: payload.description, product_created_at: nowIso, updated_at: nowIso });
-      res("sent", `${pzOnly ? "Wystawiono PZ" : `Wysłano (produkt ${productId}), PZ`}${zjson.number ? ` ${zjson.number}` : ` ${zjson.id}`}, magazyn ${whName}${warn}.${ue ? ` (nie zapisano znacznika w Towarze: ${ue.message})` : ""}`, { productId });
+      // cena sprzedaży produktu po PZ zostaje pusta (księgowa: dezorientuje przy WZ); przy niepowodzeniu jedna próba na paczkę (pozostałe pozycje bez ponawiania)
+      let saleNote = "";
+      if (!saleClearBroken) {
+        const f = await clearSalePrice(base, token, productId, Number(payload.purchase_price_net));
+        if (f.state === "failed") {
+          saleClearBroken = true;
+          saleNote = ` UWAGA: ${f.message}.`;
+        }
+      } else saleNote = " UWAGA: cena sprzedaży w produkcie może być skopiowana z zakupu — wyczyść ją ręcznie.";
+      res("sent", `${pzOnly ? "Wystawiono PZ" : `Wysłano (produkt ${productId}), PZ`}${zjson.number ? ` ${zjson.number}` : ` ${zjson.id}`}, magazyn ${whName}${warn}.${saleNote}${ue ? ` (nie zapisano znacznika w Towarze: ${ue.message})` : ""}`, { productId });
       await new Promise((r) => setTimeout(r, 150));
     }
     for (const id of ids) if (!goods.some((g) => g.id === id)) results.push({ id, serial: null, status: "skipped", message: "Pozycja nie istnieje." });
