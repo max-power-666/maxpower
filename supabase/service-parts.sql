@@ -184,7 +184,7 @@ grant execute on function service_parts_next_code() to service_role;
 
 -- Kierownik serwisu (i Admin) edytuje WSZYSTKIE dane części (16.10.2026, na prośbę właściciela — "kierownik serwisu może edytować rekordy"): nazwa, kod, dostawca, faktura, ceny, kurs,
 -- status, numer seryjny urządzenia, uwagi. Pozostali zalogowani dalej zmieniają tylko status i uwagi o użyciu. Każda taka edycja trafia do `history` (kto, kiedy, pole: było -> jest) —
--- ceny części zasilają koszt serwisu w Marży, więc zmiany muszą być widoczne. Niezmienne dla wszystkich zalogowanych: źródło, autor importu, data utworzenia i sama historia.
+-- ceny części zasilają koszt serwisu w Marży, więc zmiany muszą być widoczne. Log (16.10.2026: "zmiany zapisujemy w logu") obejmuje też status i uwagi zwykłych serwisantów. Niezmienne dla wszystkich zalogowanych: źródło, autor importu, data utworzenia i sama historia.
 alter table service_parts add column if not exists history jsonb not null default '[]'::jsonb;
 
 -- is_service_lead() zdefiniowane też w service.sql i service-requests.sql — tu powtórzone (create or replace, ta sama treść), żeby plik działał samodzielnie.
@@ -225,15 +225,16 @@ begin
       end if;
     end if;
     new.device_ref := nullif(upper(btrim(new.device_ref)), '');
-    if service_parts_can_edit_all() and coalesce(current_setting('parts.repair_sync', true), '') <> '1' then
-      foreach c in array tracked loop
-        if (to_jsonb(new) -> c) is distinct from (to_jsonb(old) -> c) then
-          changes := changes || jsonb_build_array(jsonb_build_object('field', c, 'from', to_jsonb(old) -> c, 'to', to_jsonb(new) -> c));
-        end if;
-      end loop;
-      if jsonb_array_length(changes) > 0 then
-        new.history := coalesce(old.history, '[]'::jsonb) || jsonb_build_array(jsonb_build_object('action', 'edited', 'by_email', coalesce(auth.jwt() ->> 'email', ''), 'at', now(), 'changes', changes));
+    -- Log obejmuje KAŻDĄ zmianę zalogowanego (status i uwagi serwisanta, edycje kierownika, przypisanie z napraw — to ostatnie z oznaczeniem via = 'naprawa').
+    foreach c in array tracked loop
+      if (to_jsonb(new) -> c) is distinct from (to_jsonb(old) -> c) then
+        changes := changes || jsonb_build_array(jsonb_build_object('field', c, 'from', to_jsonb(old) -> c, 'to', to_jsonb(new) -> c));
       end if;
+    end loop;
+    if jsonb_array_length(changes) > 0 then
+      new.history := coalesce(old.history, '[]'::jsonb) || jsonb_build_array(jsonb_build_object(
+        'action', 'edited', 'by_email', coalesce(auth.jwt() ->> 'email', ''), 'at', now(), 'changes', changes,
+        'via', case when coalesce(current_setting('parts.repair_sync', true), '') = '1' then 'naprawa' else 'lista' end));
     end if;
     new.updated_at := now();
     new.updated_by_email := coalesce(auth.jwt() ->> 'email', old.updated_by_email);

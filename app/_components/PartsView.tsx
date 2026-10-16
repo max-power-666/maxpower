@@ -70,6 +70,7 @@ export default function PartsView({ members, session, canEditAll = false }: { me
   const [reload, setReload] = useState(0);
   const [openSerial, setOpenSerial] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  const [historyId, setHistoryId] = useState<number | null>(null); // historia zmian części (dla każdego)
   const [editId, setEditId] = useState<number | null>(null); // Kierownik serwisu / Admin: edycja całego rekordu części
 
   useEffect(() => {
@@ -201,12 +202,12 @@ export default function PartsView({ members, session, canEditAll = false }: { me
               <th className="p-3">Status</th>
               <th className="p-3" title="Wpisywany w Serwis → Naprawy (kolumna Części) — tu tylko do odczytu">Numer seryjny / IMEI urządzenia</th>
               <th className="p-3">Uwagi</th>
-              {canEditAll && <th className="p-3"></th>}
+              <th className="p-3"></th>
             </tr>
           </thead>
           <tbody>
             {!loading && rows.length === 0 && !error && (
-              <tr><td colSpan={canEditAll ? 10 : 9} className="p-6 text-center text-inksoft text-sm">{search || filter !== "all" ? "Brak wyników." : "Brak części — załaduj dane z arkusza."}</td></tr>
+              <tr><td colSpan={10} className="p-6 text-center text-inksoft text-sm">{search || filter !== "all" ? "Brak wyników." : "Brak części — załaduj dane z arkusza."}</td></tr>
             )}
             {rows.map((r) => (
               <tr key={r.id} className="border-b border-line last:border-0 align-top">
@@ -247,7 +248,10 @@ export default function PartsView({ members, session, canEditAll = false }: { me
                 <td className="p-3">
                   <InlineEditCell value={r.usage_notes} placeholder="Uwagi" className="w-56" multiline onSave={(v) => saveField(r.id, { usage_notes: v })} />
                 </td>
-                {canEditAll && <td className="p-3"><button onClick={() => setEditId(r.id)} className="text-teal text-xs font-semibold" title="Edytuj wszystkie dane części">Edytuj</button></td>}
+                <td className="p-3 whitespace-nowrap">
+                  {canEditAll && <button onClick={() => setEditId(r.id)} className="text-teal text-xs font-semibold mr-3" title="Edytuj wszystkie dane części (z historią zmian)">Edytuj</button>}
+                  <button onClick={() => setHistoryId(r.id)} className="text-inksoft text-xs font-semibold" title="Historia zmian tej części">Historia</button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -267,11 +271,12 @@ export default function PartsView({ members, session, canEditAll = false }: { me
       </div>
       <p className="text-[11px] text-inksoft mt-3 max-w-4xl">
         Cena netto PLN to cena jednostkowa części. Części przypisane do numeru seryjnego wchodzą do kosztu serwisu w zakładce Marża (części przyjęte do dnia zamówienia, bez wierszy „Demontaż”).
-        Dane zakupowe (z arkusza albo z importu faktury) może zmienić tylko Kierownik serwisu (albo Admin) — przyciskiem „Edytuj”, z zapisem w historii zmian części; pozostali zmieniają status i uwagi. Numer seryjny/IMEI urządzenia pojawia się automatycznie, gdy serwisant wpisze kod części w naprawie (Naprawy → kolumna „Części”) — dotyczy części z unikalnym kodem; zmieniasz tu status części i uwagi.
+        Dane zakupowe (z arkusza albo z importu faktury) może zmienić tylko Kierownik serwisu (albo Admin) — przyciskiem „Edytuj” albo wprost w kolumnie Kod; pozostali zmieniają status i uwagi. Każda zmiana zapisuje się w historii części (przycisk „Historia”). Numer seryjny/IMEI urządzenia pojawia się automatycznie, gdy serwisant wpisze kod części w naprawie (Naprawy → kolumna „Części”) — dotyczy części z unikalnym kodem; zmieniasz tu status części i uwagi.
       </p>
 
       {importing && <PartsImportDialog session={session} onClose={() => setImporting(false)} onSaved={() => { setPage(1); setReload((n) => n + 1); }} />}
       {editId !== null && <PartEditDrawer id={editId} members={members} onClose={() => setEditId(null)} onSaved={() => setReload((n) => n + 1)} />}
+      {historyId !== null && <PartEditDrawer id={historyId} members={members} historyOnly onClose={() => setHistoryId(null)} onSaved={() => {}} />}
       {openSerial && <ProductCardDrawer serial={openSerial} members={members} onClose={() => setOpenSerial(null)} />}
     </div>
   );

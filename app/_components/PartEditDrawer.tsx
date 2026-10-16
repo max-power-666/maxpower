@@ -24,7 +24,7 @@ type Full = {
   price_pln: number | null;
   device_ref: string | null;
   usage_notes: string | null;
-  history?: { action: string; by_email: string; at: string; changes: { field: string; from: unknown; to: unknown }[] }[] | null;
+  history?: { action: string; by_email: string; at: string; via?: string; changes: { field: string; from: unknown; to: unknown }[] }[] | null;
 };
 
 const FIELD_LABEL: Record<string, string> = {
@@ -44,7 +44,7 @@ const parseNum = (s: string): number | null | "bad" => {
 };
 const fmtVal = (v: unknown) => (v === null || v === undefined || v === "" ? "—" : String(v));
 
-export default function PartEditDrawer({ id, members, onClose, onSaved }: { id: number; members: MemberLite[]; onClose: () => void; onSaved: () => void }) {
+export default function PartEditDrawer({ id, members, onClose, onSaved, historyOnly = false }: { id: number; members: MemberLite[]; onClose: () => void; onSaved: () => void; historyOnly?: boolean }) {
   const [orig, setOrig] = useState<Full | null>(null);
   const [f, setF] = useState<Record<string, string>>({});
   const [err, setErr] = useState("");
@@ -104,13 +104,14 @@ export default function PartEditDrawer({ id, members, onClose, onSaved }: { id: 
     <div className="fixed inset-0 bg-black/30 flex justify-end z-50" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="bg-paper w-full max-w-xl h-full overflow-y-auto p-6 border-l border-line">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold">Edycja części #{id}</h2>
+          <h2 className="text-lg font-bold">{historyOnly ? "Historia części" : "Edycja części"} #{id}{historyOnly && orig?.name ? <span className="block text-sm font-normal text-inksoft">{orig.name}</span> : null}</h2>
           <button onClick={onClose} className="text-inksoft text-xl leading-none" title="Zamknij">×</button>
         </div>
         {!orig ? (
           <p className="text-sm text-inksoft">{err || "Wczytywanie…"}</p>
         ) : (
           <>
+            {!historyOnly && <>
             <div className="grid grid-cols-2 gap-3">
               <div className="col-span-2"><label className={lab}>Nazwa części *</label><input value={f.name} onChange={(e) => set("name", e.target.value)} className={inp} /></div>
               <div><label className={lab}>Kod części</label><input value={f.part_code} onChange={(e) => set("part_code", e.target.value)} className={`${inp} font-mono`} /></div>
@@ -148,15 +149,16 @@ export default function PartEditDrawer({ id, members, onClose, onSaved }: { id: 
               <button onClick={save} disabled={saving} className="bg-ink text-paper px-4 py-2 rounded text-sm font-semibold disabled:opacity-50">{saving ? "Zapisywanie…" : "Zapisz zmiany"}</button>
               <button onClick={onClose} className="border border-line bg-white px-4 py-2 rounded text-sm font-semibold">Anuluj</button>
             </div>
+            </>}
 
-            <h3 className="text-xs font-semibold text-inksoft mt-8 mb-2">HISTORIA ZMIAN</h3>
+            <h3 className={`text-xs font-semibold text-inksoft mb-2 ${historyOnly ? "" : "mt-8"}`}>HISTORIA ZMIAN</h3>
             {history.length === 0 ? (
-              <p className="text-xs text-inksoft">Brak zmian zapisanych w historii (pozycje z arkusza i z importu mają pustą historię aż do pierwszej edycji).</p>
+              <p className="text-xs text-inksoft">Brak zmian zapisanych w historii (pozycje z arkusza i z importu mają pustą historię aż do pierwszej zmiany; historia działa od uruchomienia service-parts-edit.sql).</p>
             ) : (
               <ol className="space-y-3">
                 {history.map((h, i) => (
                   <li key={i} className="text-xs border-l-2 border-line pl-3">
-                    <div className="text-inksoft">{fmtWarsawDateTime(Date.parse(h.at), true)} · {displayNameForEmail(h.by_email, members)}</div>
+                    <div className="text-inksoft">{fmtWarsawDateTime(Date.parse(h.at), true)} · {displayNameForEmail(h.by_email, members)}{h.via === "naprawa" ? " · przypisanie z napraw" : ""}</div>
                     {(h.changes || []).map((c, j) => (
                       <div key={j}>{FIELD_LABEL[c.field] || c.field}: <span className="text-inksoft">{fmtVal(c.from)}</span> → <span className="font-semibold">{fmtVal(c.to)}</span></div>
                     ))}
