@@ -25,6 +25,7 @@ import RcpWidget from "./_components/RcpWidget";
 import RemindersView from "./_components/RemindersView";
 import GoodsView from "./_components/GoodsView";
 import ListingsView from "./_components/ListingsView";
+import ListingQueueView from "./_components/ListingQueueView";
 import ReminderBanners from "./_components/ReminderBanners";
 import { tracksWorkTime } from "@/lib/rcp";
 import ReturnsView from "./_components/ReturnsView";
@@ -41,7 +42,7 @@ import { displayNameForEmail } from "@/lib/displayName";
 const ROLES = ["Admin", "Manager", "Księgowa", "Magazyn", "Zamówienia", "Serwis", "Kierownik serwisu", "Testy", "Bidder", "Trade-in", "Kierownik trade-in", "Sklep"];
 
 type ViewKey =
-  | "overview" | "inventory" | "sales" | "team" | "service" | "tests" | "tradein" | "orders" | "backlog" | "shipping" | "invoices" | "margin" | "points" | "nbp" | "costs" | "ai" | "rcp" | "returns" | "reminders" | "goods" | "listings"
+  | "overview" | "inventory" | "sales" | "team" | "service" | "tests" | "tradein" | "orders" | "backlog" | "shipping" | "invoices" | "margin" | "points" | "nbp" | "costs" | "ai" | "rcp" | "returns" | "reminders" | "goods" | "listings" | "toList"
   // Recoo Sklep (backoffice sklepu, przełącznik w pasku bocznym):
   | "shop_products" | "shop_stock";
 
@@ -55,6 +56,7 @@ const TABS: { key: ViewKey; label: string; space?: Space }[] = [
   { key: "overview", label: "Przegląd" },
   { key: "inventory", label: "Magazyn" },
   { key: "goods", label: "Towar" }, // rejestr zakupionego towaru z arkusza (VM/V23 i Trade-in), Admin i Manager (10.10.2026)
+  { key: "toList", label: "Do wystawienia" }, // urządzenia gotowe do wystawienia (skaner) + sugerowana cena na Back Market i refurbed (16.10.2026)
   { key: "listings", label: "Listingi" }, // oferty wystawione na Back Market i refurbed (13.10.2026), Admin i Manager
   { key: "sales", label: "Zamówienia" },
   { key: "team", label: "Zespół" },
@@ -82,7 +84,7 @@ const TABS: { key: ViewKey; label: string; space?: Space }[] = [
 const NAV_GROUPS: { title: string | null; keys: ViewKey[] }[] = [
   { title: null, keys: ["overview"] },
   { title: "Sprzedaż", keys: ["sales", "shipping", "returns"] },
-  { title: "Magazyn", keys: ["inventory", "goods", "listings"] },
+  { title: "Magazyn", keys: ["inventory", "goods", "toList", "listings"] },
   { title: "Serwis", keys: ["service", "tests"] },
   { title: "Skup", keys: ["orders", "tradein"] },
   { title: "Finanse", keys: ["invoices", "costs", "margin", "nbp"] },
@@ -127,10 +129,10 @@ function navSections(space: Space, visible: ViewKey[]): { title: string | null; 
 // twardo zablokowane, tylko inny domyślny zestaw wg roli, jak każda inna zakładka.
 const ROLE_ACCESS: Record<string, ViewKey[]> = {
   // "ai" (asystent AI, 03.10.2026) — na tym etapie TYLKO Admin (także serwer: app/api/ai/ask); Manager go nie ma.
-  Admin: ["overview", "inventory", "goods", "listings", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "costs", "margin", "points", "nbp", "ai", "rcp", "returns", "reminders", "shop_products", "shop_stock"],
-  Manager: ["overview", "inventory", "goods", "listings", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "costs", "margin", "points", "nbp", "rcp", "returns", "shop_products", "shop_stock"], // wszystko (poza AI); Zespół tylko do odczytu, usuwa tylko Admin
-  Księgowa: ["overview", "inventory", "goods", "listings", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "costs", "margin", "points", "nbp", "rcp", "returns", "shop_products", "shop_stock"], // 14.10.2026: na razie dokładnie jak Manager (na prośbę właściciela)
-  Magazyn: ["inventory", "backlog", "rcp", "returns"],
+  Admin: ["overview", "inventory", "goods", "toList", "listings", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "costs", "margin", "points", "nbp", "ai", "rcp", "returns", "reminders", "shop_products", "shop_stock"],
+  Manager: ["overview", "inventory", "goods", "toList", "listings", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "costs", "margin", "points", "nbp", "rcp", "returns", "shop_products", "shop_stock"], // wszystko (poza AI); Zespół tylko do odczytu, usuwa tylko Admin
+  Księgowa: ["overview", "inventory", "goods", "toList", "listings", "sales", "team", "service", "tests", "tradein", "orders", "backlog", "shipping", "invoices", "costs", "margin", "points", "nbp", "rcp", "returns", "shop_products", "shop_stock"], // 14.10.2026: na razie dokładnie jak Manager (na prośbę właściciela)
+  Magazyn: ["inventory", "toList", "backlog", "rcp", "returns"],
   Zamówienia: ["sales", "shipping", "invoices", "backlog", "rcp", "returns"],
   // Serwis i Kierownik serwisu (08.10.2026): dodatkowo "sales" — wgląd w Zamówienia BEZ edycji (readOnly) i Zapotrzebowanie, które serwis przyjmuje.
   Serwis: ["service", "sales", "backlog", "rcp", "returns"],
@@ -992,6 +994,7 @@ export default function Home() {
 
           {view === "margin" && <MarginView session={session} members={members} />}
           {view === "goods" && <GoodsView session={session} members={members} isAdmin={role === "Admin"} canSend={role === "Admin" || role === "Manager" || role === "Księgowa"} />}
+          {view === "toList" && <ListingQueueView session={session} members={members} />}
           {view === "listings" && <ListingsView session={session} />}
           {view === "points" && <PointsView session={session} members={members} />}
 
