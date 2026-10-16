@@ -33,7 +33,7 @@ async function loadPartsBySerial(db: SupabaseClient<any, any, any>, serials: str
       for (const r of (data as PartRow[]) || []) byId.set(r.id, r);
     };
     for (let i = 0; i < chunks.length; i += 6) await Promise.all(chunks.slice(i, i + 6).map(runChunk));
-    const multi = await db.from("service_parts").select(SEL).or("device_ref.like.*,*,device_ref.like.* *,device_ref.like.*;*").limit(5000);
+    const multi = await db.from("service_parts").select(SEL).or('device_ref.like."*,*",device_ref.like."* *",device_ref.like."*;*"').limit(5000);
     if (multi.error) throw new Error(multi.error.message);
     for (const r of (multi.data as PartRow[]) || []) byId.set(r.id, r);
     const want = new Set(serials);
@@ -47,8 +47,10 @@ async function loadPartsBySerial(db: SupabaseClient<any, any, any>, serials: str
       }
     }
     return { map, available: true };
-  } catch {
-    return { map, available: false };
+  } catch (e: any) {
+    // brak tabeli (nieuruchomione service-parts.sql) = serwis 0 jak dotąd; każdy INNY błąd ma być widoczny, a nie po cichu zerować koszt serwisu (błąd z 16.10.2026: zapytanie o wiele numerów miało zły zapis)
+    if (/service_parts/.test(String(e?.message)) && /does not exist|schema cache|42P01|PGRST205/.test(String(e?.message))) return { map, available: false };
+    throw e;
   }
 }
 
