@@ -11,7 +11,9 @@ import { REFURBED_BASE_URL, type RefurbedClient } from "./refurbed";
 export type MarketInfo = {
   market: string; // kod rynku (FR, DE, …)
   ours: number | null; // nasza cena w tym rynku
-  minPrice?: number | null; // nasza cena minimalna w tym rynku (Back Market: min_price automatu)
+  minPrice?: number | null; // nasza cena minimalna w tym rynku (Back Market: min_price automatu; refurbed: min_price rynku)
+  override?: boolean; // refurbed: cena kraju ustawiona RĘCZNIE (poza automatem, przełącznik "Override" w panelu)
+  visibility?: string | null; // refurbed: FULL / NONE / LIMITED / HIDDEN
   currency: string | null;
   won: boolean | null; // czy mamy Backbox/BuyBox (null = nieznane)
   priceToWin: number | null; // cena, którą trzeba ustawić, żeby wygrać
@@ -94,7 +96,8 @@ export const rfUrl = (c: RefurbedClient, method: string) => `${c.baseUrl ?? REFU
 // INELIGIBLE / UNSPECIFIED = nie wiadomo.
 export function mapRefurbedMarkets(offer: any): MarketInfo[] {
   const by = new Map<string, MarketInfo>();
-  for (const list of [offer?.calculated_market_prices, offer?.set_market_prices]) {
+  const sources: [any, boolean][] = [[offer?.calculated_market_prices, false], [offer?.set_market_prices, true]];
+  for (const [list, fromSet] of sources) {
     for (const mp of Array.isArray(list) ? list : []) {
       const code = String(mp?.market_code || "");
       if (!code) continue;
@@ -103,6 +106,9 @@ export function mapRefurbedMarkets(offer: any): MarketInfo[] {
       by.set(code, {
         market: code,
         ours: num(mp.price),
+        minPrice: num(mp.min_price),
+        override: fromSet || mp.is_calculated === false,
+        visibility: typeof mp.visibility === "string" && mp.visibility !== "UNSPECIFIED" ? mp.visibility : null,
         currency: typeof mp.currency_code === "string" && mp.currency_code !== "UNSPECIFIED" ? mp.currency_code : null,
         won: state === "WON" || state === "SHOULD_WIN" ? true : state === "ELIGIBLE" || state === "WON_ELSEWHERE" ? false : null,
         priceToWin: num(info.suggested_offer_price),
@@ -132,4 +138,23 @@ export async function refurbedSetReferencePrice(c: RefurbedClient, offerId: stri
   );
   const data = await res.json().catch(() => null);
   return { price: num(data?.offer?.reference_price), minPrice: num(data?.offer?.reference_min_price) };
+}
+
+// Usunięcie RĘCZNEJ ceny kraju (override): kraj wraca do ceny wyliczanej z ceny referencyjnej i minimum (MarketOfferService/DeleteMarketOffer).
+export async function refurbedDeleteMarketOffer(c: RefurbedClient, offerId: string, marketCode: string): Promise<void> {
+  const doFetch = c.fetchImpl ?? fetch;
+  await withRetry(
+    doFetch,
+    `${c.baseUrl ?? REFURBED_BASE_URL}/refb.merchant.v1.MarketOfferService/DeleteMarketOffer`,
+    { method: "POST", headers: rfHeaders(c), body: JSON.stringify({ identifier: { offer_id: { id: offerId }, market_code: marketCode } }) },
+    "refurbed (usunięcie override)",
+    c.timeoutMs
+  );
+}
+// Odczyt pojedynczej oferty (do walidacji po stronie serwera): zwraca ceny krajów z flagą override.
+export async function refurbedGetOfferMarkets(c: RefurbedClient, offerId: string): Promise<{ markets: MarketInfo[]; referencePrice: number | null }> {
+  const doFetch = c.fetchImpl ?? fetch;
+  const res = await withRetry(doFetch, rfUrl(c, "GetOffer"), { method: "POST", headers: rfHeaders(c), body: JSON.stringify({ identifier: { id: offerId } }) }, "refurbed (GetOffer)", c.timeoutMs);
+  const data = await res.json();
+  return { markets: mapRefurbedMarkets(data?.offer), referencePrice: num(data?.offer?.reference_price) };
 }

@@ -367,6 +367,31 @@ export default function ListingQueueView({ session, members, canPrice = false, i
     }
   }
 
+  // refurbed: usunięcie ręcznych cen krajów (override) — kraj wraca do automatu (cena referencyjna + minimum). Po potwierdzeniu; serwer sam sprawdza, które kraje faktycznie mają override.
+  async function removeOverrides(o: Offer, markets: MarketInfo[]) {
+    const key = offerKey("refurbed", o.externalId);
+    const lines = markets.map((x) => `${x.market}: cena ${x.ours ?? "—"} / min ${x.minPrice ?? "—"}`).join("\n");
+    if (!confirm(`Usunąć ręczne ceny (override) w ${markets.length} krajach oferty refurbed?\n\nSKU: ${o.sku}\n${lines}\n\nKraje wrócą do ceny z automatu (cena referencyjna ${o.price ?? "—"}, minimum ${o.minPrice ?? "—"}). To zmienia PRAWDZIWE ceny na refurbed.`)) return;
+    setPricing(key);
+    setPriceNote(null);
+    try {
+      const res = await fetch("/api/listings/market-overrides", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ externalId: o.externalId, markets: markets.map((x) => x.market), confirm: true, reason: "Do wystawienia: powrót krajów do automatu" }) });
+      const data = await res.json();
+      if (!res.ok && !data?.results) throw new Error(data?.error || "Nie udało się usunąć override.");
+      const fails = (data.results as { market: string; ok: boolean; error?: string }[]).filter((r) => !r.ok);
+      setPriceNote({ ok: fails.length === 0, text: `refurbed ${o.sku}: usunięto override w ${data.removed} krajach${data.skipped ? ` (${data.skipped} już bez override)` : ""}${fails.length ? `; błędy: ${fails.map((f) => `${f.market} (${f.error})`).slice(0, 3).join(" | ")}` : ""}.` });
+      setMkt((p) => {
+        const n = new Map(p);
+        n.delete(key);
+        return n;
+      });
+    } catch (e: any) {
+      setPriceNote({ ok: false, text: `refurbed: ${e.message || e}` });
+    } finally {
+      setPricing(null);
+    }
+  }
+
   // Back Market: "Ustaw automat" dla WSZYSTKICH aktywnych krajów oferty (ceny per kraj, 16.10.2026). Najpierw pobiera rynki oferty z Backbox, jeśli ich jeszcze nie mamy, potem okno ze zmianami.
   async function applyBmAuto(g: Group, o: Offer) {
     const key = offerKey("backmarket", o.externalId);
@@ -648,6 +673,49 @@ export default function ListingQueueView({ session, members, canPrice = false, i
                     )}
                   </div>
                 )}
+                {mp === "refurbed" && m && !m.error && plan && (() => {
+                  const rows = m.markets.filter((x) => x.state || x.override);
+                  if (rows.length === 0) return null;
+                  const floor = plan.band.floor;
+                  const won = rows.filter((x) => x.won === true);
+                  const elig = rows.filter((x) => x.state === "ELIGIBLE");
+                  const winnable = elig.filter((x) => x.priceToWin !== null && x.priceToWin >= floor);
+                  const unprofitable = elig.filter((x) => x.priceToWin !== null && x.priceToWin < floor);
+                  const overrides = rows.filter((x) => x.override);
+                  return (
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                        <span>Kraje: <b className="text-teal">wygrane {won.length}</b>
+                          {winnable.length > 0 && <> · <b className="text-amber" title="Sugerowana cena do wygrania jest nie niższa niż nasza dolna granica — popraw minimum (Ustaw automat) albo usuń override">do wygrania {winnable.length}</b></>}
+                          {unprofitable.length > 0 && <> · <span className="text-inksoft" title="Sugerowana cena do wygrania jest poniżej naszej dolnej granicy opłacalności — nie schodzimy">poza opłacalnością {unprofitable.length}</span></>}
+                          {overrides.length > 0 && <> · <b className="text-rust" title="Ręczna cena kraju — poza automatem refurbed">ręczna cena (override) {overrides.length}</b></>}
+                        </span>
+                        {canPrice && overrides.length > 0 && (
+                          <button onClick={() => removeOverrides(o, overrides)} disabled={busyKey(o)} className="ml-auto border border-rust text-rust px-2.5 py-1 rounded font-semibold disabled:opacity-50">
+                            {busyKey(o) ? "Usuwam…" : `Usuń override (${overrides.length})`}
+                          </button>
+                        )}
+                      </div>
+                      <details>
+                        <summary className="cursor-pointer text-inksoft">Szczegóły krajów ({rows.length})</summary>
+                        <table className="mt-1 font-mono w-full">
+                          <thead><tr className="text-inksoft text-left"><th className="font-normal pr-3">Kraj</th><th className="font-normal pr-3">Stan</th><th className="font-normal pr-3">Cena / min</th><th className="font-normal pr-3">Do wygrania</th><th className="font-normal">Uwagi</th></tr></thead>
+                          <tbody>
+                            {rows.map((x) => (
+                              <tr key={x.market} className={x.override ? "text-rust" : ""}>
+                                <td className="pr-3">{x.market}</td>
+                                <td className="pr-3">{x.state || "—"}</td>
+                                <td className="pr-3">{x.ours ?? "—"} / {x.minPrice ?? "—"}</td>
+                                <td className="pr-3">{x.priceToWin ?? "—"}</td>
+                                <td className="font-sans">{[x.override ? "override" : "", x.state === "ELIGIBLE" && x.priceToWin !== null ? (x.priceToWin >= floor ? "do wygrania" : "poza opłacalnością") : "", x.visibility && x.visibility !== "FULL" ? `widoczność ${x.visibility}` : ""].filter(Boolean).join(" · ")}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </details>
+                    </div>
+                  );
+                })()}
                 {showStrategy && dec && (
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                     <span title={dec.reason}>
