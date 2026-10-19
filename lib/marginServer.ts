@@ -1,7 +1,7 @@
 // Wspólne, serwerowe ładowanie i liczenie marży (używają go route'y margin/list i margin/summary — jedna definicja, te same liczby w zakładce Marża i na Przeglądzie).
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isCountedOrder } from "@/lib/salesOrders";
-import { computeMargin, deriveBmRates, inPeriod, MARGIN_MARKETPLACES, type BmLine, type BmRates, type MarginDbRow, type MarginResult, type ServicePart } from "@/lib/margin";
+import { computeMargin, deriveBmRates, bmOrderExtras, inPeriod, MARGIN_MARKETPLACES, type BmLine, type BmRates, type MarginDbRow, type MarginResult, type ServicePart } from "@/lib/margin";
 import type { NbpRate } from "@/lib/nbp";
 import { loadFeeRates, type FeeRateResult } from "@/lib/feeRates";
 
@@ -97,7 +97,7 @@ export async function loadMarginResults(db: SupabaseClient<any, any, any>, opts:
   const bmRates = deriveBmRates(lines);
   const feeRates: Record<string, { pct: number; window: string[] }> = {};
   if (fees) for (const r of Object.values(fees.rates)) if (r.pct !== null) feeRates[r.marketplace] = { pct: r.pct, window: r.window };
-  const ctx = { eurRates: toRates("EUR"), dkkRates: toRates("DKK"), czkRates: toRates("CZK"), bmRates, partsBySerial: parts.available ? parts.map : undefined, feeRates };
+  const ctx = { eurRates: toRates("EUR"), dkkRates: toRates("DKK"), czkRates: toRates("CZK"), bmRates, bmOrderExtras: bmOrderExtras(lines), partsBySerial: parts.available ? parts.map : undefined, feeRates };
   // tylko zamówienia, które liczą się jako sprzedaż (bez anulowanych/zwróconych/nieopłaconych — ten sam isCountedOrder co Przegląd)
   const results = counted.map((r) => computeMargin(r, ctx)).filter((r) => inPeriod(r.orderDate, range));
   const data: Loaded = { results, bmRates, invoiceCount: new Set(lines.map((l) => l.invoice_ref)).size, purchasesCount: purchases.count ?? 0, feeRates: fees ? fees.rates : null };

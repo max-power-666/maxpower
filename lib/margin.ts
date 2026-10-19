@@ -157,9 +157,27 @@ export type BmRates = {
   paymentPct: number; // % ceny sprzedaży: opłata płatnicza ("payment_fees") — średnia z faktur (regulamin: 1%)
   ccbmFixedEur: number; // € za pozycję: Customer Care by Back Market ("ccbm_fees") dla konsol i reszty — kwota stała, nie procent
   ccbmAccessoryEur: number; // € za pozycję CCBM dla akcesoriów (znacznie niższa)
+  adjustmentFeePct: number; // % ceny sprzedaży: "Adjustment fee" (dp_adjustment_fee, netto po zwrotach tej opłaty) — średnia z faktur; dotyczy zamówień, których jeszcze nie ma na fakturze
   orders: number; // z ilu zamówień policzono
   invoices: string[]; // numery faktur wzięte do średnich
 };
+
+// Per zamówienie z WSZYSTKICH wgranych faktur (19.10.2026): "Adjustment fee" (dp_adjustment_fee + jej zwrot dp_adjustment_fee_refund) i zwroty ("refunds").
+// Korekta dynamicznej ceny (sales_dp_adjustment) JEST już w naszej cenie sprzedaży (cena zamówienia = faktura "sales" + korekta), natomiast opłata od niej (ok. 83% korekty)
+// jest realnym kosztem — wcześniej nie była odejmowana, więc marża takich zamówień była zawyżona o tę kwotę.
+export function bmOrderExtras(lines: BmLine[]): Map<string, { adjFee: number; refunds: number }> {
+  const m = new Map<string, { adjFee: number; refunds: number }>();
+  for (const l of lines) {
+    if (!l.order_id) continue;
+    const k = l.invoice_key;
+    if (k !== "dp_adjustment_fee" && k !== "dp_adjustment_fee_refund" && k !== "refunds") continue;
+    const e = m.get(l.order_id) || { adjFee: 0, refunds: 0 };
+    if (k === "refunds") e.refunds += Number(l.amount);
+    else e.adjFee += Number(l.amount);
+    m.set(l.order_id, e);
+  }
+  return m;
+}
 
 // Średnie z wgranych faktur: z ostatnich `weeks` tygodni faktur (numer zaczyna się od daty RRRRMMDD), tylko zamówienia SPRZEDANE i niezwrócone (zwroty mają ujemne "sales"
 // i kredyty prowizji — wypaczyłyby średnią). CCBM liczymy osobno dla akcesoriów (SKU z wiersza "sales" zamówienia) i dla pozostałych. Zwraca null, gdy nie ma z czego liczyć.
@@ -182,13 +200,15 @@ export function deriveBmRates(lines: BmLine[], weeks = 8): BmRates | null {
     byOrder.set(l.order_id, o);
     if (l.invoice_key === "sales" && l.sku) skuOf.set(l.order_id, l.sku);
   }
-  let sales = 0, comm = 0, pay = 0, orders = 0;
+  let sales = 0, comm = 0, pay = 0, adjFee = 0, adjBase = 0, orders = 0;
   for (const o of byOrder.values()) {
     if (!(o.sales > 0) || o.refunds) continue;
     orders++;
     sales += o.sales;
     comm += -(o.sales_fees || 0);
     pay += -(o.payment_fees || 0);
+    adjFee += -((o.dp_adjustment_fee || 0) + (o.dp_adjustment_fee_refund || 0));
+    adjBase += o.sales + (o.sales_dp_adjustment || 0); // cena sprzedaży w naszym systemie = faktura "sales" + korekta dynamicznej ceny
   }
   let ccbmMain = 0, ccbmMainN = 0, ccbmAcc = 0, ccbmAccN = 0;
   for (const l of inWindow) {
@@ -206,6 +226,7 @@ export function deriveBmRates(lines: BmLine[], weeks = 8): BmRates | null {
   return {
     commissionPct: (comm / sales) * 100,
     paymentPct: (pay / sales) * 100,
+    adjustmentFeePct: adjBase > 0 ? (adjFee / adjBase) * 100 : 0,
     ccbmFixedEur: ccbmMainN > 0 ? ccbmMain / ccbmMainN : 6.99,
     ccbmAccessoryEur: ccbmAccN > 0 ? ccbmAcc / ccbmAccN : 1.99,
     orders,
@@ -222,6 +243,7 @@ export type MarginContext = {
   dkkRates: NbpRate[];
   czkRates?: NbpRate[]; // korona czeska (zamówienia refurbed z Czech, 16.10.2026)
   bmRates: BmRates | null;
+  bmOrderExtras?: Map<string, { adjFee: number; refunds: number }>; // Back Market: per zamówienie z wgranych faktur — netto "Adjustment fee" (ujemne = koszt) i zwroty (ujemne), €
   partsBySerial?: Map<string, ServicePart[]>; // klucz: numer seryjny WIELKIMI literami
   feeRates?: Record<string, { pct: number; window: string[] }>; // Allegro/Erli: średnia stawka z faktur kosztowych (% ceny sprzedaży brutto) i miesiące, z których pochodzi
 };
@@ -426,19 +448,23 @@ export function computeMargin(row: MarginDbRow, ctx: MarginContext): MarginResul
       // dokładnie z faktury: prowizja + opłata płatnicza (+ CCBM, a gdy jeszcze go nie ma na żadnej fakturze — średnia stała); wartości ujemne = koszt
       const ccbm = num(row.bm_ccbm_fees);
       const pay = num(row.bm_payment_fees) ?? 0;
-      const eurOrder = -(salesFees + pay) + (ccbm !== null ? -ccbm : 0);
+      const extras = ctx.bmOrderExtras?.get(row.order_id);
+      const adj = extras?.adjFee ?? 0; // ujemne = koszt
+      const eurOrder = -(salesFees + pay) + (ccbm !== null ? -ccbm : 0) - adj;
       const kindCcbm = ctx.bmRates ? (bmKind(row.sku, row.product_name) === "accessory" ? ctx.bmRates.ccbmAccessoryEur : ctx.bmRates.ccbmFixedEur) : 0;
       const eurItem = eurOrder * share + (ccbm === null ? kindCcbm : 0);
       commissionPln = toPln(eurItem, "EUR", date, ctx);
       commissionSource = "faktura";
-      commNote = `Dokładnie z faktury Back Market (zamówienie): prowizja ${f2(-salesFees)} € + opłata płatnicza ${f2(-pay)} € + CCBM ${ccbm !== null ? f2(-ccbm) + " €" : `${f2(kindCcbm)} € (jeszcze niezafakturowane — średnia)`} = ${f2(-(salesFees + pay) + (ccbm !== null ? -ccbm : kindCcbm))} €${rateTxt}.${shareNote}`;
+      commNote = `Dokładnie z faktury Back Market (zamówienie): prowizja ${f2(-salesFees)} € + opłata płatnicza ${f2(-pay)} € + CCBM ${ccbm !== null ? f2(-ccbm) + " €" : `${f2(kindCcbm)} € (jeszcze niezafakturowane — średnia)`} ${adj !== 0 ? `+ Adjustment fee ${f2(-adj)} € (opłata od korekty dynamicznej ceny) ` : ""}= ${f2(-(salesFees + pay) + (ccbm !== null ? -ccbm : kindCcbm) - adj)} €${rateTxt}.${shareNote}`;
+      if (extras && extras.refunds !== 0) flags.push(`zwrot na fakturze BM: ${f2(-extras.refunds)} € — nieuwzględniony w marży`);
     } else if (price !== null && cur === "EUR") {
       // zamówienie jeszcze bez faktury: stawka WG REGUŁ (kraj, okres programu Accelerator, rodzaj produktu) + opłata płatnicza (średnia z faktur albo 1% z regulaminu)
       // + stała opłata CCBM za pozycję (średnia z faktur albo 6,99 € / 1,99 € dla akcesoriów); działa też bez wgranych faktur — wtedy wartości z regulaminu
       const c = bmCommissionPct({ sku: row.sku, title: row.product_name, country: row.country_code, date });
       const payPct = ctx.bmRates?.paymentPct ?? 1;
       const ccbm = c.kind === "accessory" ? (ctx.bmRates?.ccbmAccessoryEur ?? 1.99) : (ctx.bmRates?.ccbmFixedEur ?? 6.99);
-      const eur = price * ((c.pct + payPct) / 100) + ccbm;
+      const adjPct = ctx.bmRates?.adjustmentFeePct ?? 0;
+      const eur = price * ((c.pct + payPct + adjPct) / 100) + ccbm;
       commissionPln = toPln(eur, "EUR", date, ctx);
       commissionSource = "szacunek";
       const why =
@@ -453,7 +479,7 @@ export function computeMargin(row: MarginDbRow, ctx: MarginContext): MarginResul
                 ? `smartwatch (nie Apple) do ${row.country_code} w okresie rozszerzonego programu Accelerator (1.09–30.11.2026) — 0% prowizji`
                 : `smartwatch (nie Apple)${row.country_code && BM_ACCELERATOR_SMARTWATCH.markets.includes(row.country_code.toUpperCase()) ? " poza okresem programu Accelerator" : ` do ${row.country_code || "nieznanego kraju"} (poza FR/DE/ES/IT)`} — stawka standardowa 11%`
               : "produkt spoza konsol — stawka standardowa 11%";
-      commNote = `SZACUNEK (zamówienia nie ma jeszcze na wgranej fakturze): ${f2(price)} € × (${c.pct}% prowizji [${why}] + ${f2(payPct)}% opłaty płatniczej) + CCBM ${f2(ccbm)} € = ${f2(eur)} €${rateTxt}.`;
+      commNote = `SZACUNEK (zamówienia nie ma jeszcze na wgranej fakturze): ${f2(price)} € × (${c.pct}% prowizji [${why}] + ${f2(payPct)}% opłaty płatniczej + ${f2(adjPct)}% średniej Adjustment fee) + CCBM ${f2(ccbm)} € = ${f2(eur)} €${rateTxt}.`;
     }
   }
   if (commissionPln === null) flags.push("brak prowizji");
