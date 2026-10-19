@@ -221,7 +221,20 @@ async function octopiaRequest(cfg: OctopiaConfig, token: string, method: string,
   return { status: res.status, headers: res.headers, json };
 }
 
-export type OctopiaPriceResult = { offerId: string; ok: boolean; message: string; sellerExternalReference?: string; verifiedPrice?: number | null };
+// Ponawia żądanie przy błędach serwerowych/limicie (429, 5xx — w tym 504 z bramy Octopii): do 3 prób z rosnącą przerwą.
+async function octopiaRequestRetry(cfg: OctopiaConfig, token: string, sleep: (ms: number) => Promise<void>, method: string, path: string, opts: { body?: unknown; headers?: Record<string, string> } = {}) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await octopiaRequest(cfg, token, method, path, opts);
+    } catch (e: any) {
+      const retriable = e instanceof OctopiaError && (e.status === 429 || (e.status ?? 0) >= 500);
+      if (!retriable || attempt >= 3) throw e;
+      await sleep(1500 * attempt);
+    }
+  }
+}
+
+export type OctopiaPriceResult ={ offerId: string; ok: boolean; message: string; sellerExternalReference?: string; verifiedPrice?: number | null };
 export type OctopiaPriceBatch = { packageId: string | null; packageState: string | null; results: OctopiaPriceResult[] };
 
 export function octopiaTaxesForRequest(taxes: unknown): { code: string; value: number }[] | null {
@@ -277,8 +290,15 @@ export async function octopiaSetPrices(cfg: OctopiaConfig, changes: { offerId: s
   const loc = created.headers.get("content-location") || created.headers.get("location") || "";
   const packageId = (loc.split("/").filter(Boolean).pop() || created.json?.packageId || "").toString();
   if (!packageId) throw new OctopiaError("Cdiscount utworzyło paczkę, ale nie zwróciło jej identyfikatora (Content-Location).");
-  await octopiaRequest(cfg, token, "POST", `/offer-packages/${encodeURIComponent(packageId)}/offer-requests`, { body: requests });
-  await octopiaRequest(cfg, token, "PATCH", `/offer-packages/${encodeURIComponent(packageId)}`, { body: { state: "Ready" } });
+  await octopiaRequestRetry(cfg, token, sleep, "POST", `/offer-packages/${encodeURIComponent(packageId)}/offer-requests`, { body: requests });
+  // PATCH Ready bywa kończony przez bramę Octopii błędem 504 mimo że paczka została przyjęta (19.10.2026: pierwszy przebieg automatu) — ponawiamy, a gdy nadal błąd, sprawdzamy stan paczki:
+  // jeśli nie jest już "WaitingForCompletion", to Cdiscount ją przyjął i czekamy na wynik jak zwykle.
+  try {
+    await octopiaRequestRetry(cfg, token, sleep, "PATCH", `/offer-packages/${encodeURIComponent(packageId)}`, { body: { state: "Ready" } });
+  } catch (e) {
+    const st = await octopiaRequest(cfg, token, "GET", `/offer-packages/${encodeURIComponent(packageId)}`).then((r) => r.json?.state as string | undefined).catch(() => undefined);
+    if (!st || st === "WaitingForCompletion") throw e;
+  }
 
   // przetwarzanie jest asynchroniczne (czas nie jest podany w dokumentacji) — czekamy chwilę, a gdy się nie skończy, zwracamy "w trakcie"
   let state: string | null = "Ready";
@@ -286,7 +306,12 @@ export async function octopiaSetPrices(cfg: OctopiaConfig, changes: { offerId: s
   const deadline = Date.now() + (opts.pollMs ?? 25_000);
   while (Date.now() < deadline) {
     await sleep(2000);
-    const p = await octopiaRequest(cfg, token, "GET", `/offer-packages/${encodeURIComponent(packageId)}`);
+    let p: Awaited<ReturnType<typeof octopiaRequest>>;
+    try {
+      p = await octopiaRequest(cfg, token, "GET", `/offer-packages/${encodeURIComponent(packageId)}`);
+    } catch {
+      continue; // chwilowy błąd bramy (np. 504) przy odpytywaniu — próbujemy do końca czasu
+    }
     state = p.json?.state ?? null;
     message = p.json?.result?.message ?? "";
     if (state === "Integrated" || state === "Rejected") break;
