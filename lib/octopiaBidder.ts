@@ -2,7 +2,7 @@
 // Cena minimalna (i opcjonalnie maksymalna) jest wpisywana ręcznie per oferta (listing_price_rules). Cdiscount wybiera BuyBox po cenie z dostawą, więc porównujemy sumy
 // (cena + najtańsza dostawa); cel to 0,01 € poniżej najtańszego konkurenta — tak samo działa wbudowany automat Cdiscount (offer competition), którego API nie pozwala ustawić.
 
-export type BidderCompetitor = { p: number | null; d: number | null; b?: boolean | null };
+export type BidderCompetitor = { p: number | null; d: number | null; b?: boolean | null; l?: boolean | null }; // l = konkurent w programie lojalnościowym (CDAV)
 export type BidderInput = {
   state: string | null;
   quantity: number | null;
@@ -50,7 +50,13 @@ export function bidderProposal(inp: BidderInput): BidderProposal {
     if (up > inp.price + 0.004 && up >= inp.min) return { action: "set", price: up, reason: `mamy BuyBox, najtańszy konkurent ${f(cheapest)} (z dostawą) — podnosimy do ${f(up)}` };
     return none("mamy BuyBox");
   }
-  if (target >= inp.price - 0.004) return none(`najtańszy konkurent ${f(cheapest)} (z dostawą) nie jest tańszy od nas — BuyBox zależy od innych czynników (czas dostawy, jakość/Qualiscore, ocena sprzedawcy, program CDAV) — zobacz Szczegóły`);
+  if (target >= inp.price - 0.004) {
+    const holderCdav = inp.competing.some((c) => c.b === true && c.l === true);
+    const why = holderCdav
+      ? "oferta z BuyBox należy do programu CDAV (preferowanego przez Cdiscount) — sama cena tego nie zmieni"
+      : "BuyBox zależy od innych czynników (czas dostawy, jakość/Qualiscore, ocena sprzedawcy, program CDAV) — zobacz Szczegóły";
+    return none(`najtańszy konkurent ${f(cheapest)} (z dostawą) nie jest tańszy od nas — ${why}`);
+  }
   if (target < inp.min - 0.004) return { action: "warn", price: null, reason: `BuyBox poza opłacalnością: aby go zdobyć trzeba ${f(target)}, a cena minimalna to ${f(inp.min)}` };
   return { action: "set", price: target, reason: `nie mamy BuyBox, najtańszy konkurent ${f(cheapest)} (z dostawą) — schodzimy do ${f(target)}` };
 }
