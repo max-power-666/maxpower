@@ -14,6 +14,11 @@ create table if not exists listing_price_rules (
   check (min_price is null or max_price is null or max_price >= min_price)
 );
 
+-- Automat cen (19.10.2026): tryb per oferta — off (tylko propozycje), raise (cron sam podnosi cenę), both (podnosi i obniża). Domyślnie off.
+alter table listing_price_rules add column if not exists auto_mode text not null default 'off';
+alter table listing_price_rules drop constraint if exists listing_price_rules_auto_mode_check;
+alter table listing_price_rules add constraint listing_price_rules_auto_mode_check check (auto_mode in ('off', 'raise', 'both'));
+
 alter table listing_price_rules enable row level security;
 drop policy if exists "managers read listing_price_rules" on listing_price_rules;
 create policy "managers read listing_price_rules" on listing_price_rules for select

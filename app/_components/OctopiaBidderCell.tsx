@@ -1,8 +1,8 @@
 "use client";
 
-import type { BidderProposal } from "@/lib/octopiaBidder";
+import { AUTO_MODES, type AutoMode, type BidderProposal } from "@/lib/octopiaBidder";
 
-export type PriceRule = { min: number | null; max: number | null };
+export type PriceRule = { min: number | null; max: number | null; autoMode?: AutoMode };
 
 const f2 = (n: number) => n.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -13,6 +13,7 @@ export default function OctopiaBidderCell({
   proposal,
   busy,
   onSaveRule,
+  onSaveAuto,
   onApply,
 }: {
   rule: PriceRule | undefined;
@@ -20,6 +21,7 @@ export default function OctopiaBidderCell({
   proposal: BidderProposal | null;
   busy: boolean;
   onSaveRule: (min: string, max: string) => void;
+  onSaveAuto: (mode: AutoMode) => void;
   onApply: (p: BidderProposal) => void;
 }) {
   const minV = rule?.min ?? null;
@@ -45,6 +47,20 @@ export default function OctopiaBidderCell({
       ) : (
         <div className="font-mono text-[11px] text-inksoft">{minV !== null || maxV !== null ? `min ${minV !== null ? f2(minV) : "—"} / max ${maxV !== null ? f2(maxV) : "—"}` : "—"}</div>
       )}
+      {canEdit && minV !== null && (
+        <select
+          value={rule?.autoMode ?? "off"}
+          disabled={busy}
+          onChange={(e) => onSaveAuto(e.target.value as AutoMode)}
+          title={AUTO_MODES.find((m) => m.key === (rule?.autoMode ?? "off"))?.hint}
+          className={`mt-1.5 border border-line bg-white px-1.5 py-0.5 rounded text-[11px] ${(rule?.autoMode ?? "off") !== "off" ? "font-semibold text-teal" : ""}`}
+        >
+          {AUTO_MODES.map((m) => (
+            <option key={m.key} value={m.key} title={m.hint}>{m.label}</option>
+          ))}
+        </select>
+      )}
+      {!canEdit && rule?.autoMode && rule.autoMode !== "off" && <div className="text-[11px] text-teal font-semibold mt-1">{AUTO_MODES.find((m) => m.key === rule.autoMode)?.label}</div>}
       {proposal && (
         <div className="mt-1.5">
           {proposal.action === "set" && proposal.price !== null && (

@@ -61,3 +61,52 @@ export function ourDeliveryCost(details: any): number {
   const costs = modes.map((m) => Number(m?.p)).filter((n) => Number.isFinite(n) && n >= 0);
   return costs.length ? Math.min(...costs) : 0;
 }
+
+// ---- Automat (19.10.2026): cron stosuje propozycje bidderu sam, ale tylko dla ofert, którym ktoś JAWNIE włączył tryb automatu ----
+// Tryby (listing_price_rules.auto_mode): "off" (domyślnie), "raise" (tylko podwyżki — cena wraca w górę, gdy konkurencja przestaje się wyprzedawać) i "both" (podwyżki i obniżki w poszukiwaniu BuyBox).
+// Bezpieczniki: oferty z włączonym wbudowanym automatem Cdiscount pomijamy (walczyłyby o cenę), podwyżka musi być wyraźna (min. 1 €) i jest ograniczona do +20% na jeden przebieg,
+// ta sama oferta nie jest ruszana częściej niż co 45 min, a cena zawsze mieści się w naszych granicach min/max (pilnuje też serwer przy zapisie).
+export type AutoMode = "off" | "raise" | "both";
+export const AUTO_MODES: { key: AutoMode; label: string; hint: string }[] = [
+  { key: "off", label: "ręcznie", hint: "Bidder tylko proponuje; zmianę zatwierdzasz sam" },
+  { key: "raise", label: "auto: podwyżki", hint: "Co 15 min sam podnosi cenę (do 0,01 € poniżej najtańszego konkurenta, nie wyżej niż max), gdy mamy BuyBox. Obniżki zatwierdzasz sam" },
+  { key: "both", label: "auto: pełny", hint: "Co 15 min sam podnosi i obniża cenę w granicach min/max (0,01 € poniżej najtańszego konkurenta)" },
+];
+export const AUTO_MIN_RAISE = 1;
+export const AUTO_MAX_RAISE_PCT = 20;
+export const AUTO_COOLDOWN_MS = 45 * 60_000;
+
+export type AutoCandidate = {
+  externalId: string;
+  state: string | null;
+  quantity: number | null;
+  price: number | null;
+  details: any;
+  rule: { min: number | null; max: number | null; autoMode: AutoMode };
+  lastAutoAt: number | null; // czas ostatniej udanej zmiany automatu (ms)
+};
+export type AutoChange = { externalId: string; price: number; reason: string };
+
+export function selectAutoChanges(cands: AutoCandidate[], now: number): { changes: AutoChange[]; skipped: { externalId: string; why: string }[] } {
+  const changes: AutoChange[] = [];
+  const skipped: { externalId: string; why: string }[] = [];
+  for (const c of cands) {
+    const skip = (why: string) => skipped.push({ externalId: c.externalId, why });
+    if (c.rule.autoMode === "off") continue;
+    const ob = c.details?.octopia;
+    if (!ob) { skip("brak danych kanału"); continue; }
+    if (ob.comp === true) { skip("włączony wbudowany automat Cdiscount (zarządza ceną)"); continue; }
+    if (c.lastAutoAt !== null && now - c.lastAutoAt < AUTO_COOLDOWN_MS) { skip("niedawno zmieniana przez automat"); continue; }
+    const p = bidderProposal({ state: c.state, quantity: c.quantity, price: c.price, ourDelivery: ourDeliveryCost(c.details), bb: ob.bb ?? null, online: ob.online ?? null, offlineReason: ob.offlineReason ?? null, competing: ob.competing || [], bestPrice: ob.bestPrice ?? null, bestDelivery: ob.bestDelivery ?? null, min: c.rule.min, max: c.rule.max });
+    if (p.action !== "set" || p.price === null || c.price === null) continue;
+    let price = p.price;
+    if (price > c.price) {
+      if (price - c.price < AUTO_MIN_RAISE - 0.004) { skip("podwyżka mniejsza niż 1 €"); continue; }
+      price = Math.min(price, Math.round(c.price * (1 + AUTO_MAX_RAISE_PCT / 100) * 100) / 100); // jeden przebieg nie podnosi ceny o więcej niż 20%
+      if (c.rule.max !== null) price = Math.min(price, c.rule.max);
+      if (price <= c.price + 0.004) continue;
+    } else if (c.rule.autoMode !== "both") continue; // tryb "tylko podwyżki" nie obniża
+    changes.push({ externalId: c.externalId, price, reason: `automat (${c.rule.autoMode === "both" ? "pełny" : "podwyżki"}): ${p.reason}` });
+  }
+  return { changes, skipped };
+}

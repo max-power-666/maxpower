@@ -4,7 +4,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { fmtWarsawDateTime } from "@/lib/warsawDate";
-import { bidderProposal, ourDeliveryCost, type BidderProposal } from "@/lib/octopiaBidder";
+import { bidderProposal, ourDeliveryCost, type AutoMode, type BidderProposal } from "@/lib/octopiaBidder";
 import OctopiaBidderCell, { type PriceRule } from "./OctopiaBidderCell";
 import {
   isListingLive,
@@ -91,9 +91,12 @@ export default function ListingsView({ session }: { session: Session }) {
   const loadRules = useCallback(async () => {
     const out: Record<string, PriceRule> = {};
     for (let from = 0; ; from += 1000) {
-      const { data, error: err } = await supabase.from("listing_price_rules").select("external_id, min_price, max_price").eq("marketplace", "octopia").range(from, from + 999);
+      let data: any[] | null = null;
+      let err: { message: string } | null = null;
+      ({ data, error: err } = await supabase.from("listing_price_rules").select("external_id, min_price, max_price, auto_mode").eq("marketplace", "octopia").range(from, from + 999));
+      if (err) ({ data, error: err } = await supabase.from("listing_price_rules").select("external_id, min_price, max_price").eq("marketplace", "octopia").range(from, from + 999)); // przed uruchomieniem nowej wersji listing-price-rules.sql (bez trybu automatu)
       if (err) break; // brak tabeli (nieuruchomiony listing-price-rules.sql) albo brak uprawnień — bidder po prostu nic nie proponuje
-      for (const r of (data as any[]) || []) out[r.external_id] = { min: r.min_price === null ? null : Number(r.min_price), max: r.max_price === null ? null : Number(r.max_price) };
+      for (const r of (data as any[]) || []) out[r.external_id] = { min: r.min_price === null ? null : Number(r.min_price), max: r.max_price === null ? null : Number(r.max_price), autoMode: (r.auto_mode as AutoMode | undefined) ?? "off" };
       if (!data || data.length < 1000) break;
     }
     setRules(out);
@@ -257,14 +260,14 @@ export default function ListingsView({ session }: { session: Session }) {
   }, [rows, rules, mp]);
   const actionable = useMemo(() => rows.filter((r) => proposals.get(r.external_id)?.action === "set"), [rows, proposals]);
 
-  async function saveRule(externalId: string, min: string, max: string) {
+  async function saveRule(externalId: string, min: string, max: string, autoMode?: AutoMode) {
     setBidBusy(true);
     setError("");
     try {
-      const res = await fetch("/api/listings/price-rule", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ marketplace: "octopia", externalId, minPrice: min, maxPrice: max }) });
+      const res = await fetch("/api/listings/price-rule", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ marketplace: "octopia", externalId, minPrice: min, maxPrice: max, ...(autoMode ? { autoMode } : {}) }) });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) setError(data.error || "Nie udało się zapisać ceny min/max.");
-      else setRules((rs) => ({ ...rs, [externalId]: { min: data.minPrice ?? null, max: data.maxPrice ?? null } }));
+      else setRules((rs) => ({ ...rs, [externalId]: { min: data.minPrice ?? null, max: data.maxPrice ?? null, autoMode: (data.autoMode as AutoMode | undefined) ?? "off" } }));
     } finally {
       setBidBusy(false);
     }
@@ -452,6 +455,12 @@ export default function ListingsView({ session }: { session: Session }) {
                           proposal={isListingLive(r) ? proposals.get(r.external_id) ?? null : null}
                           busy={bidBusy}
                           onSaveRule={(min, max) => saveRule(r.external_id, min, max)}
+                          onSaveAuto={(mode) => {
+                            const rl = rules[r.external_id];
+                            const range = `${rl?.min ?? "—"} – ${rl?.max ?? "brak max"} €`;
+                            if (mode !== "off" && !window.confirm(`Włączyć automat cen dla ${r.sku || r.external_id}?\n\nCo 15 min aplikacja sama zmieni prawdziwą cenę tej oferty na Cdiscount (${mode === "both" ? "podwyżki i obniżki" : "tylko podwyżki"}) w granicach ${range}. Każda zmiana zapisze się w dzienniku zmian cen.`)) return;
+                            saveRule(r.external_id, rl?.min == null ? "" : String(rl.min), rl?.max == null ? "" : String(rl.max), mode);
+                          }}
                           onApply={(p) => applyPrices([{ listing: r, proposal: p }])}
                         />
                       )}
