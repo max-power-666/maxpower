@@ -1,3 +1,4 @@
+import { octopiaPanelUrl } from "./octopiaPanelIds";
 // Magazyn -> Listingi (13.10.2026): oferty wystawione na Back Market i refurbed. Tu: mappery odpowiedzi API na wiersz tabeli marketplace_listings, etykiety stanów i klienci
 // stron (Back Market GET /ws/listings, refurbed OfferService/ListOffers). Specyfikacje: api.backmarket.dev/bundled_openapi.yaml (ListingPublic) i
 // gitlab.com/refurbed-community/public-apis (refb.merchant.v1.OfferService). Synchronizacja migawki: lib/listingsSync.ts, route: app/api/listings/sync.
@@ -332,9 +333,14 @@ export function slugify(title: string | null | undefined): string {
 export type ListingLink = { label: string; url: string; hint: string };
 export function listingLinks(l: { marketplace: string; product_id: string | null; title: string | null; sku?: string | null; external_id?: string | null; details?: Record<string, any> | null }): ListingLink[] {
   if (l.marketplace === "octopia") {
-    // Publiczna strona produktu na Cdiscount (z informacji kanału); panel sprzedawcy adresuje oferty wewnętrznymi identyfikatorami, których API nie zwraca.
+    // Publiczna strona produktu na Cdiscount (z informacji kanału) oraz edycja oferty w panelu sprzedawcy Octopia. Panel adresuje oferty wewnętrznymi UUID, których API nie zwraca —
+    // mapowanie referencja -> id jest wczytane z listy w panelu (lib/octopiaPanelIds.ts); oferta bez wpisu dostaje link do listy ofert.
+    const links: ListingLink[] = [];
     const url = typeof l.details?.product_page_url === "string" ? l.details.product_page_url : "";
-    return url ? [{ label: "Strona produktu", url, hint: "Publiczna strona produktu na Cdiscount" }] : [];
+    if (url) links.push({ label: "Strona produktu", url, hint: "Publiczna strona produktu na Cdiscount (to, co widzi klient)" });
+    const panel = octopiaPanelUrl(l.sku);
+    links.push({ label: "Panel", url: panel.url, hint: panel.exact ? "Ta oferta w panelu sprzedawcy Octopia (edycja produktu)" : "Lista ofert w panelu sprzedawcy Octopia (ta oferta nie ma jeszcze zapisanego identyfikatora)" });
+    return links;
   }
   if (l.marketplace === "backmarket") {
     const links: ListingLink[] = [];
