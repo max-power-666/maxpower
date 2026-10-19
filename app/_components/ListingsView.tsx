@@ -546,6 +546,8 @@ function OctopiaDetails({ l }: { l: Listing }) {
         {ob && row("Online na Cdiscount", ob.online === null ? null : ob.online ? "tak" : "nie")}
         {ob && row("Powód offline", ob.offlineReason)}
         {ob && row("Qualiscore", ob.score)}
+        {ob && ob.scoreReasons && ob.scoreReasons.length > 0 && row("Powody oceny (Qualiscore)", ob.scoreReasons.map((x) => x.reason || x.code).filter(Boolean).join("; "))}
+        {ob && ob.loyalty !== undefined && ob.loyalty !== null && row("Program lojalnościowy (CDAV)", ob.loyalty ? "tak" : "nie")}
         {ob && row("Liczba ofert produktu", ob.offersCount)}
         {Array.isArray(d.delivery_modes) && d.delivery_modes.length > 0 && row("Dostawa", d.delivery_modes.map((m: any) => `${m.c ?? "—"} ${m.p !== null ? fmtMoney(m.p, l.currency) : ""}${m.d !== null ? ` (do ${m.d} dni)` : ""}`).join("; "))}
       </div>
@@ -566,10 +568,10 @@ function OctopiaDetails({ l }: { l: Listing }) {
               <div className="mt-2">
                 <div className="font-semibold text-inksoft mb-1">OFERTY KONKURENTÓW</div>
                 <table className="w-full">
-                  <thead><tr className="text-left text-inksoft"><th className="py-0.5 pr-3 font-semibold">Sprzedawca</th><th className="py-0.5 pr-3 font-semibold text-right">Cena</th><th className="py-0.5 pr-3 font-semibold text-right">Dostawa</th><th className="py-0.5 font-semibold">BuyBox</th></tr></thead>
+                  <thead><tr className="text-left text-inksoft"><th className="py-0.5 pr-3 font-semibold">Sprzedawca</th><th className="py-0.5 pr-3 font-semibold text-right">Cena</th><th className="py-0.5 pr-3 font-semibold text-right">Dostawa</th><th className="py-0.5 pr-3 font-semibold text-right" title="Ocena sprzedawcy">Ocena</th><th className="py-0.5 pr-3 font-semibold" title="Program lojalnościowy (CDAV)">CDAV</th><th className="py-0.5 font-semibold">BuyBox</th></tr></thead>
                   <tbody>
                     {ob.competing.map((c, i) => (
-                      <tr key={i}><td className="py-0.5 pr-3">{c.n ?? "—"}</td><td className="py-0.5 pr-3 text-right font-mono">{fmtMoney(c.p, null)}</td><td className="py-0.5 pr-3 text-right font-mono">{fmtMoney(c.d, null)}</td><td className="py-0.5">{c.b ? "tak" : ""}</td></tr>
+                      <tr key={i}><td className="py-0.5 pr-3">{c.n ?? "—"}</td><td className="py-0.5 pr-3 text-right font-mono">{fmtMoney(c.p, null)}</td><td className="py-0.5 pr-3 text-right font-mono">{fmtMoney(c.d, null)}</td><td className="py-0.5 pr-3 text-right font-mono">{c.r !== undefined && c.r !== null ? c.r : "—"}</td><td className="py-0.5 pr-3">{c.l ? "tak" : c.l === false ? "nie" : "—"}</td><td className="py-0.5">{c.b ? "tak" : ""}</td></tr>
                     ))}
                   </tbody>
                 </table>

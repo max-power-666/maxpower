@@ -50,7 +50,7 @@ export function bidderProposal(inp: BidderInput): BidderProposal {
     if (up > inp.price + 0.004 && up >= inp.min) return { action: "set", price: up, reason: `mamy BuyBox, najtańszy konkurent ${f(cheapest)} (z dostawą) — podnosimy do ${f(up)}` };
     return none("mamy BuyBox");
   }
-  if (target >= inp.price - 0.004) return none(`najtańszy konkurent ${f(cheapest)} (z dostawą) nie jest tańszy od nas — BuyBox zależy od innych czynników (dostawa, jakość, ocena)`);
+  if (target >= inp.price - 0.004) return none(`najtańszy konkurent ${f(cheapest)} (z dostawą) nie jest tańszy od nas — BuyBox zależy od innych czynników (czas dostawy, jakość/Qualiscore, ocena sprzedawcy, program CDAV) — zobacz Szczegóły`);
   if (target < inp.min - 0.004) return { action: "warn", price: null, reason: `BuyBox poza opłacalnością: aby go zdobyć trzeba ${f(target)}, a cena minimalna to ${f(inp.min)}` };
   return { action: "set", price: target, reason: `nie mamy BuyBox, najtańszy konkurent ${f(cheapest)} (z dostawą) — schodzimy do ${f(target)}` };
 }

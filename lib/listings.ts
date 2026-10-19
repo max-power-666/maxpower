@@ -149,7 +149,9 @@ export type OctopiaBrief = {
   offersCount: number | null;
   score: string | null; // Qualiscore
   offlineReason: string | null;
-  competing: { n: string | null; p: number | null; d: number | null; b: boolean | null }[];
+  competing: { n: string | null; p: number | null; d: number | null; b: boolean | null; r?: number | null; l?: boolean | null }[]; // r = ocena sprzedawcy, l = w programie lojalnościowym (np. CDAV)
+  scoreReasons?: { code: string | null; reason: string | null }[]; // powody oceny jakości oferty (Qualiscore), np. longDeliverytime
+  loyalty?: boolean | null; // czy NASZA oferta jest w programie lojalnościowym (np. CDAV)
   ext: { name: string | null; total: number | null; idx: number | null } | null;
 };
 export function mapOctopiaOffer(o: any, snapshotAt: string): ListingRow | null {
@@ -173,7 +175,9 @@ export function mapOctopiaOffer(o: any, snapshotAt: string): ListingRow | null {
     offersCount: int(fb.productInformation?.offersCount),
     score: str(fb.offerQuality?.offerScore),
     offlineReason: str(fb.offlineReason?.reason),
-    competing: (Array.isArray(fb.competingOffers) ? fb.competingOffers : []).slice(0, 8).map((c: any) => ({ n: str(c?.sellerName), p: num(c?.displayedOfferPrice), d: num(c?.deliveryCost), b: typeof c?.isBestOffer === "boolean" ? c.isBestOffer : null })),
+    competing: (Array.isArray(fb.competingOffers) ? fb.competingOffers : []).slice(0, 8).map((c: any) => ({ n: str(c?.sellerName), p: num(c?.displayedOfferPrice), d: num(c?.deliveryCost), b: typeof c?.isBestOffer === "boolean" ? c.isBestOffer : null, r: num(c?.sellerRating), l: typeof c?.loyaltyInformation?.isPartOfLoyaltyProgram === "boolean" ? c.loyaltyInformation.isPartOfLoyaltyProgram : null })),
+    scoreReasons: (Array.isArray(fb.offerQuality?.scoreReasons) ? fb.offerQuality.scoreReasons : []).slice(0, 6).map((x: any) => ({ code: str(x?.code), reason: str(x?.reason) })),
+    loyalty: typeof fb.loyaltyInformation?.isPartOfLoyaltyProgram === "boolean" ? fb.loyaltyInformation.isPartOfLoyaltyProgram : null,
     ext: fb.externalCompetingOffer ? { name: str(fb.externalCompetingOffer.marketplaceName), total: num(fb.externalCompetingOffer.totalPrice), idx: num(fb.externalCompetingOffer.priceIndex) } : null,
   };
   const details: Record<string, unknown> = { octopia: brief };
