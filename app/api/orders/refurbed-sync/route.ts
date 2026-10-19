@@ -25,8 +25,31 @@ const OPEN_WINDOW_MS = 60 * 24 * 60 * 60 * 1000;
 
 // Zapis pobranych zamówień. Upsert pozycji zawiera tylko pola z API, więc numery seryjne i pady wpisane
 // przez zespół zostają nietknięte (patrz bm-sync).
-async function saveOrders(admin: SupabaseClient<any, any, any>, all: any[]) {
-  const orders = uniqueBy(all, (o) => String(o.id));
+// Kanoniczny zapis JSON (klucze posortowane) — jsonb z bazy zwraca klucze w innej kolejności niż odpowiedź API, więc porównujemy po sortowaniu.
+function canonical(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(canonical).join(",")}]`;
+  if (v && typeof v === "object") return `{${Object.keys(v as object).sort().map((k) => `${JSON.stringify(k)}:${canonical((v as any)[k])}`).join(",")}}`;
+  return JSON.stringify(v) ?? "null";
+}
+
+// 19.10.2026 (Supabase: "Disk IO Budget" na wyczerpaniu): odświeżanie (B) pobiera zamówienia od najstarszego wciąż otwartego (u nas sięga to 1 stycznia), więc co 15 min przepisywało
+// ~2400 zamówień z surowym JSON (po ok. 3 KB) do refurbed_orders, sales_orders i sales_order_items — mimo że prawie nic się nie zmieniało. Teraz zapisujemy tylko zamówienia, których
+// surowe dane różnią się od zapisanych (albo których jeszcze nie ma). `force` (?force=1) wymusza zapis wszystkich, np. po zmianie mappera.
+async function onlyChanged(admin: SupabaseClient<any, any, any>, orders: any[]): Promise<any[]> {
+  const stored = new Map<string, string>();
+  const ids = orders.map((o) => String(o.id));
+  for (let i = 0; i < ids.length; i += 100) {
+    const { data, error } = await admin.from("refurbed_orders").select("id, raw").in("id", ids.slice(i, i + 100));
+    if (error) return orders; // przy błędzie odczytu zapisujemy wszystko jak dawniej
+    for (const r of data || []) stored.set(String(r.id), canonical(r.raw));
+  }
+  return orders.filter((o) => stored.get(String(o.id)) !== canonical(o));
+}
+
+async function saveOrders(admin: SupabaseClient<any, any, any>, all: any[], force = false) {
+  const uniq = uniqueBy(all, (o) => String(o.id));
+  const orders = force ? uniq : await onlyChanged(admin, uniq);
+  if (orders.length === 0) return;
   const { error: rawErr } = await admin.from("refurbed_orders").upsert(orders.map(mapRefurbedOrder));
   if (rawErr) throw new Error(`Błąd zapisu do Supabase (refurbed_orders): ${rawErr.message}`);
   const { error: salesErr } = await admin.from("sales_orders").upsert(orders.map(mapRefurbedToSales));
@@ -56,7 +79,8 @@ export async function GET(request: Request) {
     userAgent: process.env.REFURBED_UA || "recoo-erp",
     baseUrl: process.env.REFURBED_BASE_URL || undefined,
   };
-  const save = (orders: any[]) => saveOrders(admin, orders);
+  const force = new URL(request.url).searchParams.get("force") === "1";
+  const save = (orders: any[]) => saveOrders(admin, orders, force);
 
   const { data: meta, error: metaError } = await admin
     .from("sales_orders_sync_meta")
@@ -66,6 +90,7 @@ export async function GET(request: Request) {
   if (metaError) return NextResponse.json({ error: `Błąd odczytu z Supabase: ${metaError.message}` }, { status: 500 });
 
   const fullScan = !meta?.full_scan_done || !meta?.last_synced_at;
+  const saveAll = (orders: any[]) => saveOrders(admin, orders, true); // pierwszy pełny skan zapisuje wszystko
 
   try {
     if (fullScan) {
@@ -74,7 +99,7 @@ export async function GET(request: Request) {
         filter: { released_at: { ge: `${new Date().getFullYear()}-01-01T00:00:00Z` } },
         startAfter: (meta?.scan_cursor as string | null) ?? null,
         budgetMs: BUDGET_MS,
-        save,
+        save: saveAll,
       });
       const { error: metaWriteError } = await admin.from("sales_orders_sync_meta").upsert(
         result.finished
