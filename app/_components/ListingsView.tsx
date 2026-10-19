@@ -4,6 +4,8 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { fmtWarsawDateTime } from "@/lib/warsawDate";
+import { bidderProposal, ourDeliveryCost, type BidderProposal } from "@/lib/octopiaBidder";
+import OctopiaBidderCell, { type PriceRule } from "./OctopiaBidderCell";
 import {
   isListingLive,
   LISTING_MARKETPLACES,
@@ -74,6 +76,31 @@ export default function ListingsView({ session }: { session: Session }) {
   const [pageSize, setPageSize] = useState(100);
   const [page, setPage] = useState(1);
   const [open, setOpen] = useState<string | null>(null);
+  // Bidder Cdiscount (19.10.2026): reguły cen min/max per oferta i zmiana cen po potwierdzeniu — tylko Admin/Manager/Księgowa
+  const [rules, setRules] = useState<Record<string, PriceRule>>({});
+  const [canBid, setCanBid] = useState(false);
+  const [bidBusy, setBidBusy] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from("members").select("role").eq("user_id", session.user.id).maybeSingle();
+      setCanBid(["Admin", "Manager", "Księgowa"].includes(String((data as any)?.role || "")));
+    })();
+  }, [session.user.id]);
+
+  const loadRules = useCallback(async () => {
+    const out: Record<string, PriceRule> = {};
+    for (let from = 0; ; from += 1000) {
+      const { data, error: err } = await supabase.from("listing_price_rules").select("external_id, min_price, max_price").eq("marketplace", "octopia").range(from, from + 999);
+      if (err) break; // brak tabeli (nieuruchomiony listing-price-rules.sql) albo brak uprawnień — bidder po prostu nic nie proponuje
+      for (const r of (data as any[]) || []) out[r.external_id] = { min: r.min_price === null ? null : Number(r.min_price), max: r.max_price === null ? null : Number(r.max_price) };
+      if (!data || data.length < 1000) break;
+    }
+    setRules(out);
+  }, []);
+  useEffect(() => {
+    if (mp === "octopia") loadRules();
+  }, [mp, loadRules]);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -213,6 +240,62 @@ export default function ListingsView({ session }: { session: Session }) {
     return { won, lost, unknown };
   }, [rows, mp]);
   const part = useMemo(() => summarize(filtered), [filtered]);
+  // Propozycje cen bidderu Cdiscount (tylko oferty z ustawioną ceną minimalną)
+  const proposals = useMemo(() => {
+    const m = new Map<string, BidderProposal>();
+    if (mp !== "octopia") return m;
+    for (const r of rows) {
+      const ob = (r.details as any)?.octopia;
+      if (!ob) continue;
+      const rule = rules[r.external_id];
+      m.set(
+        r.external_id,
+        bidderProposal({ state: r.state, quantity: r.quantity, price: r.price, ourDelivery: ourDeliveryCost(r.details), bb: ob.bb ?? null, competing: ob.competing || [], bestPrice: ob.bestPrice ?? null, bestDelivery: ob.bestDelivery ?? null, min: rule?.min ?? null, max: rule?.max ?? null })
+      );
+    }
+    return m;
+  }, [rows, rules, mp]);
+  const actionable = useMemo(() => rows.filter((r) => proposals.get(r.external_id)?.action === "set"), [rows, proposals]);
+
+  async function saveRule(externalId: string, min: string, max: string) {
+    setBidBusy(true);
+    setError("");
+    try {
+      const res = await fetch("/api/listings/price-rule", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ marketplace: "octopia", externalId, minPrice: min, maxPrice: max }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) setError(data.error || "Nie udało się zapisać ceny min/max.");
+      else setRules((rs) => ({ ...rs, [externalId]: { min: data.minPrice ?? null, max: data.maxPrice ?? null } }));
+    } finally {
+      setBidBusy(false);
+    }
+  }
+
+  async function applyPrices(list: { listing: Listing; proposal: BidderProposal }[]) {
+    if (list.length === 0) return;
+    const lines = list.slice(0, 15).map(({ listing, proposal }) => `${listing.sku || listing.external_id}: ${fmtMoney(listing.price, null)} → ${fmtMoney(proposal.price, null)} €`).join("\n");
+    const msg = `Zmienić ceny ${list.length} ofert Cdiscount?\n\n${lines}${list.length > 15 ? `\n… i ${list.length - 15} kolejnych` : ""}\n\nTo zmienia prawdziwe ceny na żywym marketplace’ie (paczka ofert Cdiscount — przetwarzanie może potrwać kilkanaście sekund).`;
+    if (!window.confirm(msg)) return;
+    setBidBusy(true);
+    setError("");
+    setNote("");
+    try {
+      const res = await fetch("/api/listings/octopia-price", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ confirm: true, changes: list.slice(0, 50).map(({ listing, proposal }) => ({ externalId: listing.external_id, price: proposal.price, reason: `bidder: ${proposal.reason}` })) }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok && !data.results) {
+        setError(data.error || "Nie udało się zmienić cen.");
+        return;
+      }
+      const failed = (data.results || []).filter((r: any) => !r.ok);
+      setNote(`Cdiscount: zmieniono ${data.okCount ?? 0} z ${(data.results || []).length} cen${data.packageId ? ` (paczka ${data.packageId}, stan: ${data.packageState ?? "?"})` : ""}.${failed.length ? ` Błędy: ${failed.slice(0, 5).map((r: any) => r.message).join(" | ")}` : ""}`);
+      await load("octopia");
+    } finally {
+      setBidBusy(false);
+    }
+  }
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const curPage = Math.min(page, totalPages);
@@ -239,7 +322,7 @@ export default function ListingsView({ session }: { session: Session }) {
   }
 
   const mpLabel = LISTING_MARKETPLACES.find((m) => m.key === mp)!.label;
-  const ncols = mp === "octopia" ? 9 : 8;
+  const ncols = mp === "octopia" ? 10 : 8;
   const th = "p-3 text-left text-xs font-semibold text-inksoft whitespace-nowrap";
   const thBtn = `${th} cursor-pointer select-none hover:text-ink`;
 
@@ -297,6 +380,19 @@ export default function ListingsView({ session }: { session: Session }) {
         <button onClick={exportCsv} disabled={filtered.length === 0} className="ml-auto bg-white border border-line px-3 py-1.5 rounded text-sm font-semibold disabled:opacity-50">Pobierz CSV</button>
       </div>
 
+      {mp === "octopia" && canBid && (
+        <div className="flex flex-wrap items-center gap-3 mb-3 text-xs">
+          <button
+            onClick={() => applyPrices(actionable.map((r) => ({ listing: r, proposal: proposals.get(r.external_id)! })))}
+            disabled={bidBusy || actionable.length === 0}
+            className="bg-ink text-paper px-3 py-1.5 rounded text-sm font-semibold disabled:opacity-50"
+          >
+            Zastosuj propozycje ({actionable.length})
+          </button>
+          <span className="text-inksoft">Bidder Cdiscount proponuje ceny tylko dla ofert z ustawioną ceną minimalną; zmiana idzie po potwierdzeniu, każda zapisuje się w dzienniku zmian cen.</span>
+        </div>
+      )}
+
       <div className="border border-line bg-white overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -307,6 +403,7 @@ export default function ListingsView({ session }: { session: Session }) {
               <th className={`${thBtn} text-right`} onClick={() => toggleSort("price")}>Cena{arrow("price")}</th>
               <th className={`${th} text-right`} title={mp === "octopia" ? "Cena minimalna automatu Cdiscount (offer competition)" : undefined}>Min / max</th>
               {mp === "octopia" && <th className={th} title="Czy oferta ma BuyBox na Cdiscount i cena oferty, która go ma">BuyBox</th>}
+              {mp === "octopia" && <th className={th} title="Bidder: nasza cena minimalna/maksymalna oferty i propozycja ceny (0,01 € poniżej najtańszego konkurenta, nie niżej niż min). Nic nie zmienia samo — zmianę zatwierdzasz.">Bidder</th>}
               <th className={thBtn} onClick={() => toggleSort("state")}>Stan oferty{arrow("state")}</th>
               <th className={th}>Oferta</th>
               <th className={th}></th>
@@ -348,6 +445,16 @@ export default function ListingsView({ session }: { session: Session }) {
                           </td>
                         );
                       })()}
+                      {mp === "octopia" && (
+                        <OctopiaBidderCell
+                          rule={rules[r.external_id]}
+                          canEdit={canBid}
+                          proposal={isListingLive(r) ? proposals.get(r.external_id) ?? null : null}
+                          busy={bidBusy}
+                          onSaveRule={(min, max) => saveRule(r.external_id, min, max)}
+                          onApply={(p) => applyPrices([{ listing: r, proposal: p }])}
+                        />
+                      )}
                       <td className="p-3 whitespace-nowrap">
                         <span className={`text-xs font-semibold px-2 py-1 rounded ${stateStyle(r)}`} title={r.state !== null ? `Surowa wartość: ${r.state}` : undefined}>{listingStateLabel(r.marketplace, r.state)}</span>
                       </td>

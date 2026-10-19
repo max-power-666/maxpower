@@ -184,3 +184,143 @@ export async function octopiaFetchOffersPage(cfg: OctopiaConfig, token: string, 
     return { items, nextCursor: next && next !== cursor && items.length > 0 ? next : null };
   }
 }
+
+// ---- Zmiana cen ofert (19.10.2026, Magazyn -> Listingi -> Cdiscount, bidder) ----
+// API Octopii zmienia ceny wyłącznie wsadowo i asynchronicznie, przez paczkę ofert typu Update (specyfikacja "API REST Seller V2", /offer-packages):
+// (1) POST /offer-packages {packageType: "Update"} z nagłówkiem SalesChannelId — id paczki w Content-Location,
+// (2) POST /offer-packages/{id}/offer-requests — do 100 ofert, każda: sellerExternalReference + price {price, taxes} (przy zmianie ceny trzeba podać PEŁNĄ listę podatków oferty),
+// (3) PATCH /offer-packages/{id} {state: "Ready"} — paczka idzie do przetworzenia, (4) GET /offer-packages/{id} — stan (Ready -> IntegrationPending -> Integrated/Rejected),
+// (5) GET /offer-packages/{id}/offer-requests-results — wynik per oferta. Podatki bierzemy z ofert pobranych tuż przed zmianą (kody z GET zamieniamy na nazwy z enumu żądania).
+// NIE testowane na żywym API (brak danych dostępowych lokalnie) — kształty wg specyfikacji; pierwszą zmianę zrób na jednej ofercie i sprawdź w panelu Cdiscount.
+const OCTOPIA_TAX_CODES: Record<string, string> = { vat: "VAT", ecotax: "Ecotax", deatax: "Deatax", privatecopy: "PrivateCopy", chemicaltax: "ChemicalTax" };
+
+async function octopiaRequest(cfg: OctopiaConfig, token: string, method: string, path: string, opts: { body?: unknown; headers?: Record<string, string> } = {}): Promise<{ status: number; headers: Headers; json: any }> {
+  const doFetch = cfg.fetchImpl ?? fetch;
+  const res = await doFetch(`${OCTOPIA_API_URL}${path}`, {
+    method,
+    headers: { Authorization: `Bearer ${token}`, SellerId: cfg.sellerId, Accept: "application/json", ...(opts.body !== undefined ? { "Content-Type": "application/json" } : {}), ...(opts.headers || {}) },
+    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    cache: "no-store",
+    signal: AbortSignal.timeout(30_000),
+  });
+  const text = await res.text().catch(() => "");
+  let json: any = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    /* odpowiedź bez JSON (np. 201/204) */
+  }
+  if (!res.ok) {
+    let detail = text.slice(0, 300);
+    if (json) {
+      const errs = json.errors ? Object.entries(json.errors).map(([k, v]) => `${k}: ${(v as string[]).join(", ")}`).join("; ") : "";
+      detail = [json.detail, errs].filter(Boolean).join(" — ") || json.title || detail;
+    }
+    throw new OctopiaError(`Octopia zwróciło błąd (${res.status}) [${method} ${path.split("?")[0]}]: ${detail}`, res.status);
+  }
+  return { status: res.status, headers: res.headers, json };
+}
+
+export type OctopiaPriceResult = { offerId: string; ok: boolean; message: string; sellerExternalReference?: string; verifiedPrice?: number | null };
+export type OctopiaPriceBatch = { packageId: string | null; packageState: string | null; results: OctopiaPriceResult[] };
+
+export function octopiaTaxesForRequest(taxes: unknown): { code: string; value: number }[] | null {
+  if (!Array.isArray(taxes) || taxes.length === 0) return null;
+  const out: { code: string; value: number }[] = [];
+  for (const t of taxes as any[]) {
+    const code = OCTOPIA_TAX_CODES[String(t?.code || "").toLowerCase()];
+    const value = Number(t?.value);
+    if (!code || !Number.isFinite(value)) return null; // nieznany podatek — nie zgadujemy (przy Update lista podatków zastępuje całą istniejącą)
+    out.push({ code, value });
+  }
+  return out;
+}
+
+// Zmienia ceny ofert (offerId z listingów, np. "331462_CAN4549292092707_2_CDISFR"). Jedna paczka na wywołanie (max 100 ofert).
+export async function octopiaSetPrices(cfg: OctopiaConfig, changes: { offerId: string; price: number }[], opts: { salesChannelId?: string; pollMs?: number; sleep?: (ms: number) => Promise<void> } = {}): Promise<OctopiaPriceBatch> {
+  const channel = opts.salesChannelId ?? "CDISFR";
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  if (changes.length === 0) return { packageId: null, packageState: null, results: [] };
+  if (changes.length > 100) throw new OctopiaError("Za dużo ofert w jednej paczce (max 100).");
+  const token = await getToken(cfg);
+  const fetchOffers = async () => {
+    const params = new URLSearchParams({ salesChannelId: channel, limit: "100", offerIds: changes.map((c) => c.offerId).join(",") });
+    const r = await octopiaRequest(cfg, token, "GET", `/offers?${params.toString()}`);
+    const map = new Map<string, any>();
+    for (const o of (r.json?.items as any[]) || []) map.set(String(o.offerId), o);
+    return map;
+  };
+  const before = await fetchOffers();
+  const results = new Map<string, OctopiaPriceResult>();
+  const requests: { sellerExternalReference: string; price: { price: number; taxes: { code: string; value: number }[] } }[] = [];
+  const refToOffer = new Map<string, string>();
+  for (const c of changes) {
+    const o = before.get(c.offerId);
+    if (!o) {
+      results.set(c.offerId, { offerId: c.offerId, ok: false, message: "Cdiscount nie zwrócił tej oferty — odśwież Listingi." });
+      continue;
+    }
+    const ref = String(o.sellerExternalReference || "");
+    const taxes = octopiaTaxesForRequest(o.integrationPrice?.taxes ?? o.facialPrice?.taxes);
+    if (!ref) results.set(c.offerId, { offerId: c.offerId, ok: false, message: "Oferta nie ma referencji sprzedawcy (sellerExternalReference)." });
+    else if (refToOffer.has(ref)) results.set(c.offerId, { offerId: c.offerId, ok: false, message: `Referencja ${ref} występuje w kilku ofertach — Cdiscount odrzuciłby duplikat.` });
+    else if (!taxes) results.set(c.offerId, { offerId: c.offerId, ok: false, message: "Nie da się odczytać podatków oferty (przy zmianie ceny trzeba podać pełną listę) — zmień cenę w panelu Cdiscount." });
+    else {
+      refToOffer.set(ref, c.offerId);
+      requests.push({ sellerExternalReference: ref, price: { price: Math.round(c.price * 100) / 100, taxes } });
+      results.set(c.offerId, { offerId: c.offerId, ok: false, message: "Wysłano do Cdiscount — czekam na przetworzenie.", sellerExternalReference: ref });
+    }
+  }
+  if (requests.length === 0) return { packageId: null, packageState: null, results: changes.map((c) => results.get(c.offerId)!) };
+
+  const created = await octopiaRequest(cfg, token, "POST", "/offer-packages", { body: { packageType: "Update" }, headers: { SalesChannelId: channel } });
+  const loc = created.headers.get("content-location") || created.headers.get("location") || "";
+  const packageId = (loc.split("/").filter(Boolean).pop() || created.json?.packageId || "").toString();
+  if (!packageId) throw new OctopiaError("Cdiscount utworzyło paczkę, ale nie zwróciło jej identyfikatora (Content-Location).");
+  await octopiaRequest(cfg, token, "POST", `/offer-packages/${encodeURIComponent(packageId)}/offer-requests`, { body: requests });
+  await octopiaRequest(cfg, token, "PATCH", `/offer-packages/${encodeURIComponent(packageId)}`, { body: { state: "Ready" } });
+
+  // przetwarzanie jest asynchroniczne (czas nie jest podany w dokumentacji) — czekamy chwilę, a gdy się nie skończy, zwracamy "w trakcie"
+  let state: string | null = "Ready";
+  let message = "";
+  const deadline = Date.now() + (opts.pollMs ?? 25_000);
+  while (Date.now() < deadline) {
+    await sleep(2000);
+    const p = await octopiaRequest(cfg, token, "GET", `/offer-packages/${encodeURIComponent(packageId)}`);
+    state = p.json?.state ?? null;
+    message = p.json?.result?.message ?? "";
+    if (state === "Integrated" || state === "Rejected") break;
+  }
+  if (state === "Rejected") {
+    for (const r of requests) results.set(refToOffer.get(r.sellerExternalReference)!, { offerId: refToOffer.get(r.sellerExternalReference)!, ok: false, sellerExternalReference: r.sellerExternalReference, message: `Paczka odrzucona przez Cdiscount${message ? `: ${message}` : ""}` });
+  } else if (state === "Integrated") {
+    const rr = await octopiaRequest(cfg, token, "GET", `/offer-packages/${encodeURIComponent(packageId)}/offer-requests-results?limit=100`);
+    const byRef = new Map<string, any>();
+    for (const it of (rr.json?.items as any[]) || []) byRef.set(String(it.sellerExternalReference), it);
+    let after: Map<string, any> | null = null;
+    try {
+      after = await fetchOffers();
+    } catch {
+      after = null;
+    }
+    for (const r of requests) {
+      const offerId = refToOffer.get(r.sellerExternalReference)!;
+      const it = byRef.get(r.sellerExternalReference);
+      const okStatus = it?.integrationStatus === "Integrated";
+      const msg = (it?.results || []).map((x: any) => x?.message).filter(Boolean).join("; ");
+      const verified = after ? Number(after.get(offerId)?.integrationPrice?.price ?? after.get(offerId)?.facialPrice?.price) : NaN;
+      const verifiedPrice = Number.isFinite(verified) ? verified : null;
+      const mismatch = okStatus && verifiedPrice !== null && Math.abs(verifiedPrice - r.price.price) > 0.009;
+      results.set(offerId, {
+        offerId,
+        ok: okStatus,
+        sellerExternalReference: r.sellerExternalReference,
+        verifiedPrice,
+        message: okStatus ? (mismatch ? `Cdiscount przyjęło zmianę, ale cena w ofercie to jeszcze ${verifiedPrice} (przetwarzanie może potrwać — sprawdź za chwilę)` : msg || "Cena zmieniona") : `Odrzucone przez Cdiscount${it?.integrationStatus ? ` (${it.integrationStatus})` : ""}${msg ? `: ${msg}` : ""}`,
+      });
+    }
+  } else {
+    for (const r of requests) results.set(refToOffer.get(r.sellerExternalReference)!, { offerId: refToOffer.get(r.sellerExternalReference)!, ok: true, sellerExternalReference: r.sellerExternalReference, message: `Paczka ${packageId} wysłana (stan: ${state ?? "?"}) — Cdiscount jeszcze ją przetwarza; cena zmieni się po zakończeniu. Sprawdź w Listingach po chwili.` });
+  }
+  return { packageId, packageState: state, results: changes.map((c) => results.get(c.offerId)!) };
+}
