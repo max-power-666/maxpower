@@ -9,6 +9,8 @@ export type BidderInput = {
   price: number | null;
   ourDelivery: number; // najtańszy koszt dostawy naszej oferty (0, gdy darmowa)
   bb: boolean | null;
+  online?: boolean | null; // czy kanał widzi ofertę jako online (offline = brak BuyBox niezależnie od ceny)
+  offlineReason?: string | null;
   competing: BidderCompetitor[];
   bestPrice: number | null; // cena oferty z BuyBox (gdy to nie my)
   bestDelivery: number | null;
@@ -34,6 +36,7 @@ export function bidderProposal(inp: BidderInput): BidderProposal {
   if (inp.price === null || inp.price <= 0) return none("brak ceny oferty");
   if (inp.min === null) return none("ustaw cenę minimalną, żeby dostać propozycję");
   if (inp.bb === null) return none("brak danych o BuyBox — odśwież listingi");
+  if (inp.online === false) return none(`Cdiscount widzi ofertę jako offline${inp.offlineReason ? `: ${inp.offlineReason.replace(/^Your offer is offline because\s*/i, "")}` : ""} — cena nie ma tu znaczenia, dopóki oferta nie wróci online`);
   const ceiling = inp.max ?? inp.price; // bez ceny max nigdy nie proponujemy podwyżki ponad obecną cenę
   if (inp.price < inp.min - 0.004) return { action: "set", price: r2(inp.min), reason: `cena ${f(inp.price)} jest poniżej ceny minimalnej ${f(inp.min)}` };
   const cheapest = cheapestCompetitorTotal(inp);

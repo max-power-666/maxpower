@@ -250,7 +250,7 @@ export default function ListingsView({ session }: { session: Session }) {
       const rule = rules[r.external_id];
       m.set(
         r.external_id,
-        bidderProposal({ state: r.state, quantity: r.quantity, price: r.price, ourDelivery: ourDeliveryCost(r.details), bb: ob.bb ?? null, competing: ob.competing || [], bestPrice: ob.bestPrice ?? null, bestDelivery: ob.bestDelivery ?? null, min: rule?.min ?? null, max: rule?.max ?? null })
+        bidderProposal({ state: r.state, quantity: r.quantity, price: r.price, ourDelivery: ourDeliveryCost(r.details), bb: ob.bb ?? null, online: ob.online ?? null, offlineReason: ob.offlineReason ?? null, competing: ob.competing || [], bestPrice: ob.bestPrice ?? null, bestDelivery: ob.bestDelivery ?? null, min: rule?.min ?? null, max: rule?.max ?? null })
       );
     }
     return m;
