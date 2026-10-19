@@ -8,7 +8,7 @@ import type { RefurbedClient } from "@/lib/refurbed";
 
 // Magazyn -> Listingi (13.10.2026): synchronizuje oferty wystawione na Back Market (GET /ws/listings) i refurbed (OfferService/ListOffers) do marketplace_listings.
 // Zapisuje KOMPLETNĄ migawkę (patrz lib/listingsSync.ts: kursor w listings_sync_meta, usuwanie ofert, których marketplace już nie zwraca, dopiero po ukończeniu).
-// GET bez parametru (cron co 30 min) = wszystkie po kolei (od 16.10.2026 także Octopia/Cdiscount: GET /offers z expand=salesChannelFeedback); ?marketplace=backmarket|refurbed|octopia (przycisk "Odśwież" w zakładce Listingi) = jeden, z większym budżetem czasu.
+// GET bez parametru = wszystkie po kolei (cron co 30 min obsługuje teraz tylko Back Market i refurbed: ?marketplace=backmarket,refurbed; Octopia/Cdiscount ma własny cron co 15 min: ?marketplace=octopia) (od 16.10.2026 także Octopia/Cdiscount: GET /offers z expand=salesChannelFeedback); ?marketplace=backmarket|refurbed|octopia (przycisk "Odśwież" w zakładce Listingi) = jeden, z większym budżetem czasu.
 // Kanał bez konfiguracji (brak BACKMARKET_AUTH / REFURBED_API_TOKEN) jest pomijany z komunikatem, nie błędem — jak przy synchronizacji zamówień.
 
 export const maxDuration = 300;
@@ -58,9 +58,11 @@ export async function GET(request: Request) {
   if (!(await isAuthorized(request))) return NextResponse.json({ error: "Brak autoryzacji." }, { status: 401 });
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) return NextResponse.json({ error: "Brak SUPABASE_SERVICE_ROLE_KEY w zmiennych środowiskowych." }, { status: 500 });
 
-  const wanted = new URL(request.url).searchParams.get("marketplace");
-  if (wanted && wanted !== "backmarket" && wanted !== "refurbed" && wanted !== "octopia") return NextResponse.json({ error: "Nieznany marketplace." }, { status: 400 });
-  const targets: ListingMarketplace[] = wanted === "backmarket" || wanted === "refurbed" || wanted === "octopia" ? [wanted] : ["backmarket", "refurbed", "octopia"];
+  // ?marketplace= przyjmuje jeden kanał albo kilka po przecinku (np. backmarket,refurbed — cron co 30 min; octopia — cron co 15 min od 19.10.2026)
+  const wanted = (new URL(request.url).searchParams.get("marketplace") || "").split(",").map((x) => x.trim()).filter(Boolean);
+  const known: ListingMarketplace[] = ["backmarket", "refurbed", "octopia"];
+  if (wanted.some((w) => !known.includes(w as ListingMarketplace))) return NextResponse.json({ error: "Nieznany marketplace." }, { status: 400 });
+  const targets: ListingMarketplace[] = wanted.length > 0 ? Array.from(new Set(wanted as ListingMarketplace[])) : known;
   const budget = targets.length === 1 ? SINGLE_BUDGET_MS : BOTH_BUDGET_MS;
   const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY);
 

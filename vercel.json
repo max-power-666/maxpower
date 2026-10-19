@@ -49,8 +49,12 @@
       "schedule": "30 23 * * *"
     },
     {
-      "path": "/api/listings/sync",
+      "path": "/api/listings/sync?marketplace=backmarket,refurbed",
       "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/listings/sync?marketplace=octopia",
+      "schedule": "*/15 * * * *"
     },
     {
       "path": "/api/goods/sync-buyback",
