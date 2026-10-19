@@ -24,7 +24,8 @@ const SLEEP_BETWEEN_SKUS_MS = 2_000;
 // 3 zapytania × 45 s, więc 120 s + 137 s mieści się w maxDuration = 300 s trasy.
 const TICK_BUDGET_MS = 120_000;
 const LOCK_MS = 300_000;
-const LOG_RETENTION_DAYS = 7;
+const LOG_RETENTION_DAYS = 3; // 19.10.2026: z 7 na 3 dni (Supabase Disk IO Budget — log to ok. 14 tys. wierszy na dobę, wstawianych i kasowanych bez przerwy)
+const PRICE_HISTORY_RETENTION_DAYS = 90; // historia cen (wykres w karcie SKU) rośnie bez końca — trzymamy 90 dni
 
 type SkuRow = {
   sku: string;
@@ -248,6 +249,7 @@ export async function bidderTick(opts: { requestRun?: boolean } = {}): Promise<T
       await log(db, run.id, "info", null, `Koniec przebiegu. Zaktualizowano: ${patch.updated}. Błędy: ${patch.failed}`);
       const cutoff = new Date(Date.now() - LOG_RETENTION_DAYS * 86_400_000).toISOString();
       await db.from("buyback_log").delete().lt("at", cutoff);
+      await db.from("buyback_price_history").delete().lt("at", new Date(Date.now() - PRICE_HISTORY_RETENTION_DAYS * 86_400_000).toISOString());
     }
     return { ok: true, idle: false, runId: run.id, processed, remaining, finished: remaining === 0 };
   } finally {
