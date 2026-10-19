@@ -33,6 +33,7 @@ const FILTERS = [
   { key: "octopia", label: "Octopia" },
   { key: "allegro", label: "Allegro" },
   { key: "erli", label: "Erli" },
+  { key: "swopify", label: "Swopify" },
 ];
 
 const fmtPLN = (n: number | null) => (n === null ? "—" : n.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));

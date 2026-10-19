@@ -64,7 +64,9 @@ export function bmCommissionPct(o: { sku: string | null | undefined; title: stri
 // ani ceny z wyceny przewoźnika, ani ręcznego kosztu, przyjmujemy 15 zł netto NA ZAMÓWIENIE (dzielone na pozycje jak każdy koszt zamówienia) i oznaczamy jako szacunek.
 export const DEFAULT_PL_SHIPPING_NET = 15;
 export const MARGIN_VAT_RATE = 23; // % — VAT od marży (23/123 marży brutto), ta sama stała stawka co faktury (INVOICE_VAT_RATE)
-export const MARGIN_MARKETPLACES = ["backmarket", "refurbed", "octopia", "allegro", "erli"] as const;
+export const MARGIN_MARKETPLACES = ["backmarket", "refurbed", "octopia", "allegro", "erli", "swopify"] as const;
+// Swopify (19.10.2026, na prośbę właściciela — "zamówienia ze swopify, koszt prowizji 5%, możemy dodać do marży"): stała prowizja od ceny sprzedaży brutto; kanał ręczny (zamówienia dopisywane z maili)
+export const SWOPIFY_COMMISSION_PCT = 5;
 
 export type MarginDbRow = {
   marketplace: string;
@@ -132,7 +134,7 @@ export type MarginResult = {
   shippingPln: number | null;
   extraPln: number | null;
   commissionPln: number | null;
-  commissionSource: "faktura" | "szacunek" | "refurbed" | "octopia" | "srednia" | null;
+  commissionSource: "faktura" | "szacunek" | "refurbed" | "octopia" | "srednia" | "stala" | null;
   servicePln: number | null; // koszt części wbudowanych w sztukę (Serwis -> Części); null = brak przypisanych części
   marginPln: number | null;
   marginPct: number | null; // marża / cena sprzedaży
@@ -409,6 +411,13 @@ export function computeMargin(row: MarginDbRow, ctx: MarginContext): MarginResul
       commissionSource = "srednia";
       commNote = `SZACUNEK: średnia stawka ${f2(fr.pct)}% z faktur kosztowych ${row.marketplace === "allegro" ? "Allegro (miesięczne faktury opłat dla Polski)" : "Erli (faktury FV-P — opłaty platformy — oraz FV-A — reklama Erli Campaigns)"} za ${fr.window.join(", ")} × cena sprzedaży ${f2(salePln)} zł. Nie zależy od kategorii produktu ani opcji sprzedaży konkretnego zamówienia.`;
     } else if (!fr) commNote = "Brak średniej stawki — nie ma kompletnych miesięcy z fakturami kosztowymi (Finanse → Faktury kosztowe).";
+  } else if (row.marketplace === "swopify") {
+    // Swopify: stała prowizja 5% od ceny sprzedaży brutto (podana przez właściciela)
+    if (salePln !== null) {
+      commissionPln = round2(salePln * (SWOPIFY_COMMISSION_PCT / 100));
+      commissionSource = "stala";
+      commNote = `Stała prowizja Swopify ${SWOPIFY_COMMISSION_PCT}% × cena sprzedaży ${f2(salePln)} zł.`;
+    }
   } else if (row.marketplace === "backmarket" && date) {
     const salesFees = num(row.bm_sales_fees);
     const ri = rateOf("EUR");
