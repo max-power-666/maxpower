@@ -367,9 +367,9 @@ update sales_order_items i
         or i.currency is distinct from nullif(btrim(t.l->>'currency'), '')
         or i.name is distinct from nullif(btrim(t.l->>'product'), ''));
 
--- refurbed: total_charged na pozycji już jest ceną jednostkową (każda pozycja to zawsze jedna sztuka).
+-- refurbed: cena pozycji = total_paid (zapłacone przez klienta + rabat sfinansowany przez refurbed; 19.10.2026), a gdy puste/0 — total_charged; każda pozycja to zawsze jedna sztuka.
 update sales_order_items i
-   set price = nullif(t.it->>'total_charged', '')::numeric,
+   set price = case when coalesce(nullif(t.it->>'total_paid', '')::numeric, 0) > 0 then (t.it->>'total_paid')::numeric else nullif(t.it->>'total_charged', '')::numeric end,
        currency = nullif(btrim(t.it->>'currency_code'), ''),
        name = nullif(btrim(t.it->>'name'), '')
   from sales_orders s
@@ -378,7 +378,7 @@ update sales_order_items i
        with ordinality as t(it, n)
  where i.marketplace = 'refurbed' and i.external_id = s.external_id
    and i.item_key = coalesce(t.it->>'id', t.n::text)
-   and (i.price is distinct from nullif(t.it->>'total_charged', '')::numeric
+   and (i.price is distinct from (case when coalesce(nullif(t.it->>'total_paid', '')::numeric, 0) > 0 then (t.it->>'total_paid')::numeric else nullif(t.it->>'total_charged', '')::numeric end)
         or i.currency is distinct from nullif(btrim(t.it->>'currency_code'), '')
         or i.name is distinct from nullif(btrim(t.it->>'name'), ''));
 

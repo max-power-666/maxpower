@@ -175,6 +175,8 @@ type RefurbedItem = {
   sku?: string;
   state?: string;
   total_charged?: string;
+  total_paid?: string;
+  total_discount?: string;
   currency_code?: string;
   parcel_tracking_url?: string;
   item_identifier?: string;
@@ -1094,7 +1096,10 @@ export default function SalesOrderCard({
                         <Row label="Produkt" value={l.name} />
                         <Row label="SKU" value={l.sku} mono />
                         <Row label="Stan pozycji" value={l.state} />
-                        <Row label="Cena" value={fmtMoney(l.total_charged, l.currency_code)} />
+                        <Row label="Cena (Total Paid)" value={fmtMoney(l.total_paid && Number(l.total_paid) > 0 ? l.total_paid : l.total_charged, l.currency_code)} />
+                        {l.total_charged !== undefined && l.total_paid !== undefined && Number(l.total_paid) > 0 && Math.abs(Number(l.total_paid) - Number(l.total_charged)) > 0.005 && (
+                          <Row label="Zapłacone przez klienta (Total Charged)" value={`${fmtMoney(l.total_charged, l.currency_code)}${l.total_discount ? ` · rabat refurbed ${fmtMoney(l.total_discount, l.currency_code)}` : ""}`} />
+                        )}
                         <Row
                           label="Identyfikatory (refurbed)"
                           value={(l.item_identifiers || []).map((x) => `${x.identifier_type ?? ""} ${x.value ?? ""}`.trim()).join(", ") || l.item_identifier}

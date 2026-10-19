@@ -370,6 +370,14 @@ export function mapRefurbedToSales(o: any) {
 // W refurbed każda sztuka to osobna pozycja (order_item) z własnym id — to jest klucz pozycji.
 // refurbed nie rozbija ilości (każda pozycja to zawsze jedna sztuka), więc total_charged na pozycji już JEST
 // ceną jednostkową — bez dzielenia, inaczej niż w kanałach, które eksplodują quantity > 1 na kilka wierszy.
+// Cena pozycji refurbed (19.10.2026, na prośbę właściciela): "Total Paid" (total_paid = zapłacone przez klienta + rabat sfinansowany przez refurbed, np. 785,68 + 68,32 = 854,00 €), a nie "Total Charged"
+// (total_charged = to, co klient zapłacił po rabacie) — prowizja refurbed liczy się od total_paid, a sprzedawca dostaje pełną kwotę. Gdy total_paid jest puste albo 0 (zwroty/anulowania),
+// bierzemy total_charged. Ten sam wybór jest w supabase/sales-orders.sql (uzupełnienie starych wierszy).
+export function refurbedItemPrice(it: any): number | null {
+  const paid = num(it?.total_paid);
+  return paid !== null && paid > 0 ? paid : num(it?.total_charged);
+}
+
 export function mapRefurbedItems(o: any): SalesItemRow[] {
   return ((o.items as any[]) || []).map((it, i) => ({
     marketplace: "refurbed",
@@ -378,7 +386,7 @@ export function mapRefurbedItems(o: any): SalesItemRow[] {
     position: i + 1,
     sku: typeof it?.sku === "string" && it.sku.trim() ? it.sku.trim() : null,
     name: typeof it?.name === "string" && it.name.trim() ? it.name.trim() : null,
-    price: num(it?.total_charged),
+    price: refurbedItemPrice(it),
     currency: typeof it?.currency_code === "string" && it.currency_code.trim() ? it.currency_code.trim() : null,
   }));
 }
