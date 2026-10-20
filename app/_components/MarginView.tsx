@@ -190,6 +190,7 @@ export default function MarginView({ session, members }: { session: Session; mem
               <th className="p-3 text-right">Koszty dodatkowe</th>
               <th className="p-3 text-right">Prowizja</th>
               <th className="p-3 text-right">Serwis</th>
+              <th className="p-3 text-right" title="Czas poświęcony na sztukę w Serwisie, Testach i Trade-in × koszt godziny pracownika (z płac wrześniowych)">Koszty pracy</th>
               <th className="p-3 text-right">Marża</th>
               <th className="p-3 text-right">Marża %</th>
               <th className="p-3 w-8"></th>
@@ -197,7 +198,7 @@ export default function MarginView({ session, members }: { session: Session; mem
           </thead>
           <tbody>
             {!loading && rows.length === 0 && (
-              <tr><td colSpan={17} className="p-6 text-center text-inksoft text-sm">{search || marketplace || skuCategory || period !== "all" ? "Brak wyników." : "Brak sprzedanych sztuk z numerem seryjnym (Back Market, refurbed i Octopia)."}</td></tr>
+              <tr><td colSpan={18} className="p-6 text-center text-inksoft text-sm">{search || marketplace || skuCategory || period !== "all" ? "Brak wyników." : "Brak sprzedanych sztuk z numerem seryjnym (Back Market, refurbed i Octopia)."}</td></tr>
             )}
             {rows.map((r) => {
               const rowKey = `${r.marketplace}:${r.orderId}:${r.itemKey}`;
@@ -231,6 +232,10 @@ export default function MarginView({ session, members }: { session: Session; mem
                   {r.commissionSource === "srednia" && <div className="text-[10px] text-amber font-sans" title="Prowizja szacowana średnią stawką z faktur kosztowych (3 ostatnie kompletne miesiące) — zakładka Prowizje Allegro / Erli">średnia z faktur</div>}
                 </td>
                 <td className={`p-3 text-right font-mono ${r.servicePln === null ? "text-inksoft" : ""}`} title="Części przypisane do numeru seryjnego (Serwis → Części), cena netto">{fmtPLN(r.servicePln)}</td>
+                <td className={`p-3 text-right font-mono ${r.laborPln === null ? "text-inksoft" : ""}`} title="Czas pracy nad sztuką (Serwis, Testy, Trade-in) × koszt godziny pracownika z płac wrześniowych">
+                  {fmtPLN(r.laborPln)}
+                  {r.laborHours !== null && <div className="text-[10px] text-inksoft">{r.laborHours.toLocaleString("pl-PL", { maximumFractionDigits: 2 })} h</div>}
+                </td>
                 <td className={`p-3 text-right font-mono font-semibold whitespace-nowrap ${marginCls(r.marginPln)}`}>
                   {fmtPLN(r.marginPln)}
                   {r.flags.length > 0 && <span className="text-amber ml-1 cursor-help" title={r.flags.join("; ")}>⚠</span>}
@@ -249,7 +254,7 @@ export default function MarginView({ session, members }: { session: Session; mem
               </tr>
               {open && (
                 <tr className="border-b border-line bg-paper">
-                  <td colSpan={17} className="px-6 py-4">
+                  <td colSpan={18} className="px-6 py-4">
                     <div className="text-xs font-semibold text-inksoft mb-2">WYLICZENIE MARŻY — {r.productName || r.sku || r.serial} · {r.serial}</div>
                     <table className="w-full max-w-5xl text-sm bg-white border border-line">
                       <tbody>
@@ -291,7 +296,7 @@ export default function MarginView({ session, members }: { session: Session; mem
       <p className="text-[11px] text-inksoft mt-3 max-w-4xl">
         Marża = cena sprzedaży (PLN, brutto) − cena zakupu − VAT od marży ({"("}sprzedaż − zakup{")"} × 23/123, bez kosztów dodatkowych) − wysyłka − koszty dodatkowe (Trade-in) − prowizja marketplace&apos;u − koszty serwisu.
         Towary na V23 (zakup ze standardowym VAT 23%, np. akcesoria) liczymy inaczej: kosztem jest cena zakupu NETTO, a „VAT” w tabeli to VAT należny 23% od pełnej ceny sprzedaży — marża = sprzedaż/1,23 − zakup netto − pozostałe koszty.
-        Koszty serwisu = ceny netto części przypisanych do numeru seryjnego (Serwis → Części). Koszty zamówień z wieloma pozycjami dzielone wg ceny pozycji; waluty przeliczone kursem NBP z dnia poprzedniego względem daty zamówienia.
+        Koszty serwisu = ceny netto części przypisanych do numeru seryjnego (Serwis → Części). Koszty pracy = czas z napraw, testów i obsługi paczki Trade-in tej sztuki (pojedynczy wpis najwyżej 4 h) × koszt godziny pracownika (kwota z umowy + składki pracodawcy ÷ godziny, z płac wrześniowych); pomniejszają marżę. Koszty zamówień z wieloma pozycjami dzielone wg ceny pozycji; waluty przeliczone kursem NBP z dnia poprzedniego względem daty zamówienia.
       </p>
 
       </>

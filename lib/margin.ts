@@ -136,6 +136,8 @@ export type MarginResult = {
   commissionPln: number | null;
   commissionSource: "faktura" | "szacunek" | "refurbed" | "octopia" | "srednia" | "stala" | null;
   servicePln: number | null; // koszt części wbudowanych w sztukę (Serwis -> Części); null = brak przypisanych części
+  laborPln: number | null; // koszty pracy (20.10.2026): czas z napraw, testów i obsługi paczki Trade-in tej sztuki × koszt godziny pracownika; null = brak wpisów albo stawek
+  laborHours: number | null; // przepracowane godziny, z których liczono koszty pracy (po ograniczeniu pojedynczego wpisu do LABOR_MAX_HOURS)
   marginPln: number | null;
   marginPct: number | null; // marża / cena sprzedaży
   flags: string[]; // czego brakuje (marża wtedy niepełna) — pokazywane w UI
@@ -238,6 +240,12 @@ export function deriveBmRates(lines: BmLine[], weeks = 8): BmRates | null {
 // (1, a gdy w polu urządzenia było kilka numerów — 1/liczba numerów, żeby koszt nie liczył się wielokrotnie).
 export type ServicePart = { name: string | null; pln: number | null; receivedAt: string | null; status: string | null; share: number };
 
+// Praca nad sztuką (20.10.2026): jeden zakończony wpis z Serwisu (naprawa), Testów albo Trade-in (obsługa paczki). hours = czas netto (bez wstrzymania), ograniczony do LABOR_MAX_HOURS;
+// costPerHour = koszt godziny dla firmy z płac (null = pracownik bez stawki w payroll_rates).
+export const LABOR_MAX_HOURS = 4; // zapomniany albo długo czekający wpis (np. naprawa "oczekuje na części") nie może zawyżać kosztu — pojedynczy wpis liczy się do 4 godzin
+export const LABOR_AREA_LABEL = { serwis: "Serwis", testy: "Testy", trade_in: "Trade-in" } as const;
+export type LaborEntry = { area: keyof typeof LABOR_AREA_LABEL; who: string | null; startedAt: string; hours: number; rawHours: number; costPerHour: number | null };
+
 export type MarginContext = {
   eurRates: NbpRate[];
   dkkRates: NbpRate[];
@@ -245,6 +253,7 @@ export type MarginContext = {
   bmRates: BmRates | null;
   bmOrderExtras?: Map<string, { adjFee: number; refunds: number }>; // Back Market: per zamówienie z wgranych faktur — netto "Adjustment fee" (ujemne = koszt) i zwroty (ujemne), €
   partsBySerial?: Map<string, ServicePart[]>; // klucz: numer seryjny WIELKIMI literami
+  laborBySerial?: Map<string, LaborEntry[]>; // klucz: numer seryjny WIELKIMI literami bez zer wiodących (laborKey)
   feeRates?: Record<string, { pct: number; window: string[] }>; // Allegro/Erli: średnia stawka z faktur kosztowych (% ceny sprzedaży brutto) i miesiące, z których pochodzi
 };
 
@@ -256,6 +265,9 @@ function toPln(amount: number, currency: string | null | undefined, date: string
   const r = rateBeforeDate(rates, date);
   return r === null ? null : amount * r;
 }
+
+// Klucz numeru seryjnego do łączenia wpisów pracy ze sprzedaną sztuką: wielkie litery, bez spacji na brzegach i bez zer wiodących (numer bywa wpisany raz z zerem, raz bez).
+export const laborKey = (serial: string | null | undefined) => (serial || "").trim().toUpperCase().replace(/^0+/, "");
 
 const f2 = (n: number) => n.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const f4 = (n: number) => n.toLocaleString("pl-PL", { minimumFractionDigits: 4, maximumFractionDigits: 4 });
@@ -519,16 +531,49 @@ export function computeMargin(row: MarginDbRow, ctx: MarginContext): MarginResul
     }
   }
 
+  // --- koszty pracy (20.10.2026): czas poświęcony na sztukę w Serwisie, Testach i Trade-in (wpisy rozpoczęte NIE PÓŹNIEJ niż w dniu zamówienia) × koszt godziny pracownika z płac
+  // (payroll_rates: kwota z umowy + składki pracodawcy, ÷ godziny; dziś stawki z płac wrześniowych dla wszystkich okresów). Wpis bez stawki pracownika liczy się jako 0 z ostrzeżeniem.
+  let laborPln: number | null = null;
+  let laborHours: number | null = null;
+  {
+    const all = ctx.laborBySerial?.get(laborKey(row.serial_number)) ?? [];
+    const orderDay = row.order_date ? warsawDate(row.order_date) : "";
+    const used = all.filter((e) => !orderDay || warsawDate(e.startedAt) <= orderDay);
+    if (!ctx.laborBySerial) {
+      details.push({ key: "labor", label: "Koszty pracy", sign: "-", amountPln: null, note: "Brak danych o stawkach pracowników (tabela płac) — koszty pracy nie są liczone." });
+    } else if (used.length === 0) {
+      details.push({ key: "labor", label: "Koszty pracy", sign: "-", amountPln: null, note: "Do tego numeru seryjnego nie ma zakończonych wpisów w Serwisie, Testach ani Trade-in (przed dniem zamówienia) — koszty pracy 0." });
+    } else {
+      const priced = used.filter((e) => e.costPerHour !== null);
+      laborPln = priced.reduce((sum, e) => sum + e.hours * (e.costPerHour as number), 0);
+      laborHours = used.reduce((sum, e) => sum + e.hours, 0);
+      const noRate = used.length - priced.length;
+      if (noRate > 0) flags.push(`${noRate} ${noRate === 1 ? "wpis pracy" : "wpisy pracy"} bez stawki pracownika (koszty pracy)`);
+      const hm = (h: number) => `${f2(h)} h`;
+      const list = used
+        .slice(0, 8)
+        .map((e) => `${LABOR_AREA_LABEL[e.area]}${e.who ? ` (${e.who})` : ""} ${hm(e.hours)}${e.rawHours > e.hours + 0.005 ? ` z ${hm(e.rawHours)}, ucięte do ${LABOR_MAX_HOURS} h` : ""}${e.costPerHour === null ? " — brak stawki" : ` × ${f2(e.costPerHour)} zł = ${f2(e.hours * e.costPerHour)} zł`}`)
+        .join("; ");
+      details.push({
+        key: "labor",
+        label: "Koszty pracy",
+        sign: "-",
+        amountPln: round2(laborPln),
+        note: `${used.length} ${used.length === 1 ? "wpis" : "wpisów"} pracy, razem ${hm(laborHours)}: ${list}${used.length > 8 ? `; … (+${used.length - 8})` : ""}. Koszt godziny = (kwota z umowy + składki pracodawcy) ÷ godziny z płac wrześniowych; pojedynczy wpis liczy się najwyżej ${LABOR_MAX_HOURS} h.`,
+      });
+    }
+  }
+
   const marginPln =
     salePln !== null && purchase !== null && vatPln !== null
-      ? round2(salePln - purchase - vatPln - (shippingPln ?? 0) - (extraPln ?? 0) - (commissionPln ?? 0) - (servicePln ?? 0))
+      ? round2(salePln - purchase - vatPln - (shippingPln ?? 0) - (extraPln ?? 0) - (commissionPln ?? 0) - (servicePln ?? 0) - (laborPln ?? 0))
       : null;
   details.push({
     key: "margin",
     label: "Marża",
     sign: "=",
     amountPln: marginPln,
-    note: marginPln === null ? "Nie do policzenia — brakuje ceny sprzedaży (lub kursu) albo ceny zakupu." : "sprzedaż − zakup − VAT (od marży albo należny przy V23) − wysyłka − koszty dodatkowe − prowizja − serwis. Brakujące koszty liczone jako 0 (patrz ostrzeżenia).",
+    note: marginPln === null ? "Nie do policzenia — brakuje ceny sprzedaży (lub kursu) albo ceny zakupu." : "sprzedaż − zakup − VAT (od marży albo należny przy V23) − wysyłka − koszty dodatkowe − prowizja − serwis − koszty pracy. Brakujące koszty liczone jako 0 (patrz ostrzeżenia).",
   });
 
   return {
@@ -552,6 +597,8 @@ export function computeMargin(row: MarginDbRow, ctx: MarginContext): MarginResul
     commissionPln: commissionPln === null ? null : round2(commissionPln),
     commissionSource,
     servicePln: servicePln === null ? null : round2(servicePln),
+    laborPln: laborPln === null ? null : round2(laborPln),
+    laborHours: laborHours === null ? null : Math.round(laborHours * 100) / 100,
     marginPln,
     marginPct: marginPln !== null && salePln ? marginPln / salePln : null,
     flags,

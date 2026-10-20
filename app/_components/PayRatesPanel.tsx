@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
-type Row = { id: number; period: string; person_name: string; contract: string; hours: number; payout: number; bonus: number; note: string | null };
+type Row = { id: number; period: string; person_name: string; contract: string; hours: number; payout: number; bonus: number; employer_costs: number; note: string | null };
+const CONTRACT_LABEL: Record<string, string> = { UZ: "Umowy zlecenie", UO: "Umowy o pracę" };
 
 const fmt = (n: number) => n.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const MONTHS = ["styczeń", "luty", "marzec", "kwiecień", "maj", "czerwiec", "lipiec", "sierpień", "wrzesień", "październik", "listopad", "grudzień"];
@@ -28,7 +29,7 @@ export default function PayRatesPanel() {
     })();
   }, []);
 
-  const periods = Array.from(new Set((rows ?? []).map((r) => r.period)));
+  const groups = Array.from(new Set((rows ?? []).map((r) => `${r.period}|${r.contract}`)));
 
   return (
     <div className="border border-line bg-white">
@@ -38,45 +39,53 @@ export default function PayRatesPanel() {
       </div>
       {error && <div className="p-4 text-sm text-rust">{error}</div>}
       {!error && rows === null && <div className="p-4 text-sm text-inksoft">Wczytywanie…</div>}
-      {periods.map((p) => {
-        const list = (rows ?? []).filter((r) => r.period === p);
+      {groups.map((g) => {
+        const [p, contract] = g.split("|");
+        const list = (rows ?? []).filter((r) => r.period === p && r.contract === contract);
+        const hasEmployer = list.some((r) => Number(r.employer_costs) > 0);
         return (
-          <div key={p} className="border-b border-line last:border-b-0">
-            <div className="px-3 pt-3 text-xs font-semibold text-inksoft uppercase tracking-wide">Umowy zlecenie — płace za {periodLabel(p)}</div>
+          <div key={g} className="border-b border-line last:border-b-0">
+            <div className="px-3 pt-3 text-xs font-semibold text-inksoft uppercase tracking-wide">{CONTRACT_LABEL[contract] ?? contract} — płace za {periodLabel(p)}</div>
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs text-inksoft border-b border-line">
                   <th className="p-3">Osoba</th>
                   <th className="p-3 text-right">Godziny</th>
-                  <th className="p-3 text-right">Kwota z umowy (zł)</th>
+                  <th className="p-3 text-right">{contract === "UO" ? "Brutto (zł)" : "Kwota z umowy (zł)"}</th>
                   <th className="p-3 text-right">Premia (zł)</th>
                   <th className="p-3 text-right">Stawka godzinowa</th>
                   <th className="p-3 text-right">Premia na godzinę</th>
                   <th className="p-3 text-right">Razem na godzinę</th>
+                  {hasEmployer && <th className="p-3 text-right">Składki pracodawcy (zł)</th>}
+                  {hasEmployer && <th className="p-3 text-right">Koszt dla firmy na godzinę</th>}
                 </tr>
               </thead>
               <tbody>
                 {list.map((r) => {
-                  const hours = Number(r.hours), payout = Number(r.payout), bonus = Number(r.bonus);
+                  const hours = Number(r.hours), payout = Number(r.payout), bonus = Number(r.bonus), employer = Number(r.employer_costs);
                   return (
                     <tr key={r.id} className="border-b border-line last:border-b-0">
                       <td className="p-3 font-semibold">
                         {r.person_name}
                         {r.note && <div className="text-xs font-normal text-inksoft">{r.note}</div>}
                       </td>
-                      <td className="p-3 text-right tabular-nums">{fmt(hours)}</td>
+                      <td className="p-3 text-right tabular-nums">{fmt(hours)}{contract === "UO" ? " *" : ""}</td>
                       <td className="p-3 text-right tabular-nums">{fmt(payout)}</td>
                       <td className="p-3 text-right tabular-nums">{bonus ? fmt(bonus) : "—"}</td>
                       <td className="p-3 text-right tabular-nums font-semibold">{fmt((payout - bonus) / hours)} zł</td>
                       <td className="p-3 text-right tabular-nums">{bonus ? `${fmt(bonus / hours)} zł` : "—"}</td>
                       <td className="p-3 text-right tabular-nums font-semibold">{fmt(payout / hours)} zł</td>
+                      {hasEmployer && <td className="p-3 text-right tabular-nums">{employer ? fmt(employer) : "—"}</td>}
+                      {hasEmployer && <td className="p-3 text-right tabular-nums font-semibold">{fmt((payout + employer) / hours)} zł</td>}
                     </tr>
                   );
                 })}
               </tbody>
             </table>
             <div className="px-3 pb-3 text-xs text-inksoft">
-              Dane na podstawie płac wrześniowych 2026 (wypłata 10.10.2026), nie z RCP. Kwota z umowy to kwota brutto z rachunku (przed składkami i podatkiem, jeśli występują; osoby do 26. roku życia nie mają składek, więc jest równa wypłacie). Stawka godzinowa = (kwota − premia) ÷ godziny; premia na godzinę = premia ÷ godziny; razem na godzinę = kwota ÷ godziny. Bez składek pracodawcy.
+              Dane na podstawie płac wrześniowych 2026 (wypłata 10.10.2026), nie z RCP. Stawka godzinowa = (kwota − premia) ÷ godziny; premia na godzinę = premia ÷ godziny; razem na godzinę = kwota ÷ godziny.
+              {contract === "UO" && " * Dla umów o pracę godziny to przyjęta średnia (167 h na miesiąc), nie rzeczywiste; kwota to brutto z listy płac (z premią, urlopowym i dodatkami)."}
+              {hasEmployer ? " Koszt dla firmy na godzinę = (kwota + składki pracodawcy) ÷ godziny; to stawka używana w Marży (Koszty pracy)." : ""}
             </div>
           </div>
         );
