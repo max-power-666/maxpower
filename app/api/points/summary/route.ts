@@ -16,7 +16,7 @@ const POINTS_STATUSES_TRADEIN = ["obsluzona", "kontroferta", "ok_dok", "problem"
 type Src = { table: string; emailCol: string; extra: string; filter: (q: any) => any; area: "service" | "tests" | "tradein" };
 const SOURCES: Src[] = [
   { table: "service_log", emailCol: "employee_email", extra: "task_type", filter: (q) => q.eq("status", "naprawiony"), area: "service" },
-  { table: "test_log", emailCol: "employee_email", extra: "", filter: (q) => q.eq("status", "przetestowane"), area: "tests" },
+  { table: "test_log", emailCol: "employee_email", extra: "", filter: (q) => q.eq("status", "przetestowane").neq("test_kind", "inwentaryzacja"), area: "tests" },
   { table: "buyback_order_intake", emailCol: "entered_by_email", extra: "", filter: (q) => q.in("status", POINTS_STATUSES_TRADEIN), area: "tradein" },
 ];
 

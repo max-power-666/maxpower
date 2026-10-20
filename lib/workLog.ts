@@ -76,6 +76,7 @@ export const TEST_KINDS = [
   { key: "olx", label: "OLX" },
   { key: "allegro", label: "Allegro" },
   { key: "vinted", label: "Vinted" },
+  { key: "inwentaryzacja", label: "Inwentaryzacja" }, // 21.10.2026: NIE punktowana i nie liczy się do liczby testów (trigger test_log_inventory_points w bazie)
 ] as const;
 
 // Wynik testu (01.10.2026) — stan urządzenia ustalony podczas testu; niezależny od statusu
@@ -87,6 +88,7 @@ export const TEST_RESULTS = [
   { key: "rma", label: "RMA" },
   { key: "do_poprawy", label: "Do poprawy" },
   { key: "outlet", label: "Outlet" },
+  { key: "na_czesci", label: "Na części" }, // 21.10.2026
 ] as const;
 
 export const INTAKE_STATUSES = [
@@ -140,6 +142,7 @@ export const TEST_KIND_COLORS: Record<string, { bg: string; fg: string }> = {
   olx: { bg: "#d6f1ee", fg: "#0f766e" },
   allegro: { bg: "#fde8d7", fg: "#c2570c" },
   vinted: { bg: "#fde3ec", fg: "#b4235f" },
+  inwentaryzacja: { bg: "#e4e1f7", fg: "#4b3fa8" },
 };
 
 export const TEST_RESULT_COLORS: Record<string, { bg: string; fg: string }> = {
@@ -148,4 +151,5 @@ export const TEST_RESULT_COLORS: Record<string, { bg: string; fg: string }> = {
   rma: { bg: "#fde1e1", fg: "#b42318" },
   do_poprawy: { bg: "#fef6d8", fg: "#8a6d00" },
   outlet: { bg: "#dcf1fb", fg: "#0b6a8f" },
+  na_czesci: { bg: "#e9dccb", fg: "#6b4423" },
 };

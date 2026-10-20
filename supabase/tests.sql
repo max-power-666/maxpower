@@ -146,3 +146,19 @@ do $$
 begin
   begin alter publication supabase_realtime add table test_log; exception when duplicate_object then null; end;
 end $$;
+
+-- Rodzaj testu "Inwentaryzacja" (21.10.2026): test NIEPUNKTOWANY — baza zeruje punkty (points = 0) przy zapisie z tym rodzajem; po zmianie rodzaju na inny wraca stawka 15 pkt.
+-- (Aplikacja dodatkowo pomija ten rodzaj w podsumowaniu punktacji i liczbie testów oraz w kosztach pracy w Marży.) Nowy wynik "Na części" to zwykły tekst w kolumnie result — bez zmian w bazie.
+create or replace function test_log_inventory_points() returns trigger
+language plpgsql as $$
+begin
+  if new.test_kind = 'inwentaryzacja' then
+    new.points := 0;
+  elsif tg_op = 'UPDATE' and old.test_kind = 'inwentaryzacja' and new.points = 0 then
+    new.points := 15;
+  end if;
+  return new;
+end $$;
+drop trigger if exists test_log_inventory_points on test_log;
+create trigger test_log_inventory_points before insert or update on test_log
+  for each row execute function test_log_inventory_points();

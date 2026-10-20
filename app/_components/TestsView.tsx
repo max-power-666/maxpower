@@ -101,7 +101,7 @@ export default function TestsView({
     try {
       // Punkty po points_awarded_at (pierwsze zaliczenie, trigger w bazie) — zmiana statusu nie przesuwa testu do innego dnia. Przed uruchomieniem
       // aktualizacji tests.sql kolumny nie ma — wtedy awaryjnie po finished_at (stare zachowanie).
-      const rangeQuery = (col: string) => fetchAllPaged<{ employee_email: string | null; points: number }>(() => inPeriod(supabase.from("test_log").select("employee_email, points").eq("status", "przetestowane"), col, period));
+      const rangeQuery = (col: string) => fetchAllPaged<{ employee_email: string | null; points: number }>(() => inPeriod(supabase.from("test_log").select("employee_email, points").eq("status", "przetestowane").neq("test_kind", "inwentaryzacja"), col, period));
       const [rangeRes, { data: recentData, error: recentErr }] = await Promise.all([
         rangeQuery("points_awarded_at"),
         (() => {

@@ -89,7 +89,7 @@ async function loadLaborBySerial(db: SupabaseClient<any, any, any>, keys: Set<st
   };
   const [svc, tst, intake] = await Promise.all([
     fetchAll<{ device_ref: string | null; employee_email: string | null; started_at: string | null; finished_at: string | null; paused_seconds: number | null }>((f, t) => db.from("service_log").select("device_ref, employee_email, started_at, finished_at, paused_seconds").order("id").range(f, t)).catch(() => []),
-    fetchAll<{ serial_number: string | null; employee_email: string | null; started_at: string | null; finished_at: string | null }>((f, t) => db.from("test_log").select("serial_number, employee_email, started_at, finished_at").order("id").range(f, t)).catch(() => []),
+    fetchAll<{ serial_number: string | null; employee_email: string | null; started_at: string | null; finished_at: string | null }>((f, t) => db.from("test_log").select("serial_number, employee_email, started_at, finished_at").neq("test_kind", "inwentaryzacja").order("id").range(f, t)).catch(() => []),
     fetchAll<{ serial_number: string | null; entered_by_email: string | null; entered_at: string | null; finished_at: string | null }>((f, t) => db.from("buyback_order_intake").select("serial_number, entered_by_email, entered_at, finished_at").order("order_public_id").range(f, t)).catch(() => []),
   ]);
   for (const r of svc) add("serwis", r.device_ref, r.employee_email, r.started_at, r.finished_at, r.paused_seconds || 0);
