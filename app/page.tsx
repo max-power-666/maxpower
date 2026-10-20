@@ -38,6 +38,7 @@ import TestsView from "./_components/TestsView";
 import InventoryRawView from "./_components/InventoryRawView";
 import ConsoleCatalogView from "./_components/ConsoleCatalogView";
 import ThemeSwitcher from "./_components/ThemeSwitcher";
+import PayRatesPanel from "./_components/PayRatesPanel";
 import { displayNameForEmail } from "@/lib/displayName";
 
 const ROLES = ["Admin", "Manager", "Księgowa", "Magazyn", "Zamówienia", "Serwis", "Kierownik serwisu", "Testy", "Bidder", "Trade-in", "Kierownik trade-in", "Sklep"];
@@ -998,6 +999,7 @@ export default function Home() {
               members={members}
               currentUserId={session.user.id}
               canEdit={role === "Admin"}
+              canSeePay={role === "Admin" || role === "Manager" || role === "Księgowa"}
               onChangeRole={changeMemberRole}
               onChangeName={changeMemberName}
               onChangeAccess={changeMemberAccess}
@@ -1191,6 +1193,7 @@ function TeamView({
   members,
   currentUserId,
   canEdit,
+  canSeePay,
   onChangeRole,
   onChangeName,
   onChangeAccess,
@@ -1200,6 +1203,7 @@ function TeamView({
   members: Member[];
   currentUserId: string;
   canEdit: boolean; // role i imiona zmienia tylko Admin (polityka w bazie); reszta widzi listę tylko do odczytu
+  canSeePay: boolean; // stawki godzinowe i premie z płac (20.10.2026): Admin, Manager, Księgowa
   onChangeRole: (userId: string, role: string) => void;
   onChangeName: (userId: string, name: string) => void;
   onChangeAccess: (userId: string, access: ViewKey[] | null) => void;
@@ -1315,6 +1319,7 @@ function TeamView({
           })}
         </tbody>
       </table>
+      {canSeePay && <PayRatesPanel />}
 
       {editingMember && (
         <MemberEditDrawer
