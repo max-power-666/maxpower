@@ -31,7 +31,7 @@ export default function PayRatesPanel() {
   const periods = Array.from(new Set((rows ?? []).map((r) => r.period)));
 
   return (
-    <div className="mt-6 border border-line bg-white">
+    <div className="border border-line bg-white">
       <div className="p-3 border-b border-line">
         <div className="text-sm font-semibold">Stawki godzinowe i premie</div>
         <div className="text-xs text-inksoft">Widoczne tylko dla Admina, Managera i Księgowej.</div>

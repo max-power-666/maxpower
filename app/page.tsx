@@ -1211,6 +1211,7 @@ function TeamView({
   onChangePrinter: (userId: string, field: "zebra_printer_name" | "a4_printer_name", value: string | null) => void;
 }) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [teamSub, setTeamSub] = useState<"team" | "pay">("team"); // pigułki Zespołu (20.10.2026): lista osób / Stawki godzinowe i premie (tylko Admin, Manager, Księgowa)
 
   // Imię i nazwisko to zwykły tekst; dopiero "Zmień" (tylko Admin) otwiera pole, żeby nie dało się go przypadkiem edytować.
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -1236,7 +1237,27 @@ function TeamView({
 
   const editingMember = members.find((m) => m.user_id === editingAccessId) ?? null;
 
+  const subPill = (active: boolean) => `px-3 py-1.5 rounded-full text-sm font-semibold border ${active ? "bg-ink text-paper border-ink" : "bg-white border-line"}`;
+  if (canSeePay && teamSub === "pay") {
+    return (
+      <div>
+        <div className="flex gap-2 mb-4">
+          <button onClick={() => setTeamSub("team")} className={subPill(false)}>Zespół</button>
+          <button onClick={() => setTeamSub("pay")} className={subPill(true)}>Stawki godzinowe i premie</button>
+        </div>
+        <PayRatesPanel />
+      </div>
+    );
+  }
+
   return (
+    <div>
+    {canSeePay && (
+      <div className="flex gap-2 mb-4">
+        <button onClick={() => setTeamSub("team")} className={subPill(true)}>Zespół</button>
+        <button onClick={() => setTeamSub("pay")} className={subPill(false)}>Stawki godzinowe i premie</button>
+      </div>
+    )}
     <div className="border border-line bg-white">
       <table className="w-full text-sm">
         <thead>
@@ -1319,7 +1340,6 @@ function TeamView({
           })}
         </tbody>
       </table>
-      {canSeePay && <PayRatesPanel />}
 
       {editingMember && (
         <MemberEditDrawer
@@ -1331,6 +1351,7 @@ function TeamView({
           onClose={() => setEditingAccessId(null)}
         />
       )}
+    </div>
     </div>
   );
 }
