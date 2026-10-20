@@ -59,7 +59,21 @@ export default function ShopStockView({ members }: { members: MemberLite[] }) {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
-  const [onlyPublished, setOnlyPublished] = useState(false);
+  // "Ukryj szkice" (21.10.2026): domyślnie włączone — chowa produkty nieopublikowane i nieaktywne warianty (np. dawny magazyn sklepu
+  // ukryty przed importem ofert Back Market). Wybór zapamiętany w przeglądarce.
+  const [onlyPublished, setOnlyPublishedState] = useState(() => {
+    try {
+      return localStorage.getItem("shop-stock-hide-drafts") !== "0";
+    } catch {
+      return true;
+    }
+  });
+  const setOnlyPublished = (v: boolean) => {
+    setOnlyPublishedState(v);
+    try {
+      localStorage.setItem("shop-stock-hide-drafts", v ? "1" : "0");
+    } catch {}
+  };
   const [editId, setEditId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [historySku, setHistorySku] = useState<string | null>(null);
@@ -137,6 +151,8 @@ export default function ShopStockView({ members }: { members: MemberLite[] }) {
     );
   }, [rows, search, category, filter, onlyPublished]);
 
+  const draftCount = useMemo(() => rows.filter((r) => !(r.model.published && r.active)).length, [rows]);
+
   const totals = useMemo(() => {
     const sellable = rows.filter((r) => r.active && r.model.published);
     return {
@@ -190,10 +206,14 @@ export default function ShopStockView({ members }: { members: MemberLite[] }) {
             {f === "all" ? "Wszystkie" : f === "zero" ? "Brak na stanie" : "Na stanie"}
           </button>
         ))}
-        <label className="flex items-center gap-2 text-sm ml-2 cursor-pointer">
-          <input type="checkbox" checked={onlyPublished} onChange={(e) => setOnlyPublished(e.target.checked)} />
-          tylko widoczne w sklepie
-        </label>
+        <span className="text-line mx-1">|</span>
+        <button
+          className={pill(onlyPublished)}
+          onClick={() => setOnlyPublished(!onlyPublished)}
+          title="Szkice = produkty nieopublikowane w sklepie oraz nieaktywne warianty. Kliknij, żeby je pokazać lub ukryć."
+        >
+          Ukryj szkice ({draftCount})
+        </button>
       </div>
 
       <div className="border border-line bg-white overflow-x-auto">
