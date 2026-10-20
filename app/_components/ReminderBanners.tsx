@@ -16,7 +16,7 @@ export default function ReminderBanners({ session, role, onOpen }: { session: Se
   const isAdmin = role === "Admin";
   const isManager = role === "Manager" || role === "Księgowa"; // Manager widzi tylko wnioski urlopowe do rozpatrzenia (12.10.2026) — przypomnienia i Backlog zostają dla Admina
   const canDecideLeave = isAdmin || isManager || role === "Kierownik serwisu"; // Kierownik serwisu: wnioski serwisantów (13.10.2026; RLS ogranicza widoczne wnioski do jego zespołu)
-  const isService = role === "Serwis" || role === "Kierownik serwisu"; // nowe zapotrzebowania widzi tylko serwis (10.10.2026)
+  const isService = role === "Serwis" || role === "Zegarmistrz" || role === "Kierownik serwisu"; // nowe zapotrzebowania widzi tylko serwis (10.10.2026)
   const [active, setActive] = useState<Active[]>([]);
   const [auto, setAuto] = useState<Auto[]>([]);
   const today = warsawYmd(Date.now());

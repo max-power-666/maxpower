@@ -32,7 +32,7 @@ $$;
 -- is_service_staff (service-requests.sql)
 create or replace function is_service_staff() returns boolean
 language sql stable security definer set search_path = public as $$
-  select exists (select 1 from members where user_id = auth.uid() and role in ('Admin', 'Manager', 'Księgowa', 'Serwis', 'Kierownik serwisu'));
+  select exists (select 1 from members where user_id = auth.uid() and role in ('Admin', 'Manager', 'Księgowa', 'Serwis', 'Zegarmistrz', 'Kierownik serwisu'));
 $$;
 
 -- service_requests_guard: pełna definicja (z rolą Księgowa i usuwaniem) jest TYLKO w service-requests.sql — uruchom ten plik, żeby ją zaktualizować.
@@ -50,7 +50,7 @@ language sql stable security definer set search_path = public as $$
     select 1 from members
     where user_id = auth.uid()
       and (role = 'Admin'
-        or (view_access is null and role in ('Manager', 'Księgowa'))
+        or (view_access is null and role in ('Manager', 'Księgowa', 'Zegarmistrz'))
         or (view_access is not null and 'goods' = any (view_access)))
   );
 $$;

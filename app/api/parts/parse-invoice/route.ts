@@ -14,7 +14,7 @@ const admin = () => createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.
 
 export async function POST(request: Request) {
   const db = admin();
-  if (!(await requireRole(request, db, ["Admin", "Manager", "Księgowa", "Serwis", "Kierownik serwisu"]))) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
+  if (!(await requireRole(request, db, ["Admin", "Manager", "Księgowa", "Serwis", "Zegarmistrz", "Kierownik serwisu"]))) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return NextResponse.json({ error: "Brak ANTHROPIC_API_KEY — odczyt faktur wymaga klucza (ten sam co dla zakładki AI). Dodaj pozycje ręcznie." }, { status: 500 });
 

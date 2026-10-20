@@ -40,7 +40,7 @@ import ConsoleCatalogView from "./_components/ConsoleCatalogView";
 import ThemeSwitcher from "./_components/ThemeSwitcher";
 import { displayNameForEmail } from "@/lib/displayName";
 
-const ROLES = ["Admin", "Manager", "Księgowa", "Magazyn", "Zamówienia", "Serwis", "Kierownik serwisu", "Testy", "Bidder", "Trade-in", "Kierownik trade-in", "Sklep"];
+const ROLES = ["Admin", "Manager", "Księgowa", "Magazyn", "Zamówienia", "Serwis", "Zegarmistrz", "Kierownik serwisu", "Testy", "Bidder", "Trade-in", "Kierownik trade-in", "Sklep"];
 
 type ViewKey =
   | "overview" | "inventory" | "sales" | "team" | "service" | "tests" | "tradein" | "orders" | "backlog" | "shipping" | "invoices" | "margin" | "points" | "nbp" | "costs" | "ai" | "rcp" | "returns" | "reminders" | "goods" | "listings" | "toList"
@@ -139,6 +139,8 @@ const ROLE_ACCESS: Record<string, ViewKey[]> = {
   Serwis: ["service", "sales", "backlog", "rcp", "returns"],
   // Kierownik serwisu (05.10.2026): te same zakładki co Serwis; w samym Serwisie widzi naprawy wszystkich i może edytować wiersz w KAŻDYM statusie (patrz ServiceView).
   "Kierownik serwisu": ["service", "sales", "backlog", "rcp", "returns"],
+  // Zegarmistrz (20.10.2026): jak Serwis + zakładka Towar, w której dodaje i EDYTUJE rekordy (goods_can_read() w bazie: domyślnie dostęp bez własnej listy zakładek; usuwa tylko Admin).
+  Zegarmistrz: ["service", "sales", "goods", "backlog", "rcp", "returns"],
   Testy: ["tests", "backlog", "rcp", "returns"],
   Bidder: ["tradein", "backlog", "rcp", "returns"],
   "Trade-in": ["orders", "backlog", "rcp", "returns"],
@@ -910,7 +912,7 @@ export default function Home() {
             onNavigate={(v) => setView(v as ViewKey)}
           />
         )}
-        {(role === "Admin" || role === "Manager" || role === "Księgowa" || role === "Serwis" || role === "Kierownik serwisu") && <ReminderBanners session={session} role={role} onOpen={(v) => setView(v as ViewKey)} />}
+        {(role === "Admin" || role === "Manager" || role === "Księgowa" || role === "Serwis" || role === "Zegarmistrz" || role === "Kierownik serwisu") && <ReminderBanners session={session} role={role} onOpen={(v) => setView(v as ViewKey)} />}
         {/* Tytuł zakładki usunięty (10.10.2026) — zajmował miejsce; pasek zostaje tylko w Magazynie, bo trzyma przycisk "Odśwież". */}
         {view === "inventory" && (
         <div className="flex items-center justify-end px-8 py-3 border-b border-line">
