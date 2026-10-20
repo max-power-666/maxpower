@@ -48,7 +48,7 @@ export default function PayRatesPanel() {
                 <tr className="text-left text-xs text-inksoft border-b border-line">
                   <th className="p-3">Osoba</th>
                   <th className="p-3 text-right">Godziny</th>
-                  <th className="p-3 text-right">Wypłata (zł)</th>
+                  <th className="p-3 text-right">Kwota z umowy (zł)</th>
                   <th className="p-3 text-right">Premia (zł)</th>
                   <th className="p-3 text-right">Stawka godzinowa</th>
                   <th className="p-3 text-right">Premia na godzinę</th>
@@ -62,12 +62,12 @@ export default function PayRatesPanel() {
                     <tr key={r.id} className="border-b border-line last:border-b-0">
                       <td className="p-3 font-semibold">
                         {r.person_name}
-                        {r.note && <div className="text-xs font-normal text-amber">⚠ {r.note}</div>}
+                        {r.note && <div className="text-xs font-normal text-inksoft">{r.note}</div>}
                       </td>
                       <td className="p-3 text-right tabular-nums">{fmt(hours)}</td>
                       <td className="p-3 text-right tabular-nums">{fmt(payout)}</td>
                       <td className="p-3 text-right tabular-nums">{bonus ? fmt(bonus) : "—"}</td>
-                      <td className="p-3 text-right tabular-nums font-semibold">{fmt((payout - bonus) / hours)} zł{r.note ? " (?)" : ""}</td>
+                      <td className="p-3 text-right tabular-nums font-semibold">{fmt((payout - bonus) / hours)} zł</td>
                       <td className="p-3 text-right tabular-nums">{bonus ? `${fmt(bonus / hours)} zł` : "—"}</td>
                       <td className="p-3 text-right tabular-nums font-semibold">{fmt(payout / hours)} zł</td>
                     </tr>
@@ -76,7 +76,7 @@ export default function PayRatesPanel() {
               </tbody>
             </table>
             <div className="px-3 pb-3 text-xs text-inksoft">
-              Dane na podstawie płac wrześniowych 2026 (wypłata 10.10.2026), nie z RCP. Stawka godzinowa = (wypłata − premia) ÷ godziny; premia na godzinę = premia ÷ godziny; razem na godzinę = wypłata ÷ godziny. Zlecenie bez składek (netto = brutto).
+              Dane na podstawie płac wrześniowych 2026 (wypłata 10.10.2026), nie z RCP. Kwota z umowy to kwota brutto z rachunku (przed składkami i podatkiem, jeśli występują; osoby do 26. roku życia nie mają składek, więc jest równa wypłacie). Stawka godzinowa = (kwota − premia) ÷ godziny; premia na godzinę = premia ÷ godziny; razem na godzinę = kwota ÷ godziny. Bez składek pracodawcy.
             </div>
           </div>
         );
