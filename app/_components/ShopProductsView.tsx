@@ -44,6 +44,7 @@ export default function ShopProductsView({
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
+  const [noPhotos, setNoPhotos] = useState(false); // tylko produkty bez zdjęć (do uzupełnienia galerii)
   const [openId, setOpenId] = useState<string | null>(null); // id modelu albo "new"
   const loadSeq = useRef(0);
 
@@ -118,9 +119,10 @@ export default function ShopProductsView({
       (m) =>
         (!category || m.category_slug === category) &&
         (status === "all" || (status === "published" ? m.published : !m.published)) &&
+        (!noPhotos || !thumbs[m.id]) &&
         (!q || `${m.name} ${m.brand} ${m.slug} ${m.keywords}`.toLowerCase().includes(q)),
     );
-  }, [models, search, category, status]);
+  }, [models, search, category, status, noPhotos, thumbs]);
 
   async function togglePublished(m: ShopModel) {
     setModels((prev) => prev.map((x) => (x.id === m.id ? { ...x, published: !m.published } : x)));
@@ -178,6 +180,9 @@ export default function ShopProductsView({
                 {s === "all" ? "Wszystkie" : s === "published" ? "Opublikowane" : "Szkice"}
               </button>
             ))}
+            <button className={pill(noPhotos)} onClick={() => setNoPhotos((v) => !v)} title="Produkty bez żadnego zdjęcia. Zdjęcie wgrane do jednego produktu skopiujesz w jego karcie do całej grupy (ta sama konsola z innym dyskiem albo grą).">
+              Bez zdjęć ({models.filter((m) => !thumbs[m.id] && (status === "all" || (status === "published" ? m.published : !m.published))).length})
+            </button>
             <button onClick={() => setOpenId("new")} className="ml-auto px-4 py-2 rounded bg-ink text-paper text-sm font-semibold">
               + Nowy produkt
             </button>

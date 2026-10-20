@@ -26,6 +26,7 @@ import {
   type ShopModel,
   type ShopVariant,
 } from "@/lib/shop";
+import { imageGroupKey, imagesToCopy } from "@/lib/shopImageGroups";
 
 // Karta produktu sklepu (panel boczny): dane modelu, warianty z cenami, zdjęcia, dziennik zmian.
 // Stan magazynowy wariantu jest tu tylko do odczytu (zmiana: zakładka Magazyn w Recoo Sklep).
@@ -621,6 +622,67 @@ function ImagesSection({
   const [busy, setBusy] = useState(false);
   const [over, setOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Grupa zdjęć (lib/shopImageGroups.ts): produkty różniące się tylko pojemnością / grą w zestawie mają te same zdjęcia.
+  const [group, setGroup] = useState<{ id: string; name: string; published: boolean; imgs: { url: string; storage_path: string | null; alt: string; option_value: string | null; position: number }[] }[] | null>(null);
+  const [showGroup, setShowGroup] = useState(false);
+  const groupKey = imageGroupKey(model.name, model.category_slug);
+
+  async function loadGroup() {
+    const { data: ms, error } = await supabase.from("shop_models").select("id, name, category_slug, published");
+    if (error) return;
+    const sib = (ms ?? []).filter((m) => m.id !== model.id && imageGroupKey(m.name, m.category_slug) === groupKey);
+    const imgs: Record<string, NonNullable<typeof group>[number]["imgs"]> = {};
+    for (let i = 0; i < sib.length; i += 100) {
+      const { data } = await supabase.from("shop_images").select("model_id, url, storage_path, alt, option_value, position").in("model_id", sib.slice(i, i + 100).map((m) => m.id));
+      for (const r of data ?? []) (imgs[r.model_id] ??= []).push(r);
+    }
+    setGroup(sib.map((m) => ({ id: m.id, name: m.name, published: m.published, imgs: imgs[m.id] ?? [] })).sort((a, b) => a.name.localeCompare(b.name, "pl")));
+  }
+  useEffect(() => {
+    loadGroup();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model.id, groupKey, images.length]);
+
+  const urls = new Set(images.map((i) => i.url));
+  const missing = (group ?? []).filter((g) => images.some((i) => !g.imgs.some((x) => x.url === i.url)));
+  const donor = images.length === 0 ? [...(group ?? [])].sort((a, b) => b.imgs.length - a.imgs.length).find((g) => g.imgs.length > 0) : undefined;
+
+  // Kopiuje zdjęcia (ten sam plik — wiersze shop_images z tym samym adresem) do wskazanych produktów; brakujące dopisuje na końcu galerii.
+  async function copyImages(source: { url: string; storage_path: string | null; option_value: string | null; position: number; alt: string }[], targets: { id: string; name: string; imgs: { url: string; position: number }[] }[]) {
+    setBusy(true);
+    try {
+      let n = 0;
+      for (const t of targets) {
+        const rows = imagesToCopy(source, t.imgs).map((s) => ({ model_id: t.id, url: s.url, storage_path: s.storage_path, alt: t.name, option_value: s.option_value, position: s.position }));
+        if (!rows.length) continue;
+        const { error } = await supabase.from("shop_images").insert(rows);
+        if (error) throw error;
+        n++;
+      }
+      return n;
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function copyToGroup() {
+    if (!missing.length) return;
+    if (!confirm(`Skopiować zdjęcia tego produktu (${images.length}) do ${missing.length} innych produktów z grupy?\n\nDopisane zostaną tylko zdjęcia, których tam jeszcze nie ma — istniejących nic nie usuwa.`)) return;
+    try {
+      await copyImages(images.map((i) => ({ ...i, option_value: i.option_value ?? null })), missing);
+      await loadGroup(); // licznik "bez zdjęć tego produktu" spada do 0
+    } catch (e) {
+      onError(e instanceof Error ? e.message : String((e as { message?: string }).message ?? e));
+    }
+  }
+  async function takeFromGroup() {
+    if (!donor) return;
+    try {
+      await copyImages(donor.imgs, [{ id: model.id, name: model.name, imgs: images }]);
+      onChanged();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : String((e as { message?: string }).message ?? e));
+    }
+  }
 
   async function upload(files: FileList | File[]) {
     const list = Array.from(files).filter((f) => /^image\/(png|jpeg|webp)$/.test(f.type));
@@ -684,7 +746,11 @@ function ImagesSection({
     // Najpierw wiersz (sklep przestaje go pokazywać), potem plik ze Storage. Pliki startowe z repo sklepu nie mają storage_path.
     const { error } = await supabase.from("shop_images").delete().eq("id", img.id);
     if (error) return onError(error.message);
-    if (img.storage_path) await supabase.storage.from("shop-images").remove([img.storage_path]);
+    if (img.storage_path) {
+      // ten sam plik może być w galeriach innych produktów z grupy — usuwamy go dopiero, gdy nikt go już nie używa
+      const { count } = await supabase.from("shop_images").select("id", { count: "exact", head: true }).eq("storage_path", img.storage_path);
+      if (count === 0) await supabase.storage.from("shop-images").remove([img.storage_path]);
+    }
     onChanged();
   }
 
@@ -713,6 +779,36 @@ function ImagesSection({
         </button>
         <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden onChange={(e) => e.target.files && upload(e.target.files)} />
       </div>
+      {group && group.length > 0 && (
+        <div className="border border-line bg-white px-3 py-2 mb-3 text-xs">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+            <span>
+              Grupa zdjęć: <b>{group.length + 1} produktów</b> (różnią się pojemnością albo grą w zestawie)
+              {images.length > 0 && <> · bez zdjęć tego produktu: <b className={missing.length ? "text-amber" : "text-teal"}>{missing.length}</b></>}
+            </span>
+            {images.length > 0 && missing.length > 0 && (
+              <button onClick={copyToGroup} disabled={busy} className="px-2.5 py-1 border border-line rounded font-semibold disabled:opacity-50">Skopiuj zdjęcia do grupy ({missing.length})</button>
+            )}
+            {donor && (
+              <button onClick={takeFromGroup} disabled={busy} className="px-2.5 py-1 border border-line rounded font-semibold disabled:opacity-50" title={donor.name}>Weź zdjęcia z grupy ({donor.imgs.length})</button>
+            )}
+            <button onClick={() => setShowGroup((v) => !v)} className="text-inksoft hover:underline">{showGroup ? "Ukryj listę" : "Pokaż listę"}</button>
+          </div>
+          {showGroup && (
+            <ul className="mt-2 space-y-0.5">
+              {group.map((g) => (
+                <li key={g.id} className="flex justify-between gap-3">
+                  <span className={g.published ? "" : "text-inksoft"}>{g.name}{g.published ? "" : " (szkic)"}</span>
+                  <span className="text-inksoft whitespace-nowrap">
+                    {g.imgs.length} zdj.{images.length > 0 && images.every((i) => g.imgs.some((x) => x.url === i.url)) ? " ✓" : ""}
+                    {g.imgs.some((x) => !urls.has(x.url)) && images.length > 0 ? " · ma też inne" : ""}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
       {images.length === 0 ? (
         <p className="text-sm text-inksoft">Brak zdjęć — sklep pokazuje ilustrację zastępczą.</p>
       ) : (

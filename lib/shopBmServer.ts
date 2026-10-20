@@ -7,6 +7,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { bmFetchListingsPage, bmListingsConfigFromEnv, type BmListingsConfig } from "./listings";
 import { planOffer, shopPricePln, variantQuantities, type BmLiveOffer, type OfferPlan } from "./shopBm";
+import { imageGroupKey, imagesToCopy, type GroupImage } from "./shopImageGroups";
 
 type Admin = SupabaseClient<any, any, any>;
 const MAX_PAGES = 40; // 2000 aktywnych ofert — bezpiecznik przed pętlą bez końca
@@ -86,7 +87,26 @@ export async function runQuantitySync(admin: Admin, offers?: BmLiveOffer[]): Pro
   return { offers: live.length, variants: wanted.size, changed, units, errors: errors.slice(0, 5) };
 }
 
-export type OffersResult = { offers: number; inShop: number; newModels: number; newVariants: number; newLinks: number; skipped: string[]; quantities: QuantityResult };
+export type OffersResult = { offers: number; inShop: number; newModels: number; newVariants: number; newLinks: number; newWithImages?: number; skipped: string[]; quantities: QuantityResult };
+
+// Galerie istniejących produktów wg grupy zdjęć (lib/shopImageGroups.ts) — dawca = produkt grupy z największą liczbą zdjęć.
+async function groupDonors(admin: Admin): Promise<Map<string, GroupImage[]>> {
+  const models = await selectAll<{ id: string; name: string; category_slug: string }>((a, b) => admin.from("shop_models").select("id, name, category_slug").order("id").range(a, b), "shop_models");
+  const imgs = await selectAll<GroupImage & { model_id: string }>(
+    (a, b) => admin.from("shop_images").select("model_id, url, storage_path, alt, option_value, position").order("id").range(a, b),
+    "shop_images",
+  );
+  const byModel = new Map<string, GroupImage[]>();
+  for (const i of imgs) byModel.set(i.model_id, [...(byModel.get(i.model_id) ?? []), i]);
+  const out = new Map<string, GroupImage[]>();
+  for (const m of models) {
+    const g = byModel.get(m.id);
+    if (!g?.length) continue;
+    const key = imageGroupKey(m.name, m.category_slug);
+    if ((out.get(key)?.length ?? 0) < g.length) out.set(key, g);
+  }
+  return out;
+}
 
 async function latestEurRate(admin: Admin): Promise<number> {
   const { data, error } = await admin.from("nbp_rates").select("mid").eq("currency", "EUR").order("rate_date", { ascending: false }).limit(1).maybeSingle();
@@ -107,9 +127,11 @@ export async function runOffersRefresh(admin: Admin): Promise<OffersResult> {
   let newModels = 0;
   let newVariants = 0;
   let newLinks = 0;
+  let newWithImages = 0;
 
   if (todo.length) {
     const usedSkus = new Set((await selectAll<{ sku: string }>((a, b) => admin.from("shop_variants").select("sku").order("id").range(a, b), "shop_variants")).map((r) => r.sku));
+    const donors = await groupDonors(admin);
     const { data: maxSort } = await admin.from("shop_models").select("sort").order("sort", { ascending: false }).limit(1).maybeSingle();
     let sort = Number(maxSort?.sort ?? 0) + 1;
 
@@ -133,6 +155,14 @@ export async function runOffersRefresh(admin: Admin): Promise<OffersResult> {
         }
         model = ins.data;
         newModels++;
+        // zdjęcia z grupy (ta sama konsola z innym dyskiem / grą); błąd kopiowania nie blokuje importu
+        const donor = donors.get(imageGroupKey(first.name, first.category));
+        if (donor) {
+          const rows = imagesToCopy(donor, []).map((s) => ({ model_id: model!.id, url: s.url, storage_path: s.storage_path, alt: first.name, option_value: s.option_value, position: s.position }));
+          const imgIns = await admin.from("shop_images").insert(rows);
+          if (imgIns.error) skipped.push(`${first.name}: zdjęcia z grupy — ${imgIns.error.message}`);
+          else newWithImages++;
+        }
       }
       const byGrade = new Map<string, OfferPlan[]>();
       for (const p of group) byGrade.set(p.grade, [...(byGrade.get(p.grade) ?? []), p]);
@@ -169,5 +199,5 @@ export async function runOffersRefresh(admin: Admin): Promise<OffersResult> {
     }
   }
   const quantities = await runQuantitySync(admin, live);
-  return { offers: live.length, inShop: plans.length, newModels, newVariants, newLinks, skipped: skipped.slice(0, 10), quantities };
+  return { offers: live.length, inShop: plans.length, newModels, newVariants, newLinks, newWithImages, skipped: skipped.slice(0, 10), quantities };
 }

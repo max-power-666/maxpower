@@ -25,7 +25,7 @@ function qtyText(r: any) {
 function offersText(r: any) {
   if (!r) return "";
   if (r.error) return `błąd: ${r.error}`;
-  return `${r.inShop} ofert w kategoriach sklepu (z ${r.offers} aktywnych): nowe produkty ${r.newModels}, nowe warianty ${r.newVariants}, nowe powiązania ${r.newLinks}${r.skipped?.length ? `; pominięto: ${r.skipped.join(" | ")}` : ""}`;
+  return `${r.inShop} ofert w kategoriach sklepu (z ${r.offers} aktywnych): nowe produkty ${r.newModels}${r.newWithImages ? ` (ze zdjęciami z grupy: ${r.newWithImages})` : ""}, nowe warianty ${r.newVariants}, nowe powiązania ${r.newLinks}${r.skipped?.length ? `; pominięto: ${r.skipped.join(" | ")}` : ""}`;
 }
 
 export default function ShopBmSyncBar({ onChanged }: { onChanged: () => void }) {
