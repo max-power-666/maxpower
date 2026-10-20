@@ -43,7 +43,7 @@ $$;
 -- Czy zalogowany jest serwisantem (może przyjmować zlecenia i zmieniać ich status). SECURITY DEFINER jak is_admin() — czyta members bez uprawnień do niej.
 create or replace function is_service_staff() returns boolean
 language sql stable security definer set search_path = public as $$
-  select exists (select 1 from members where user_id = auth.uid() and role in ('Admin', 'Manager', 'Księgowa', 'Serwis', 'Zegarmistrz', 'Kierownik serwisu'));
+  select exists (select 1 from members where user_id = auth.uid() and role in ('Admin', 'Manager', 'Księgowa', 'Serwis', 'Kierownik serwisu'));
 $$;
 
 -- Kto może usuwać (i przywracać) zlecenia — "miękkie" usunięcie z widoku "Usunięte". SECURITY DEFINER jak is_admin().
@@ -90,7 +90,7 @@ begin
   if new.message is distinct from old.message or new.priority is distinct from old.priority then
     if client and not (
          my_role in ('Admin', 'Manager', 'Księgowa')
-      or (old.created_by_user_id = auth.uid() and old.status in ('nowe', 'przyjete', 'w_realizacji') and coalesce(my_role, '') not in ('Serwis', 'Zegarmistrz', 'Kierownik serwisu'))) then
+      or (old.created_by_user_id = auth.uid() and old.status in ('nowe', 'przyjete', 'w_realizacji') and coalesce(my_role, '') not in ('Serwis', 'Kierownik serwisu'))) then
       raise exception 'Treść i priorytet zlecenia zmienia jego autor (dopóki jest aktywne), Admin albo Manager — serwisanci nie edytują zleceń.' using errcode = 'P0001';
     end if;
     if new.message is distinct from old.message then
