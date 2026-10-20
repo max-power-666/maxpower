@@ -9,6 +9,7 @@ import PartEditDrawer from "./PartEditDrawer";
 import type { Session } from "@supabase/supabase-js";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { escapeLike } from "@/lib/search";
+import { takePrefill, usePrefillListener } from "@/lib/searchPrefill";
 
 // Serwis -> Części (04.10.2026, na prośbę właściciela): rejestr części do napraw z ceną zakupu i przypisanym numerem seryjnym/IMEI urządzenia.
 // Dane zakupowe (nazwa, cena, faktura) pochodzą z arkusza parts.numbers i są tylko do odczytu; zespół zmienia przypisanie urządzenia, status i
@@ -60,7 +61,8 @@ export default function PartsView({ members, session, canEditAll = false }: { me
   const [rows, setRows] = useState<Part[]>([]);
   const [total, setTotal] = useState(0);
   const [sum, setSum] = useState<{ pln: number; count: number; freePln: number; freeCount: number; yearCount: number; freeYearCount: number } | null>(null);
-  const [searchInput, setSearchInput] = useState("");
+  const [searchInput, setSearchInput] = useState(() => takePrefill("service-parts")); // wyszukiwarka globalna (20.10.2026)
+  usePrefillListener("service-parts", setSearchInput);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<FilterKey>("all");
   const [pageSize, setPageSize] = useState(50);

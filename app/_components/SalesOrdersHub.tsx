@@ -12,6 +12,7 @@ import SalesOrderCard, { itemFieldLabel, updateSalesItem, type SalesHistoryEntry
 import PadSerialsCell, { MAX_PADS } from "./PadSerialsCell";
 import ServiceRequestsView from "./ServiceRequestsView";
 import { SERVICE_STAFF_ROLES } from "@/lib/serviceRequests";
+import { takePrefill, usePrefillListener } from "@/lib/searchPrefill";
 
 // Zakładka Zamówienia: sprzedaż z marketplace'ów — wspólna lista ze wszystkich kanałów (tabela sales_orders).
 // Dane wypełnia serwer (app/api/orders/*-sync, cron co 15 min); przycisk "Odśwież" uruchamia synchronizację od razu.
@@ -430,7 +431,8 @@ function OrdersList({
   const [total, setTotal] = useState<number | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
-  const [searchInput, setSearchInput] = useState("");
+  const [searchInput, setSearchInput] = useState(() => takePrefill("sales")); // wyszukiwarka globalna (20.10.2026)
+  usePrefillListener("sales", setSearchInput);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusBucket | "wszystkie">("nowe");
   const [marketplaceFilter, setMarketplaceFilter] = useState<string | "wszystkie">("wszystkie");

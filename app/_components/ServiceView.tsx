@@ -16,6 +16,7 @@ import {
   fmtDuration,
 } from "@/lib/workLog";
 import { fetchAllPaged, inPeriod, orInPeriod, periodKey, type Period } from "@/lib/period";
+import { takePrefill, usePrefillListener } from "@/lib/searchPrefill";
 
 // Rejestracja pracy serwisanta wg tabeli punktowej z Regulaminu premiowania (§2, 12.10.2026).
 // Nie liczy premii w zł (Regulamin §4-§7) — wymagałoby to danych o czasie pracy/urlopach,
@@ -83,7 +84,8 @@ export default function ServiceView({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   // Wyszukiwarka po numerze seryjnym (02.10.2026): bez niej lista to tylko najświeższe 50 wpisów, wyszukiwanie sięga całej tabeli.
-  const [searchInput, setSearchInput] = useState("");
+  const [searchInput, setSearchInput] = useState(() => takePrefill("service-repairs")); // wyszukiwarka globalna (20.10.2026) wpisuje tu numer seryjny
+  usePrefillListener("service-repairs", setSearchInput);
   const [search, setSearch] = useState("");
   const [repairEmails, setRepairEmails] = useState<string[]>([]);
   const [employeeFilter, setEmployeeFilter] = useState(""); // filtr listy po kolumnie "Pracownik" (e-mail; pusty = wszyscy) — tylko dla osób widzących naprawy wszystkich

@@ -17,6 +17,7 @@ import PeriodPicker from "./PeriodPicker";
 import { escapeLike } from "@/lib/search";
 import { buybackStatusLabel, buybackStatusStyle } from "@/lib/buybackOrders";
 import { colorForUser } from "@/lib/userColors";
+import { takePrefill, usePrefillListener } from "@/lib/searchPrefill";
 
 // Zakładka Trade-in: domyślnie obsługa paczek przez pracowników (IntakeView — rejestr pracy
 // wg Regulaminu premiowania, jak Serwis), plus podstrona "Raw data" z pełną, zsynchronizowaną
@@ -164,8 +165,36 @@ export default function TradeInHub({
   isAdmin: boolean;
   isAdminOrManager: boolean;
 }) {
-  const [sub, setSub] = useState<"intake" | "raw" | "dw">("intake");
-  const [openOrderId, setOpenOrderId] = useState<string | null>(null);
+  // wyszukiwarka globalna (20.10.2026): podstrona z sessionStorage "tradein-sub" i numer zamówienia Buyback do otwarcia ("tradein-order")
+  const [sub, setSub] = useState<"intake" | "raw" | "dw">(() => {
+    try {
+      const v = sessionStorage.getItem("tradein-sub");
+      if (v === "intake" || v === "raw" || v === "dw") {
+        sessionStorage.removeItem("tradein-sub");
+        return v;
+      }
+    } catch {
+      /* brak sessionStorage */
+    }
+    return "intake";
+  });
+  const [openOrderId, setOpenOrderId] = useState<string | null>(() => takePrefill("tradein-order") || null);
+  usePrefillListener("tradein-order", (q) => setOpenOrderId(q));
+  useEffect(() => {
+    const onNav = () => {
+      try {
+        const v = sessionStorage.getItem("tradein-sub");
+        if (v === "intake" || v === "raw" || v === "dw") {
+          sessionStorage.removeItem("tradein-sub");
+          setSub(v);
+        }
+      } catch {
+        /* brak sessionStorage */
+      }
+    };
+    window.addEventListener("nav-sub-changed", onNav);
+    return () => window.removeEventListener("nav-sub-changed", onNav);
+  }, []);
 
   return (
     <div>
@@ -224,7 +253,8 @@ function IntakeView({
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
 
-  const [searchInput, setSearchInput] = useState("");
+  const [searchInput, setSearchInput] = useState(() => takePrefill("tradein-intake")); // wyszukiwarka globalna (20.10.2026)
+  usePrefillListener("tradein-intake", setSearchInput);
   const [search, setSearch] = useState("");
   // Paginacja listy paczek po stronie serwera (07.10.2026): .range() + licznik; zmiana wyszukiwania lub rozmiaru strony wraca na stronę 1.
   const [page, setPage] = useState(1);

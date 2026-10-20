@@ -10,6 +10,7 @@ import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import type { Session } from "@supabase/supabase-js";
 import ProductCardDrawer from "./ProductCardDrawer";
 import GoodsAddForm, { type GoodsEditRow } from "./GoodsAddForm";
+import { takePrefill, usePrefillListener } from "@/lib/searchPrefill";
 
 // Zakładka Towar (10.10.2026, na prośbę właściciela): rejestr zakupionego towaru z arkusza Towar.numbers, dwie pigułki jak arkusze:
 // VM, V23 (zakupy od firm i z Allegro, podział wg VAT) i Skup (dawniej Trade-in: zakupy ze skupu Back Market). Dane w tabeli goods_register (supabase/goods.sql),
@@ -90,13 +91,17 @@ export default function GoodsView({ session, members, isAdmin, canSend = false }
   const [tab, setTab] = useState<Tab>("all");
   const [pageSize, setPageSize] = useState(50);
   const [page, setPage] = useState(1);
-  const [searchInput, setSearchInput] = useState("");
+  const [searchInput, setSearchInput] = useState(() => takePrefill("goods")); // wyszukiwarka globalna (20.10.2026): fraza z paska na górze strony
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
   const [supplier, setSupplier] = useState("");
   // Dostępność (14.10.2026): "Dostępny" = numer seryjny jest w magazynie Fakturowni; domyślnie pokazujemy tylko dostępne. Dane z widoku goods_register_available
   // (supabase/goods-available.sql); bez widoku lista działa jak dotąd, bez kolumny i filtra.
-  const [availFilter, setAvailFilter] = useState<"yes" | "all" | "no">("yes");
+  const [availFilter, setAvailFilter] = useState<"yes" | "all" | "no">(() => (searchInput ? "all" : "yes")); // numer z wyszukiwarki globalnej może dotyczyć też sztuki już niedostępnej
+  usePrefillListener("goods", (q) => {
+    setSearchInput(q);
+    setAvailFilter("all");
+  });
   const [availView, setAvailView] = useState(true);
   const [statusCols, setStatusCols] = useState(true); // kolumny product_status_* w widoku (po ponownym uruchomieniu goods-available.sql)
   // Kolumna `pending` (15.10.2026): opłacony zakup z Buyback, który jeszcze nie dotarł do magazynu Fakturowni — liczy się jako "dostępne" w filtrze, żeby nowe zakupy były widoczne od razu.

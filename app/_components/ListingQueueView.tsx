@@ -16,6 +16,7 @@ import StockSyncBar from "./StockSyncBar";
 import { marginAtPrice } from "@/lib/listingPrice";
 import type { MarketInfo } from "@/lib/marketPricing";
 import ProductCardDrawer from "./ProductCardDrawer";
+import { takePrefill, usePrefillListener } from "@/lib/searchPrefill";
 
 // Magazyn -> "Do wystawienia" (16.10.2026, na prośbę właściciela): urządzenia gotowe do wystawienia na sprzedaż wprowadzane skanerem (numer seryjny + SKU). Cena zakupu i koszty
 // dodatkowe (serwis, prowizja + PCC) idą z Towaru, a sugerowana cena sprzedaży na Back Market i refurbed jest liczona tak, żeby zysk netto po wszystkich kosztach wynosił ~20% ceny
@@ -96,7 +97,8 @@ export default function ListingQueueView({ session, members, canPrice = false, i
   const [goods, setGoods] = useState<Map<string, Goods>>(new Map());
   const [listings, setListings] = useState<Map<string, { backmarket: ListingInfo | null; refurbed: ListingInfo | null }>>(new Map());
   const [filter, setFilter] = useState<Filter>("todo");
-  const [searchInput, setSearchInput] = useState("");
+  const [searchInput, setSearchInput] = useState(() => takePrefill("tolist")); // wyszukiwarka globalna (20.10.2026)
+  usePrefillListener("tolist", setSearchInput);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");

@@ -6,6 +6,7 @@ import { escapeLike } from "@/lib/search";
 import type { MemberLite } from "@/lib/displayName";
 import ProductCardDrawer from "./ProductCardDrawer";
 import { PRODUCT_STATUS_SOURCES, productStatusParts } from "@/lib/workLog";
+import { takePrefill, usePrefillListener } from "@/lib/searchPrefill";
 
 // Lista sztuk ze stanem = 1 z cache Fakturowni (fakturownia_stock_cache), strona po stronie,
 // z wyszukiwaniem po numerze seryjnym. W Fakturowni numer seryjny to nazwa produktu, a opis
@@ -57,7 +58,8 @@ function fmtPLN(n: number) {
 export default function InventoryRawView({ reloadKey = 0, members }: { reloadKey?: number; members: MemberLite[] }) {
   const [pageSize, setPageSize] = useState(50);
   const [page, setPage] = useState(1);
-  const [searchInput, setSearchInput] = useState("");
+  const [searchInput, setSearchInput] = useState(() => takePrefill("inventory-raw")); // wyszukiwarka globalna (20.10.2026)
+  usePrefillListener("inventory-raw", setSearchInput);
   const [search, setSearch] = useState("");
   const [rows, setRows] = useState<Row[]>([]);
   const [total, setTotal] = useState(0);

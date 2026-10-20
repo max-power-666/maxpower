@@ -14,11 +14,12 @@ const pill = (active: boolean) => `px-3 py-1.5 rounded-full text-sm font-semibol
 
 export default function ServiceHub({ session, members, role, isAdmin, isAdminOrManager, isServiceLead }: { session: Session; members: MemberLite[]; role: string; isAdmin: boolean; isAdminOrManager: boolean; isServiceLead: boolean }) {
   const [sub, setSub] = useState<"repairs" | "parts" | "requests">(() => {
-    // baner "Nowe zapotrzebowania dla serwisu" (ReminderBanners) otwiera Serwis od razu na Zapotrzebowaniu
+    // baner "Nowe zapotrzebowania dla serwisu" (ReminderBanners) otwiera Serwis od razu na Zapotrzebowaniu; wyszukiwarka globalna (20.10.2026) także na Naprawach/Częściach
     try {
-      if (sessionStorage.getItem("service-sub") === "requests") {
+      const v = sessionStorage.getItem("service-sub");
+      if (v === "requests" || v === "parts" || v === "repairs") {
         sessionStorage.removeItem("service-sub");
-        return "requests";
+        return v;
       }
     } catch {
       /* brak sessionStorage */
@@ -29,9 +30,10 @@ export default function ServiceHub({ session, members, role, isAdmin, isAdminOrM
   useEffect(() => {
     const onNav = () => {
       try {
-        if (sessionStorage.getItem("service-sub") === "requests") {
+        const v = sessionStorage.getItem("service-sub");
+        if (v === "requests" || v === "parts" || v === "repairs") {
           sessionStorage.removeItem("service-sub");
-          setSub("requests");
+          setSub(v);
         }
       } catch {
         /* brak sessionStorage */

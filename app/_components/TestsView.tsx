@@ -11,6 +11,7 @@ import ProductCardDrawer from "./ProductCardDrawer";
 import { TEST_STATUSES as STATUSES, TEST_KINDS, TEST_RESULTS, TEST_KIND_COLORS, TEST_RESULT_COLORS, fmtDuration } from "@/lib/workLog";
 import { fetchAllPaged, inPeriod, periodKey, type Period } from "@/lib/period";
 import PeriodPicker from "./PeriodPicker";
+import { takePrefill, usePrefillListener } from "@/lib/searchPrefill";
 
 // Rejestr testów urządzeń wg Regulaminu premiowania (§2, 12.10.2026, zaktualizowany 01.10.2026):
 // 15 pkt flat za prawidłowo przetestowane urządzenie (wartość ustawia default w bazie). Stare
@@ -73,7 +74,8 @@ export default function TestsView({
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
   const [openSerial, setOpenSerial] = useState<string | null>(null);
-  const [searchInput, setSearchInput] = useState("");
+  const [searchInput, setSearchInput] = useState(() => takePrefill("tests")); // wyszukiwarka globalna (20.10.2026)
+  usePrefillListener("tests", setSearchInput);
   const [search, setSearch] = useState(""); // wyszukiwarka po numerze seryjnym / SKU (debounce 300 ms), jak w Serwisie i Trade-in
 
   useEffect(() => {

@@ -27,6 +27,7 @@ import GoodsView from "./_components/GoodsView";
 import ListingsView from "./_components/ListingsView";
 import ListingQueueView from "./_components/ListingQueueView";
 import ReminderBanners from "./_components/ReminderBanners";
+import GlobalSearchBar from "./_components/GlobalSearchBar";
 import { tracksWorkTime } from "@/lib/rcp";
 import ReturnsView from "./_components/ReturnsView";
 import ShopProductsView from "./_components/ShopProductsView";
@@ -366,6 +367,22 @@ export default function Home() {
     });
   const [shipPrefill, setShipPrefill] = useState<ShipPrefill | null>(null); // dane z karty zamówienia do formularza przesyłki
   const [invSub, setInvSub] = useState<"summary" | "raw" | "catalog">("summary");
+  // Wyszukiwarka globalna (20.10.2026) ustawia podstronę Magazynu (Raw data) przez sessionStorage "inv-sub"
+  useEffect(() => {
+    const apply = () => {
+      try {
+        if (sessionStorage.getItem("inv-sub") === "raw") {
+          sessionStorage.removeItem("inv-sub");
+          setInvSub("raw");
+        }
+      } catch {
+        /* brak sessionStorage */
+      }
+    };
+    apply();
+    window.addEventListener("nav-sub-changed", apply);
+    return () => window.removeEventListener("nav-sub-changed", apply);
+  }, [view]);
   const [rawReloadKey, setRawReloadKey] = useState(0);
   const [fakturowniaSummary, setFakturowniaSummary] = useState<FakturowniaSummary | null>(null);
   const [fakturowniaLastSynced, setFakturowniaLastSynced] = useState<string | null>(null);
@@ -884,6 +901,15 @@ export default function Home() {
       </aside>
 
       <main className="flex-1">
+        {role && spaceOf(view) === "erp" && (
+          <GlobalSearchBar
+            session={session}
+            members={members}
+            allowedViews={effectiveAccess(role, viewAccess, [])}
+            readOnlyOrders={!["Admin", "Manager", "Księgowa", "Zamówienia"].includes(role)}
+            onNavigate={(v) => setView(v as ViewKey)}
+          />
+        )}
         {(role === "Admin" || role === "Manager" || role === "Księgowa" || role === "Serwis" || role === "Kierownik serwisu") && <ReminderBanners session={session} role={role} onOpen={(v) => setView(v as ViewKey)} />}
         {/* Tytuł zakładki usunięty (10.10.2026) — zajmował miejsce; pasek zostaje tylko w Magazynie, bo trzyma przycisk "Odśwież". */}
         {view === "inventory" && (

@@ -5,6 +5,7 @@ import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { MARKETPLACES } from "@/lib/salesOrders";
+import { takePrefill, usePrefillListener } from "@/lib/searchPrefill";
 import { ACTIVE_REQUEST_STATUSES, canEditRequest, REJECTED_REQUEST_STATUSES, REQUEST_DELETE_ROLES, REQUEST_PRIORITIES, REQUEST_PRIORITY_LABEL, REQUEST_PRIORITY_RANK, REQUEST_STATUSES, REQUEST_STATUS_LABEL, requestCode, type RequestPriority, type RequestStatus } from "@/lib/serviceRequests";
 
 // Zamówienia -> Zapotrzebowanie (08.10.2026): pracownicy zlecają zadania dla serwisu (dowolna treść albo numer zamówienia + priorytet; autor, data i numer ZAP-n automatycznie), serwisant przyjmuje zlecenie i ustawia status.
@@ -61,7 +62,8 @@ export default function ServiceRequestsView({ session, members, role, canHandle 
   const [filter, setFilter] = useState<"active" | "all" | "deleted" | RequestStatus>("active");
   // "Miękkie" usuwanie (15.10.2026): kolumny deleted_at / deleted_by_email pojawiają się po ponownym uruchomieniu supabase/service-requests.sql; bez nich działa stare, trwałe usuwanie.
   const [softDelete, setSoftDelete] = useState(true);
-  const [searchInput, setSearchInput] = useState("");
+  const [searchInput, setSearchInput] = useState(() => takePrefill("service-requests")); // wyszukiwarka globalna (20.10.2026)
+  usePrefillListener("service-requests", setSearchInput);
   const [openId, setOpenId] = useState<number | null>(null);
   // Hurtowe usuwanie (13.10.2026): checkboxy po lewej widzą tylko role z prawem usuwania (Admin, Kierownik serwisu — jak polityka delete w bazie).
   const canDelete = REQUEST_DELETE_ROLES.includes(role);
