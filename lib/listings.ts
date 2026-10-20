@@ -263,10 +263,11 @@ export function bmListingsConfigFromEnv(): BmListingsConfig | null {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const RETRY_STATUSES = new Set([429, 502, 503, 504]);
 
-// GET /ws/listings?page=N&page-size=50 — BEZ filtra publication_state, więc dostajemy też oferty offline (quantity 0) i dezaktywowane.
-export async function bmFetchListingsPage(cfg: BmListingsConfig, page: number): Promise<{ results: any[]; hasNext: boolean; count: number | null }> {
+// GET /ws/listings?page=N&page-size=50 — domyślnie BEZ filtra publication_state, więc dostajemy też oferty offline (quantity 0) i dezaktywowane.
+// `extraQuery` (np. "publication_state=2&min_quantity=1" — filtry z OpenAPI BM) zawęża listę, np. do ofert aktywnych (Sklep, lib/shopBmServer.ts).
+export async function bmFetchListingsPage(cfg: BmListingsConfig, page: number, extraQuery = ""): Promise<{ results: any[]; hasNext: boolean; count: number | null }> {
   const doFetch = cfg.fetchImpl ?? fetch;
-  const url = `${cfg.baseUrl}/ws/listings?page=${page}&page-size=${BM_LISTINGS_PAGE_SIZE}`;
+  const url = `${cfg.baseUrl}/ws/listings?page=${page}&page-size=${BM_LISTINGS_PAGE_SIZE}${extraQuery ? `&${extraQuery}` : ""}`;
   for (let attempt = 1; ; attempt++) {
     const res = await doFetch(url, {
       headers: { Accept: "application/json", "Accept-Language": cfg.lang, Authorization: cfg.auth, "User-Agent": cfg.userAgent },

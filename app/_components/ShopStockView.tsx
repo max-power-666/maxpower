@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { SHOP_URL, formatPln, gradeLabel, type ShopCategory, type ShopGrade } from "@/lib/shop";
+import ShopBmSyncBar from "./ShopBmSyncBar";
 
 // Recoo Sklep → Magazyn: ręczny stan wariantów (decyzja właściciela — bez numerów seryjnych).
 // Każda zmiana idzie przez funkcję bazy shop_stock_change (supabase/shop.sql): blokada wiersza, pilnowanie zera
@@ -163,6 +164,7 @@ export default function ShopStockView({ members }: { members: MemberLite[] }) {
 
   return (
     <div>
+      <ShopBmSyncBar onChanged={load} />
       <div className="grid grid-cols-4 border border-line bg-white mb-4">
         <Tile label="SZTUK NA STANIE" value={String(totals.units)} note="opublikowane, aktywne warianty" />
         <Tile label="WARTOŚĆ (CENY SPRZEDAŻY)" value={formatPln(totals.value)} note="suma: stan × cena w sklepie" />
