@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { fmtWarsawDateTime } from "@/lib/warsawDate";
 import { bidderProposal, ourDeliveryCost, type AutoMode, type BidderProposal } from "@/lib/octopiaBidder";
 import OctopiaBidderCell, { type PriceRule } from "./OctopiaBidderCell";
+import ShopListingsView from "./ShopListingsView";
 import {
   isListingLive,
   LISTING_MARKETPLACES,
@@ -60,6 +61,7 @@ function stateStyle(l: Listing): string {
 
 export default function ListingsView({ session }: { session: Session }) {
   const [mp, setMp] = useState<ListingMarketplace>("backmarket");
+  const [shopTab, setShopTab] = useState(false); // pigułka "Sklep" (21.10.2026): lista dostępnych ofert Back Market z kategorii sklepu
   const [rows, setRows] = useState<Listing[]>([]);
   const [meta, setMeta] = useState<Meta | null>(null);
   const [counts, setCounts] = useState<Partial<Record<ListingMarketplace, number>>>({});
@@ -329,15 +331,34 @@ export default function ListingsView({ session }: { session: Session }) {
   const th = "p-3 text-left text-xs font-semibold text-inksoft whitespace-nowrap";
   const thBtn = `${th} cursor-pointer select-none hover:text-ink`;
 
+  const marketplacePills = LISTING_MARKETPLACES.map((m) => (
+    <button key={m.key} onClick={() => { setShopTab(false); setMp(m.key); }} className={pill(!shopTab && mp === m.key)}>
+      {m.label}
+      {counts[m.key] !== undefined && <span className="ml-1.5 text-xs font-normal opacity-70">{fmtInt(counts[m.key]!)}</span>}
+    </button>
+  ));
+  const shopPill = (
+    <button key="shop" onClick={() => setShopTab(true)} className={pill(shopTab)}>
+      Sklep
+    </button>
+  );
+  if (shopTab) {
+    return (
+      <div>
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          {marketplacePills}
+          {shopPill}
+        </div>
+        <ShopListingsView />
+      </div>
+    );
+  }
+
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2 mb-4">
-        {LISTING_MARKETPLACES.map((m) => (
-          <button key={m.key} onClick={() => setMp(m.key)} className={pill(mp === m.key)}>
-            {m.label}
-            {counts[m.key] !== undefined && <span className="ml-1.5 text-xs font-normal opacity-70">{fmtInt(counts[m.key]!)}</span>}
-          </button>
-        ))}
+        {marketplacePills}
+        {shopPill}
         <div className="ml-auto flex items-center gap-3">
           <span className="text-xs text-inksoft lowercase">
             {meta?.last_synced_at ? `ostatnia pełna synchronizacja: ${fmtWarsawDateTime(Date.parse(meta.last_synced_at))}` : "brak jeszcze pełnej synchronizacji"}
