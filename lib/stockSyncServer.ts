@@ -16,10 +16,10 @@ import { refurbedListOrders } from "./refurbed";
 // Szybka ścieżka (16.10.2026, "zmiana stanu musi się odbywać szybciej"): Back Market nie ma webhooków, więc przy każdym przebiegu (cron co minutę) pytamy oba marketplace'y WPROST o świeże
 // zamówienia (BM: zmienione w ostatnich 30 min, refurbed: złożone w ostatnich 30 min) i nie czekamy na 15-minutową synchronizację zamówień do bazy. Te same mappery co synchronizacja,
 // więc klucze pozycji są identyczne i późniejszy zapis z synchronizacji niczego nie dubluje (pozycje są w dzienniku listing_stock_synced).
-type FastItem = PendingItem & { order_status: string; order_date: string | null };
+export type FastItem = PendingItem & { order_status: string; order_date: string | null; price?: number | null; currency?: string | null }; // price/currency: dla powiadomień o zamówieniach (orderWebhookServer)
 const FAST_WINDOW_MS = 30 * 60_000;
 
-async function fetchBmRecent(): Promise<FastItem[]> {
+export async function fetchBmRecent(): Promise<FastItem[]> {
   const cfg = bmListingsConfigFromEnv();
   if (!cfg) return [];
   const since = new Date(Date.now() - FAST_WINDOW_MS).toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -31,14 +31,14 @@ async function fetchBmRecent(): Promise<FastItem[]> {
     const data = await res.json();
     for (const o of (data.results as any[]) || []) {
       const sales = mapBmToSales(o);
-      for (const it of mapBmItems(o)) out.push({ marketplace: "backmarket", external_id: it.external_id, item_key: it.item_key, sku: it.sku, order_status: sales.status, order_date: sales.order_date ?? null });
+      for (const it of mapBmItems(o)) out.push({ marketplace: "backmarket", external_id: it.external_id, item_key: it.item_key, sku: it.sku, order_status: sales.status, order_date: sales.order_date ?? null, price: it.price ?? null, currency: it.currency ?? null });
     }
     if (!data.next) break;
   }
   return out;
 }
 
-async function fetchRefurbedRecent(extraIds: string[]): Promise<FastItem[]> {
+export async function fetchRefurbedRecent(extraIds: string[]): Promise<FastItem[]> {
   const token = process.env.REFURBED_API_TOKEN;
   if (!token) return [];
   const c: RefurbedClient = { token, userAgent: process.env.REFURBED_UA || "recoo-erp", baseUrl: process.env.REFURBED_BASE_URL || undefined };
@@ -60,7 +60,7 @@ async function fetchRefurbedRecent(extraIds: string[]): Promise<FastItem[]> {
   const out: FastItem[] = [];
   for (const o of orders) {
     const sales = mapRefurbedToSales(o);
-    for (const it of mapRefurbedItems(o)) out.push({ marketplace: "refurbed", external_id: it.external_id, item_key: it.item_key, sku: it.sku, order_status: sales.status, order_date: sales.order_date ?? null });
+    for (const it of mapRefurbedItems(o)) out.push({ marketplace: "refurbed", external_id: it.external_id, item_key: it.item_key, sku: it.sku, order_status: sales.status, order_date: sales.order_date ?? null, price: it.price ?? null, currency: it.currency ?? null });
   }
   return out;
 }

@@ -41,6 +41,10 @@
       "schedule": "* * * * *"
     },
     {
+      "path": "/api/orders/webhook-notify",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/nbp/sync",
       "schedule": "0 13 * * *"
     },
