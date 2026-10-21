@@ -54,3 +54,34 @@ body {
   background-color: var(--color-paper);
   color: var(--color-ink);
 }
+
+/* Zawsze widoczne paski przewijania dla szerokich tabel (21.10.2026, na prośbę właściciela — "żeby było wiadomo, że są jeszcze
+   kolumny po prawej"). macOS domyślnie chowa paski (nakładkowe); stylowanie ::-webkit-scrollbar wymusza stały pasek w Chrome/Safari/Edge,
+   a scrollbar-color/-width obsługuje Firefox. Użycie: klasa scrollbar-always na kontenerze z overflow-x-auto / overflow-auto. */
+/* scrollbar-color tylko tam, gdzie nie ma ::-webkit-scrollbar (Firefox) — w Chrome 121+ ustawienie scrollbar-color wyłącza
+   ::-webkit-scrollbar i pasek znów staje się chowanym paskiem systemu. */
+@supports not selector(::-webkit-scrollbar) {
+  .scrollbar-always {
+    scrollbar-width: auto;
+    scrollbar-color: var(--color-inksoft) var(--color-paper);
+  }
+}
+.scrollbar-always::-webkit-scrollbar {
+  height: 12px;
+  width: 12px;
+}
+.scrollbar-always::-webkit-scrollbar-track {
+  background: var(--color-paper);
+  border-top: 1px solid var(--color-line);
+}
+.scrollbar-always::-webkit-scrollbar-thumb {
+  background: var(--color-inksoft);
+  border-radius: 6px;
+  border: 3px solid var(--color-paper);
+}
+.scrollbar-always::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ink);
+}
+.scrollbar-always::-webkit-scrollbar-corner {
+  background: var(--color-paper);
+}
