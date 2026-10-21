@@ -672,9 +672,11 @@ function IntakeView({
           <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages || loading} className="bg-white border border-line px-3 py-1.5 rounded text-sm font-semibold text-ink disabled:opacity-40">Następna ›</button>
         </div>
       </div>
-      <div className="border border-line bg-white overflow-x-auto">
+      {/* Tabela ma własne okno przewijania (wysokość ekranu) z przyklejonym nagłówkiem — pasek przewijania w poziomie jest zawsze
+          widoczny na dole ekranu, a nie dopiero pod ostatnim wierszem (21.10.2026). */}
+      <div className="border border-line bg-white overflow-auto max-h-[calc(100vh-8rem)]">
         <table className="w-full text-sm">
-          <thead>
+          <thead className="sticky top-0 z-10 bg-white shadow-[0_1px_0_var(--color-line)]">
             <tr className="text-left text-xs text-inksoft border-b border-line">
               {hasChannel && <th className="p-3">Kanał</th>}
               <th className="p-3">Rozpoczęto</th>

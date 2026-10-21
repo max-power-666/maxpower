@@ -901,7 +901,8 @@ export default function Home() {
         </div>
       </aside>
 
-      <main className="flex-1">
+      {/* min-w-0: bez tego szeroka tabela rozpycha <main> (element flex) i cała strona wychodzi poza okno (21.10.2026) */}
+      <main className="flex-1 min-w-0">
         {role && spaceOf(view) === "erp" && (
           <GlobalSearchBar
             session={session}
