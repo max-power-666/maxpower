@@ -333,7 +333,7 @@ export default function TestsView({
                 <td className="p-3 whitespace-nowrap">
                   <span
                     className="inline-block whitespace-nowrap text-xs font-semibold px-2 py-1 rounded-full bg-paper text-ink"
-                    style={{ backgroundColor: colorForUser(r.employee_email), color: colorForUser(r.employee_email) ? "#1f2937" : undefined }}
+                    style={{ backgroundColor: colorForUser(r.employee_email), color: colorForUser(r.employee_email) ? "var(--color-ink)" : undefined }}
                   >
                     {displayNameForEmail(r.employee_email, members)}
                   </span>

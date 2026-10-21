@@ -34,12 +34,13 @@ export default function DefectsCell({
   return (
     <div className="flex flex-col gap-1 min-w-[10rem]">
       {list.length > 0 && (
-        <div className="flex flex-wrap gap-1">
+        <div className="flex flex-wrap gap-1 max-w-[16rem]">
           {list.map((d, i) => (
-            <span key={`${d}-${i}`} className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-rustsoft text-rust">
-              {d}
+            // zaokrąglony prostokąt zamiast pigułki: dłuższa usterka zawija się w kilka linii i nie robi się z niej owal
+            <span key={`${d}-${i}`} className="inline-flex items-start gap-1.5 max-w-full text-xs font-medium leading-snug px-2 py-0.5 rounded-md border border-line bg-rustsoft text-rust break-words">
+              <span className="min-w-0">{d}</span>
               {!readOnly && (
-                <button onClick={() => onSave(list.filter((_, idx) => idx !== i))} title="Usuń usterkę" className="leading-none hover:opacity-70">
+                <button onClick={() => onSave(list.filter((_, idx) => idx !== i))} title="Usuń usterkę" className="shrink-0 leading-snug opacity-70 hover:opacity-100">
                   ×
                 </button>
               )}

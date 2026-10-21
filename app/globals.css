@@ -21,6 +21,11 @@
   --color-tealsoft: #EEF0FE;
   --color-rust: #DC2626;
   --color-rustsoft: #FDE2E1;
+  /* kolory osób (lib/userColors.ts): tło wiersza/plakietki — w trybie nocnym ciemne odpowiedniki */
+  --user-pink: #fde3ec;
+  --user-blue: #e3f2fd;
+  --user-purple: #f0e3fd;
+  --user-yellow: #fef6d8;
 }
 
 :root[data-theme="dark"] {
@@ -38,6 +43,10 @@
   --color-tealsoft: #1C2C29;
   --color-rust: #D9806C;
   --color-rustsoft: #34221E;
+  --user-pink: #33222A;
+  --user-blue: #1C2833;
+  --user-purple: #2A2236;
+  --user-yellow: #302B1A;
   color-scheme: dark; /* natywne kontrolki (scrollbary, listy, pola dat) też ciemne */
 }
 

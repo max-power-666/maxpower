@@ -1539,6 +1539,7 @@ plakietki marketplace'ów/statusów w `SalesOrdersHub.tsx`/`BacklogView.tsx` (ha
 jasne plakietki na ciemnym tle (czytelne, tylko niespójne z resztą motywu). Dwa hardkodowane heksy siatki i linii
 najechania na wykresie Biddera (`TradeInView.tsx`, `#C7CCB9`/`#57614F`) zostały przestawione na `var(--color-line)`/
 `var(--color-inksoft)` przy okazji tej zmiany, bo inaczej byłyby całkiem niewidoczne na ciemnym tle.
+**Kolory osób i usterki w trybie nocnym (21.10.2026, zgłoszone: "w trybie nocnym apka jest miejscami nieczytelna, np. Trade-in; kolumna Usterki nie wygląda dobrze"):** tła wierszy Trade-in i plakietka "Pracownik" w Testach (`lib/userColors.ts`) były jasnymi pastelami na sztywno, a tryb nocny daje jasny tekst — jasne na jasnym. Teraz kolory osób to zmienne CSS `--user-pink/blue/purple/yellow` (`app/globals.css`) z ciemnymi odpowiednikami w trybie nocnym; tekst plakietki w Testach = `var(--color-ink)`. Usterki (`DefectsCell.tsx`) to zaokrąglone prostokąty z obwódką zamiast pigułek (`rounded-full` przy zawiniętym tekście robił owale), × wyrównany do pierwszej linii, szerokość listy max 16rem. Uwaga przy kolorach Tailwind z tego projektu: to zmienne CSS w formacie hex, więc modyfikator przezroczystości (`border-rust/30`) nie działa. Nowa osoba w `COLOR_BY_EMAIL` = nowa para zmiennych w obu motywach.
 
 ## Wzorce w kodzie (używaj ich przy nowych modułach)
 
