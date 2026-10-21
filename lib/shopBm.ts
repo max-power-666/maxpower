@@ -99,7 +99,8 @@ export function shopPricePln(eur: number, rate: number) {
   return Math.ceil((x + 1) / 10) * 10 - 1;
 }
 
-const COLOR_BG: Record<string, string> = { Sony: "#E1F0FE", Microsoft: "#D9F8EF", Nintendo: "#FDECF0" };
+// Tło karty produktu: domyślnie białe dla wszystkich (21.10.2026, decyzja właściciela — kolor ustawia ręcznie w wybranych ofertach).
+const DEFAULT_BG = "#FFFFFF";
 
 export type OfferPlan = {
   offer: BmLiveOffer;
@@ -123,14 +124,14 @@ export function planOffer(o: BmLiveOffer): OfferPlan | null {
   if (category === "konsole") {
     brand = consoleBrand(title);
     name = cleanConsole(title);
-    color = COLOR_BG[brand];
+    color = DEFAULT_BG;
   } else if (category === "aparaty") {
     ({ brand, name } = cleanCamera(title));
-    color = "#E7EBFA";
+    color = DEFAULT_BG;
   } else {
     brand = "Samsung";
     name = colors(title.replace(/^Samsung\s+/, ""));
-    color = "#E3FCEE";
+    color = DEFAULT_BG;
   }
   const modelSlug = slugify(category === "aparaty" ? name : `${brand} ${name}`);
   const sku = shopSkuFrom(o.sku || `BM-${o.id}`) || `BM-${o.id.slice(0, 8).toUpperCase()}`;

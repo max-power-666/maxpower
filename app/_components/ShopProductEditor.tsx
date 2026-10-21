@@ -69,7 +69,7 @@ const emptyDraft = (category: string): Draft => ({
   description: "",
   highlights: "",
   option_label: "",
-  color: SHOP_COLORS[0].hex,
+  color: "#FFFFFF", // domyślnie białe tło (21.10.2026)
   keywords: "",
   is_new: false,
   featured: false,
