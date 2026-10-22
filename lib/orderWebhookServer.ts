@@ -3,7 +3,7 @@
 //    (b) "szybka ścieżka" Back Market i refurbed: świeże zamówienia pytane wprost w API (ta sama co synchronizacja stanów), więc powiadomienie idzie po ok. minucie;
 //  - każde zamówienie raz (order_webhook_sent: wpis powstaje PRZED wysyłką; błąd = ponowienie w kolejnych przebiegach, do 5 prób);
 //  - pierwszy przebieg to "baseline": zamówienia z ostatnich 14 dni są tylko oznaczane jako obsłużone, nic nie jest wysyłane.
-// Payload: marketplace + pozycje (sku, ilość, cena, waluta) — bez danych klienta i bez numeru zamówienia.
+// Payload: marketplace + numer zamówienia (order_id, od 22.10.2026) + pozycje (sku, ilość, cena, waluta) — bez danych klienta.
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isCountedOrder } from "./salesOrders";
 import { fetchBmRecent, fetchRefurbedRecent, type FastItem } from "./stockSyncServer";
@@ -119,7 +119,7 @@ export async function runOrderWebhook(db: SupabaseClient<any, any, any>, opts: {
   }
   const list = [...cands.values()];
 
-  if (opts.dryRun) return { ran: true, dryRun: true, candidates: list.length, sent: 0, failed: 0, errors, samples: list.slice(0, 5).map((c) => buildWebhookPayload(c.marketplace, c.items)) };
+  if (opts.dryRun) return { ran: true, dryRun: true, candidates: list.length, sent: 0, failed: 0, errors, samples: list.slice(0, 5).map((c) => buildWebhookPayload(c.marketplace, c.items, c.external_id)) };
 
   let sent = 0;
   let failed = 0;
@@ -140,7 +140,7 @@ export async function runOrderWebhook(db: SupabaseClient<any, any, any>, opts: {
       const upd = await db.from("order_webhook_sent").update({ status: "sending", updated_at: new Date().toISOString() }).eq("marketplace", c.marketplace).eq("external_id", c.external_id).eq("status", prev.status).eq("updated_at", prev.updated_at).select("external_id");
       if (upd.error || !upd.data || upd.data.length === 0) continue;
     }
-    const res = await sendWebhook(url!, buildWebhookPayload(c.marketplace, c.items), opts.fetchImpl);
+    const res = await sendWebhook(url!, buildWebhookPayload(c.marketplace, c.items, c.external_id), opts.fetchImpl);
     attempts += 1;
     if (res.ok) {
       sent += 1;
