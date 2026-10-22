@@ -44,10 +44,33 @@ export async function GET(request: Request) {
   const { data: member } = await db.from("members").select("role").eq("user_id", uid).maybeSingle();
   if (!member?.role) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
 
-  const serial = (new URL(request.url).searchParams.get("serial") || "").trim();
+  const sp = new URL(request.url).searchParams;
+  const serial = (sp.get("q") || sp.get("serial") || "").trim();
   if (serial.length < 3) return NextResponse.json({ found: false } satisfies ReturnLookup);
   const variants = serialVariants(serial);
   const orFilter = (col: string) => variants.map((v) => `${col}.ilike.${quote(v.replace(/[%_\\]/g, "\\$&"))}`).join(",");
+
+  // 0) numer zamówienia sprzedaży (22.10.2026: zwrot można wprowadzić też po numerze zamówienia) — dokładny numer, bez rozróżniania wielkości liter
+  const { data: ords } = await db.from("sales_orders").select("marketplace, external_id, order_date").ilike("external_id", serial.replace(/[%_\\]/g, "\\$&")).order("order_date", { ascending: false }).limit(3);
+  if (ords?.length) {
+    const o = ords[0] as any;
+    const { data: its } = await db.from("sales_order_items").select("sku, name, serial_number").eq("marketplace", o.marketplace).eq("external_id", o.external_id).order("position", { ascending: true });
+    const items = (its || []).map((i: any) => ({ serial: (i.serial_number || "").trim(), sku: i.sku || "", name: i.name || "", product: guessReturnProduct(i.name, i.sku) }));
+    const name = await buyerName(db, o.marketplace, o.external_id).catch(() => "");
+    const first = items[0];
+    const res: ReturnLookup = {
+      found: true,
+      source: "zamowienie",
+      byOrder: true,
+      platform: o.marketplace,
+      orderId: o.external_id,
+      customerName: name,
+      items,
+      ...(items.length === 1 ? { serial: first.serial, sku: first.sku, productName: first.name, product: first.product } : {}),
+      note: items.length > 1 ? "W zamówieniu jest kilka pozycji — wybierz, której dotyczy zwrot." : undefined,
+    };
+    return NextResponse.json(res);
+  }
 
   // 1) sprzedaż: pozycje zamówień z tym numerem seryjnym; bierzemy najnowsze zamówienie (sztuka mogła być sprzedana kilka razy)
   const { data: items } = await db.from("sales_order_items").select("marketplace, external_id, sku, name, serial_number").or(orFilter("serial_number")).limit(20);

@@ -21,9 +21,12 @@ create table if not exists returns_log (
   correction_number text,      -- NUMER KOREKTY
   replaced_imei text,          -- IMEI WYMIENIONEGO
   check_notes text,            -- UWAGI PRZY SPRAWDZANIU
-  commission numeric,          -- PROWIZJA
+  commission numeric,          -- (nieużywane od 22.10.2026 — PROWIZJA to lista, patrz commission_status)
   history jsonb not null default '[]'::jsonb
 );
+
+-- PROWIZJA jako lista (22.10.2026): prowizja / odzyskana / odrzucona / bez_prowizji / do_zgloszenia / zgloszona — zwykły tekst, lista w lib/returns.ts
+alter table returns_log add column if not exists commission_status text;
 
 create index if not exists returns_log_created_idx on returns_log (created_at desc);
 create index if not exists returns_log_serial_idx on returns_log (upper(btrim(serial_number)));
@@ -53,7 +56,7 @@ begin
   end if;
   o := to_jsonb(old);
   n := to_jsonb(new);
-  foreach f in array array['received_at','return_kind','customer_name','platform','order_id','product','sku','serial_number','client_comment','can_do','final_status','correction_number','replaced_imei','check_notes','commission'] loop
+  foreach f in array array['received_at','return_kind','customer_name','platform','order_id','product','sku','serial_number','client_comment','can_do','final_status','correction_number','replaced_imei','check_notes','commission_status'] loop
     if o -> f is distinct from n -> f then
       changes := changes || jsonb_build_array(jsonb_build_object('field', f, 'from', o -> f, 'to', n -> f));
     end if;

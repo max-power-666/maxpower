@@ -7,7 +7,7 @@ import { escapeLike } from "@/lib/search";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { takePrefill, usePrefillListener } from "@/lib/searchPrefill";
 import {
-  RETURN_KINDS, RETURN_FINAL_STATUSES, RETURN_FINAL_COLORS, RETURN_PLATFORMS, RETURN_PLATFORM_COLORS, RETURN_PRODUCTS, platformLabel, type ReturnLookup,
+  RETURN_KINDS, RETURN_FINAL_STATUSES, RETURN_FINAL_COLORS, RETURN_COMMISSION, RETURN_COMMISSION_COLORS, RETURN_PLATFORMS, RETURN_PLATFORM_COLORS, RETURN_PRODUCTS, platformLabel, type ReturnLookup,
 } from "@/lib/returns";
 import InlineEditCell from "./InlineEditCell";
 import ProductCardDrawer from "./ProductCardDrawer";
@@ -33,13 +33,12 @@ type Row = {
   correction_number: string | null;
   replaced_imei: string | null;
   check_notes: string | null;
-  commission: number | null;
+  commission_status: string | null;
 };
 
-const COLS = "id, created_by_email, received_at, return_kind, customer_name, platform, order_id, product, sku, serial_number, client_comment, can_do, final_status, correction_number, replaced_imei, check_notes, commission";
+const COLS = "id, created_by_email, received_at, return_kind, customer_name, platform, order_id, product, sku, serial_number, client_comment, can_do, final_status, correction_number, replaced_imei, check_notes, commission_status";
 const todayYmd = () => new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Warsaw" });
 const fmtDate = (ymd: string) => ymd.split("-").reverse().join(".");
-const fmtMoney = (n: number | null) => (n === null ? "" : n.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 const btnPrimary = "bg-ink text-paper px-4 py-2 rounded text-sm font-semibold disabled:opacity-50";
 const input = "w-full border border-line bg-white px-2 py-2 rounded text-sm";
 const label = "text-xs font-semibold text-inksoft block mb-1";
@@ -62,6 +61,7 @@ export default function ReturnsView({ session, members, isAdmin }: { session: Se
   const [lookup, setLookup] = useState<ReturnLookup | null>(null);
   const [lookingUp, setLookingUp] = useState(false);
   const [previous, setPrevious] = useState(0);
+  const [pickItems, setPickItems] = useState<NonNullable<ReturnLookup["items"]>>([]);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
   const lastLooked = useRef("");
@@ -105,6 +105,7 @@ export default function ReturnsView({ session, members, isAdmin }: { session: Se
     lastLooked.current = serial;
     setLookingUp(true);
     setLookup(null);
+    setPickItems([]);
     try {
       const [res, prev] = await Promise.all([
         fetch(`/api/returns/lookup?serial=${encodeURIComponent(serial)}`, { headers: { Authorization: `Bearer ${session.access_token}` } }).then((r) => r.json()),
@@ -113,7 +114,25 @@ export default function ReturnsView({ session, members, isAdmin }: { session: Se
       setPrevious(prev.count ?? 0);
       const l = res as ReturnLookup;
       setLookup(l);
-      if (l.found) {
+      if (l.found && l.byOrder) {
+        // wpisano numer zamówienia: dane zamówienia + numer seryjny pozycji (przy kilku pozycjach wybiera pracownik)
+        setPickItems(l.items && l.items.length > 1 ? l.items : []);
+        setPrevious(0);
+        setForm((f) => ({
+          ...f,
+          serial: l.serial || (l.items && l.items.length > 1 ? "" : f.serial),
+          platform: l.platform || f.platform,
+          orderId: l.orderId || f.orderId,
+          name: l.customerName || f.name,
+          product: l.product || f.product,
+          sku: l.sku || f.sku,
+        }));
+        if (l.serial) {
+          lastLooked.current = l.serial;
+          const prev2 = await supabase.from("returns_log").select("id", { count: "exact", head: true }).ilike("serial_number", escapeLike(l.serial));
+          setPrevious(prev2.count ?? 0);
+        }
+      } else if (l.found) {
         setForm((f) => ({
           ...f,
           platform: f.platform || l.platform || "",
@@ -133,7 +152,7 @@ export default function ReturnsView({ session, members, isAdmin }: { session: Se
   async function submit() {
     setFormError("");
     const serial = form.serial.trim().toUpperCase();
-    if (!serial) return setFormError("Podaj numer seryjny / IMEI.");
+    if (!serial && !form.orderId.trim()) return setFormError("Podaj numer seryjny / IMEI albo numer zamówienia.");
     setSubmitting(true);
     const { error: err } = await supabase.from("returns_log").insert({
       received_at: form.receivedAt || todayYmd(),
@@ -143,7 +162,7 @@ export default function ReturnsView({ session, members, isAdmin }: { session: Se
       order_id: form.orderId.trim() || null,
       product: form.product || null,
       sku: form.sku.trim() || null,
-      serial_number: serial,
+      serial_number: serial || null,
       client_comment: form.comment.trim() || null,
     });
     setSubmitting(false);
@@ -151,6 +170,7 @@ export default function ReturnsView({ session, members, isAdmin }: { session: Se
     setForm({ ...emptyForm, kind: form.kind, receivedAt: form.receivedAt });
     setLookup(null);
     setPrevious(0);
+    setPickItems([]);
     lastLooked.current = "";
     setPage(0);
     load();
@@ -180,13 +200,13 @@ export default function ReturnsView({ session, members, isAdmin }: { session: Se
         <h2 className="text-xs font-semibold text-inksoft mb-3">PRZYJMIJ ZWROT</h2>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3">
           <div className="md:col-span-2">
-            <label className={label}>Numer seryjny / IMEI *</label>
+            <label className={label}>Numer seryjny / IMEI lub numer zamówienia *</label>
             <input
               value={form.serial}
               onChange={(e) => setForm({ ...form, serial: e.target.value })}
               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); doLookup(form.serial); } }}
               onBlur={() => doLookup(form.serial)}
-              placeholder="Zeskanuj lub wpisz i naciśnij Enter — resztę podpowiemy"
+              placeholder="Zeskanuj numer seryjny albo wpisz numer zamówienia i naciśnij Enter — resztę podpowiemy"
               className={`${input} font-mono`}
               autoFocus
             />
@@ -205,13 +225,30 @@ export default function ReturnsView({ session, members, isAdmin }: { session: Se
         {(lookingUp || lookup || previous > 0) && (
           <div className="text-xs mb-3 space-y-1">
             {lookingUp && <p className="text-inksoft">Szukam danych…</p>}
-            {lookup?.found && lookup.source === "zamowienie" && (
+            {lookup?.found && lookup.byOrder && (
+              <p className="text-teal">Znaleziono zamówienie {platformLabel(lookup.platform)} {lookup.orderId}{lookup.productName ? ` — ${lookup.productName}` : ""}.{lookup.serial ? " Numer seryjny pozycji uzupełniony." : lookup.items && lookup.items.length === 1 ? " Pozycja nie ma jeszcze wpisanego numeru seryjnego." : ""}</p>
+            )}
+            {lookup?.found && !lookup.byOrder && lookup.source === "zamowienie" && (
               <p className="text-teal">Znaleziono zamówienie {platformLabel(lookup.platform)} {lookup.orderId}{lookup.productName ? ` — ${lookup.productName}` : ""}. Pola poniżej uzupełnione — sprawdź je.</p>
             )}
-            {lookup?.found && lookup.source !== "zamowienie" && <p className="text-amber">Znaleziono tylko SKU (źródło: {lookup.source}).</p>}
+            {lookup?.found && !lookup.byOrder && lookup.source !== "zamowienie" && <p className="text-amber">Znaleziono tylko SKU (źródło: {lookup.source}).</p>}
             {lookup && !lookup.found && <p className="text-inksoft">{lookup.note || "Nie znaleziono tego numeru w zamówieniach ani w magazynie — uzupełnij pola ręcznie."}</p>}
             {lookup?.note && lookup.found && <p className="text-inksoft">{lookup.note}</p>}
             {previous > 0 && <p className="text-amber">Uwaga: ten numer ma już {previous} {previous === 1 ? "zwrot" : "zwroty/zwrotów"} w rejestrze.</p>}
+          </div>
+        )}
+        {pickItems.length > 1 && (
+          <div className="flex flex-wrap gap-2 mb-3">
+            {pickItems.map((it, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => setForm((f) => ({ ...f, serial: it.serial, sku: it.sku, product: it.product }))}
+                className={`text-xs border px-3 py-1.5 rounded ${form.sku === it.sku && form.serial === it.serial ? "bg-ink text-paper border-ink" : "border-line bg-white"}`}
+              >
+                {it.name || it.sku || "pozycja"}{it.sku ? ` · ${it.sku}` : ""}{it.serial ? ` · ${it.serial}` : " · bez numeru seryjnego"}
+              </button>
+            ))}
           </div>
         )}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3">
@@ -283,7 +320,7 @@ export default function ReturnsView({ session, members, isAdmin }: { session: Se
               <th className={th}>Numer korekty</th>
               <th className={th}>IMEI wymienionego</th>
               <th className={th}>Uwagi przy sprawdzaniu</th>
-              <th className={`${th} text-right`}>Prowizja</th>
+              <th className={th}>Prowizja</th>
               <th className={th}>Dodał</th>
               {isAdmin && <th className={th}></th>}
             </tr>
@@ -350,18 +387,21 @@ export default function ReturnsView({ session, members, isAdmin }: { session: Se
                   <td className="p-3"><InlineEditCell value={r.correction_number} placeholder="Nr korekty" className="w-32 font-mono text-xs" onSave={(v) => save(r, { correction_number: v }, "numer korekty")} /></td>
                   <td className="p-3"><InlineEditCell value={r.replaced_imei} placeholder="IMEI" className="w-36 font-mono text-xs" onSave={(v) => save(r, { replaced_imei: v ? v.toUpperCase() : null }, "IMEI wymienionego")} /></td>
                   <td className="p-3"><InlineEditCell value={r.check_notes} placeholder="Uwagi" multiline className="w-56" onSave={(v) => save(r, { check_notes: v }, "uwagi przy sprawdzaniu")} /></td>
-                  <td className="p-3 text-right">
-                    <InlineEditCell
-                      value={r.commission === null ? null : fmtMoney(r.commission)}
-                      placeholder="0,00"
-                      className="w-24 text-right"
-                      onSave={(v) => {
-                        if (v === null) return save(r, { commission: null }, "prowizja");
-                        const n = Number(v.replace(/\s/g, "").replace(",", "."));
-                        if (!Number.isFinite(n)) return setError("Prowizja musi być liczbą.");
-                        save(r, { commission: Math.round(n * 100) / 100 }, "prowizja");
-                      }}
-                    />
+                  <td className="p-3">
+                    {(() => {
+                      const cc = r.commission_status ? RETURN_COMMISSION_COLORS[r.commission_status] : undefined;
+                      return (
+                        <select
+                          value={r.commission_status ?? ""}
+                          onChange={(e) => save(r, { commission_status: e.target.value || null }, "prowizja")}
+                          className={`text-xs px-2 py-1 rounded-full ${cc ? "font-semibold border-none" : "border border-line bg-white"}`}
+                          style={cc ? { backgroundColor: cc.bg, color: cc.fg } : undefined}
+                        >
+                          <option value="">—</option>
+                          {RETURN_COMMISSION.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+                        </select>
+                      );
+                    })()}
                   </td>
                   <td className="p-3 text-xs text-inksoft whitespace-nowrap">{displayNameForEmail(r.created_by_email, members)}</td>
                   {isAdmin && (
