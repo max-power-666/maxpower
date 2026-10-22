@@ -299,3 +299,7 @@ begin
   begin alter publication supabase_realtime add table buyback_orders; exception when duplicate_object then null; end;
   begin alter publication supabase_realtime add table buyback_order_intake; exception when duplicate_object then null; end;
 end $$;
+
+-- Cena zakupu i numer faktury dla kanałów innych niż Buyback (22.10.2026) — patrz też trade-in-purchase.sql
+alter table buyback_order_intake add column if not exists purchase_price numeric(12,2);
+alter table buyback_order_intake add column if not exists invoice_no text;

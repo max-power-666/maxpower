@@ -71,6 +71,8 @@ type IntakeEntry = {
   channel?: string | null; // kanał skupu (kolumna channel, buyback-orders.sql 06.10.2026); brak/null = buyback
   defects?: string[] | null; // usterki paczki (kolumna defects, buyback-orders.sql 06.10.2026)
   docs: boolean;
+  purchase_price?: number | null; // cena zakupu PLN — tylko kanały inne niż Buyback (trade-in-purchase.sql, 22.10.2026)
+  invoice_no?: string | null; // numer faktury / dokumentu zakupu — j.w.
   notes: string | null;
   entered_by_email: string | null;
   entered_at: string;
@@ -91,13 +93,19 @@ const INTAKE_COLUMNS_BASE =
 // klucz obcy do buyback_orders zniknął razem z kanałami innymi niż Buyback, więc PostgREST nie zrobi już osadzenia.
 let defectsColumnAvailable = true;
 let channelColumnAvailable = true;
+let purchaseColumnsAvailable = true;
 const intakeColumns = () => {
   let c = INTAKE_COLUMNS_BASE;
   if (defectsColumnAvailable) c = c.replace("pad_serials, docs", "pad_serials, defects, docs");
   if (channelColumnAvailable) c = c.replace("id, order_public_id", "id, order_public_id, channel");
+  if (purchaseColumnsAvailable) c = c.replace(" docs, notes", " docs, purchase_price, invoice_no, notes");
   return c;
 };
 const isBuyback = (row: { channel?: string | null }) => (row.channel ?? "buyback") === "buyback";
+// Paczka spoza Buyback bez ceny zakupu albo numeru faktury — do uzupełnienia JAK NAJSZYBCIEJ (zwrócone paczki pomijamy); pola nie są obowiązkowe
+const missingPurchase = (row: { channel?: string | null; status: string; purchase_price?: number | null; invoice_no?: string | null }) =>
+  !isBuyback(row) && row.status !== "zwrocona" && (row.purchase_price == null || !(row.invoice_no || "").trim());
+const MISSING_PURCHASE_OR = "purchase_price.is.null,invoice_no.is.null,invoice_no.eq.";
 
 // Dane zamówień Back Market dla wpisów Buyback (kolumny tylko do odczytu w liście).
 async function attachBmOrders(rows: IntakeEntry[]): Promise<IntakeEntry[]> {
@@ -246,6 +254,11 @@ function IntakeView({
   const [loading, setLoading] = useState(false);
   const [hasDefects, setHasDefects] = useState(defectsColumnAvailable);
   const [hasChannel, setHasChannel] = useState(channelColumnAvailable);
+  const [hasPurchase, setHasPurchase] = useState(purchaseColumnsAvailable);
+  const [missingCount, setMissingCount] = useState(0);
+  const [missingOnly, setMissingOnly] = useState(false);
+  const [purchasePrice, setPurchasePrice] = useState("");
+  const [invoiceNo, setInvoiceNo] = useState("");
   const [channel, setChannel] = useState<string>("buyback");
   const [error, setError] = useState("");
 
@@ -279,14 +292,15 @@ function IntakeView({
       supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [periodKey(period), search, page, pageSize]);
+  }, [periodKey(period), search, page, pageSize, missingOnly]);
 
   async function load() {
     setLoading(true);
     setError("");
     try {
       let listQuery = supabase.from("buyback_order_intake").select(intakeColumns(), { count: "exact" }).order("entered_at", { ascending: false });
-      if (search) listQuery = listQuery.or(`order_public_id.ilike.%${escapeLike(search)}%,serial_number.ilike.%${escapeLike(search)}%`);
+      if (missingOnly && purchaseColumnsAvailable) listQuery = listQuery.neq("channel", "buyback").neq("status", "zwrocona").or(MISSING_PURCHASE_OR); // tylko paczki do uzupełnienia (cały rejestr, bez okresu)
+      else if (search) listQuery = listQuery.or(`order_public_id.ilike.%${escapeLike(search)}%,serial_number.ilike.%${escapeLike(search)}%`);
       else {
         // Okres (Dziś / 7 / 30 dni) zawęża też listę paczek (15.10.2026, jak w Serwisie): paczki rozpoczęte lub zakończone w okresie oraz wciąż trwające (bez daty
         // zakończenia). Wyszukiwanie po numerze szuka w całej historii, więc okresu wtedy nie stosujemy.
@@ -310,6 +324,11 @@ function IntakeView({
         setHasDefects(false);
         return load(); // ponów bez kolumny Usterek
       }
+      if (listErr && listErr.code === "42703" && /purchase_price|invoice_no/.test(listErr.message) && purchaseColumnsAvailable) {
+        purchaseColumnsAvailable = false;
+        setHasPurchase(false);
+        return load(); // ponów bez kolumn ceny zakupu i faktury
+      }
       if (listErr && listErr.code === "42703" && /channel/.test(listErr.message) && channelColumnAvailable) {
         channelColumnAvailable = false;
         setHasChannel(false);
@@ -321,6 +340,10 @@ function IntakeView({
       }
       if (listErr) throw listErr;
       setTotalCount(listCount ?? null);
+      if (purchaseColumnsAvailable && channelColumnAvailable) {
+        const { count: mc } = await supabase.from("buyback_order_intake").select("id", { count: "exact", head: true }).neq("channel", "buyback").neq("status", "zwrocona").or(MISSING_PURCHASE_OR);
+        setMissingCount(mc ?? 0);
+      }
       setRangeRows(rangeData || []);
       setEntries(await attachBmOrders((listData as unknown as IntakeEntry[]) || []));
     } catch (e: any) {
@@ -377,6 +400,14 @@ function IntakeView({
       setFormError(fromBuyback ? "Podaj numer zamówienia lub numer przesyłki." : "Podaj numer przesyłki.");
       return;
     }
+    let purchasePriceNum: number | null = null;
+    if (!fromBuyback && purchasePrice.trim()) {
+      purchasePriceNum = Number(purchasePrice.replace(/\s/g, "").replace(",", "."));
+      if (!Number.isFinite(purchasePriceNum) || purchasePriceNum < 0) {
+        setFormError("Cena zakupu musi być liczbą (zł).");
+        return;
+      }
+    }
     setSubmitting(true);
     try {
       // Buyback: numer zamówienia/przesyłki szukany wśród zamówień BM. Inne kanały: wpisany numer przesyłki jest kluczem wpisu.
@@ -384,6 +415,7 @@ function IntakeView({
       const { error: err } = await supabase.from("buyback_order_intake").insert({
         order_public_id: orderId,
         ...(channelColumnAvailable ? { channel } : {}),
+        ...(!fromBuyback && purchaseColumnsAvailable ? { purchase_price: purchasePriceNum, invoice_no: invoiceNo.trim() || null } : {}),
         entered_by_user_id: session.user.id,
         entered_by_email: session.user.email,
         status: "w_trakcie",
@@ -399,6 +431,8 @@ function IntakeView({
         throw err;
       }
       setLookup("");
+      setPurchasePrice("");
+      setInvoiceNo("");
     } catch (e: any) {
       setFormError(e.message || "Błąd zapisu.");
     } finally {
@@ -440,11 +474,26 @@ function IntakeView({
   }
 
   // Edycje z listy (uwagi, numer seryjny, SKU, pady) trafiają do tego samego logu zmian co edycja na karcie.
-  function saveField(row: IntakeEntry, column: "notes" | "serial_number" | "sku" | "pads", label: string, value: string | number | null) {
+  function saveField(row: IntakeEntry, column: "notes" | "serial_number" | "sku" | "pads" | "invoice_no", label: string, value: string | number | null) {
     setError("");
     enqueueUpdate(row.id, label, (cur) => ({
       patch: { [column]: value },
       changes: [{ field: label, from: cur[column] === null ? null : String(cur[column]), to: value === null ? null : String(value) }],
+    }));
+  }
+
+  // Cena zakupu (zł) — tylko kanały inne niż Buyback; przecinek lub kropka, puste czyści
+  function savePurchasePrice(row: IntakeEntry, text: string | null) {
+    let value: number | null = null;
+    if (text !== null) {
+      value = Number(text.replace(/\s/g, "").replace(",", "."));
+      if (!Number.isFinite(value) || value < 0) return setError("Cena zakupu musi być liczbą (zł).");
+      value = Math.round(value * 100) / 100;
+    }
+    setError("");
+    enqueueUpdate(row.id, "Cena zakupu", (cur) => ({
+      patch: { purchase_price: value },
+      changes: [{ field: "Cena zakupu", from: cur.purchase_price == null ? null : String(cur.purchase_price), to: value === null ? null : String(value) }],
     }));
   }
 
@@ -640,6 +689,21 @@ function IntakeView({
             />
           </div>
         </div>
+        {channel !== "buyback" && hasPurchase && (
+          <div className="mb-3">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-1">
+              <div>
+                <label className="text-xs font-semibold text-inksoft block mb-1">Cena zakupu (zł)</label>
+                <input value={purchasePrice} onChange={(e) => setPurchasePrice(e.target.value)} placeholder="np. 1250,00" className="w-full border border-line bg-white px-2 py-2 rounded text-sm font-mono" />
+              </div>
+              <div className="md:col-span-2">
+                <label className="text-xs font-semibold text-inksoft block mb-1">Numer faktury / dokumentu zakupu</label>
+                <input value={invoiceNo} onChange={(e) => setInvoiceNo(e.target.value)} className="w-full border border-line bg-white px-2 py-2 rounded text-sm font-mono" />
+              </div>
+            </div>
+            <p className="text-xs font-semibold text-rust">Pola nie są obowiązkowe, ale cenę zakupu i numer faktury trzeba uzupełnić jak najszybciej — bez nich zakup nie trafi do Towaru i Marży.</p>
+          </div>
+        )}
         {formError && <p className="text-rust text-xs mb-2">{formError}</p>}
         <button onClick={submit} disabled={submitting} className={btnPrimary}>
           {submitting ? (channel === "buyback" ? "Szukanie…" : "Zapisywanie…") : "Rozpocznij"}
@@ -672,6 +736,14 @@ function IntakeView({
           <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages || loading} className="bg-white border border-line px-3 py-1.5 rounded text-sm font-semibold text-ink disabled:opacity-40">Następna ›</button>
         </div>
       </div>
+      {hasPurchase && (missingCount > 0 || missingOnly) && (
+        <div className="mb-3 border-2 border-rust bg-rustsoft text-rust px-4 py-3 rounded flex flex-wrap items-center gap-3">
+          <span className="text-sm font-bold">⚠ {missingCount} {missingCount === 1 ? "paczka" : "paczek"} z kanałów innych niż Buyback bez ceny zakupu lub numeru faktury — uzupełnij je jak najszybciej.</span>
+          <button onClick={() => { setMissingOnly((v) => !v); setPage(1); }} className="ml-auto bg-white border border-rust text-rust px-3 py-1 rounded text-xs font-semibold">
+            {missingOnly ? "Pokaż wszystkie paczki" : "Pokaż tylko do uzupełnienia"}
+          </button>
+        </div>
+      )}
       {/* Tabela ma własne okno przewijania (wysokość ekranu) z przyklejonym nagłówkiem — pasek przewijania w poziomie jest zawsze
           widoczny na dole ekranu, a nie dopiero pod ostatnim wierszem (21.10.2026). */}
       <div className="border border-line bg-white overflow-auto max-h-[calc(100vh-8rem)] scrollbar-always">
@@ -689,6 +761,8 @@ function IntakeView({
               <th className="p-3">Pady</th>
               <th className="p-3">Nr seryjny padów</th>
               <th className="p-3">Dok.</th>
+              {hasPurchase && <th className="p-3">Cena zakupu (zł)</th>}
+              {hasPurchase && <th className="p-3">Nr faktury</th>}
               {hasDefects && <th className="p-3">Usterki</th>}
               <th className="p-3">Status BM</th>
               <th className="p-3">Status</th>
@@ -700,7 +774,7 @@ function IntakeView({
           </thead>
           <tbody>
             {!loading && entries.length === 0 && (
-              <tr><td colSpan={14 + (hasDefects ? 1 : 0) + (hasChannel ? 1 : 0) + (isAdminOrManager ? 1 : 0) + (isAdmin ? 1 : 0)} className="p-6 text-center text-inksoft text-sm">{search ? "Nic nie znaleziono dla tego numeru." : "Brak paczek w wybranym okresie — rozpocznij pierwszą powyżej albo wybierz dłuższy okres."}</td></tr>
+              <tr><td colSpan={14 + (hasPurchase ? 2 : 0) + (hasDefects ? 1 : 0) + (hasChannel ? 1 : 0) + (isAdminOrManager ? 1 : 0) + (isAdmin ? 1 : 0)} className="p-6 text-center text-inksoft text-sm">{search ? "Nic nie znaleziono dla tego numeru." : "Brak paczek w wybranym okresie — rozpocznij pierwszą powyżej albo wybierz dłuższy okres."}</td></tr>
             )}
             {entries.map((e) => (
               <tr key={e.id} className="border-b border-line last:border-b-0" style={{ backgroundColor: rowColorForUser(e.entered_by_email) }}>
@@ -763,6 +837,29 @@ function IntakeView({
                     aria-label="Dok."
                   />
                 </td>
+                {hasPurchase && (
+                  <td className="p-3">
+                    {isBuyback(e) ? <span className="text-xs text-inksoft" title="Cena z zamówienia Back Market">z BM</span> : (
+                      <div className={missingPurchase(e) && e.purchase_price == null ? "border-2 border-rust bg-rustsoft rounded px-1" : ""}>
+                        <InlineEditCell
+                          value={e.purchase_price == null ? null : e.purchase_price.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          placeholder="UZUPEŁNIJ"
+                          className="w-24 font-mono text-right"
+                          onSave={(v) => savePurchasePrice(e, v)}
+                        />
+                      </div>
+                    )}
+                  </td>
+                )}
+                {hasPurchase && (
+                  <td className="p-3">
+                    {isBuyback(e) ? <span className="text-xs text-inksoft">—</span> : (
+                      <div className={missingPurchase(e) && !(e.invoice_no || "").trim() ? "border-2 border-rust bg-rustsoft rounded px-1" : ""}>
+                        <InlineEditCell value={e.invoice_no ?? null} placeholder="UZUPEŁNIJ" className="w-36 font-mono" onSave={(v) => saveField(e, "invoice_no", "Nr faktury", v)} />
+                      </div>
+                    )}
+                  </td>
+                )}
                 {hasDefects && (
                   <td className="p-3">
                     <DefectsCell values={e.defects ?? null} onSave={(next) => saveDefects(e, next)} />
@@ -1006,6 +1103,12 @@ function OrderCardDrawer({
                     <Row key={i} label={`Nr seryjny pada ${i + 1}`} value={intake.pad_serials?.[i]} mono />
                   ))}
                   <Row label="Dok." value={intake.docs ? "tak" : "nie"} />
+                  {purchaseColumnsAvailable && !isBuyback(intake) && (
+                    <>
+                      <Row label="Cena zakupu" value={intake.purchase_price == null ? "BRAK — uzupełnij jak najszybciej (na liście paczek)" : `${intake.purchase_price.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} zł`} />
+                      <Row label="Nr faktury" value={(intake.invoice_no || "").trim() ? intake.invoice_no : "BRAK — uzupełnij jak najszybciej (na liście paczek)"} />
+                    </>
+                  )}
                   {defectsColumnAvailable && <Row label="Usterki" value={(intake.defects ?? []).join(", ") || null} />}
                   <Row label="Uwagi" value={intake.notes} />
                 </>
