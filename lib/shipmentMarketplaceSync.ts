@@ -22,6 +22,7 @@ import { bmShipConfigFromEnv, bmMarkOrderShipped, bmSetOrderlineIdentifier, BM_S
 import { refurbedListCarriers, refurbedMarkItemsShipped } from "./refurbed";
 import { octopiaConfigFromEnv, octopiaGetOrder, octopiaShipOrder, OCTOPIA_CARRIER_BY_CARRIER } from "./octopia";
 import { saveOctopiaOrders } from "./octopiaServer";
+import { markSwopifyShipped } from "./swopifyShipping";
 
 export type ShipmentCarrier = "dhl_express" | "dhl_parcel" | "ups";
 
@@ -40,6 +41,11 @@ export async function notifyMarketplace(
   if (!opts.marketplace || !opts.externalId) return { synced: false, error: null }; // przesyłka nie powiązana z zamówieniem — nic do zgłoszenia
 
   try {
+    if (opts.marketplace === "swopify") {
+      // kanał ręczny (bez API): numer przesyłki zapisujemy w zamówieniu i oznaczamy je jako wysłane (lib/swopifyShipping.ts)
+      await markSwopifyShipped(db, opts.externalId, opts.trackingNumber);
+      return { synced: true, error: null };
+    }
     if (opts.marketplace === "backmarket") {
       const cfg = bmShipConfigFromEnv();
       if (!cfg) return { synced: false, error: "Brak konfiguracji Back Market (BACKMARKET_AUTH) — zgłoś numer przesyłki ręcznie w panelu Back Market." };

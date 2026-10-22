@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { revertSwopifyIfNoShipment } from "@/lib/swopifyShipping";
 import { requireRole } from "@/lib/serverAuth";
 import { dhlParcelConfigFromEnv, dhlParcelDelete } from "@/lib/dhlParcel";
 import { admin } from "@/lib/parcelServer";
@@ -26,5 +27,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: e.message || "Nie udało się anulować przesyłki." }, { status: 422 });
   }
   await db.from("shipments").update({ cancelled_at: new Date().toISOString(), label_data: null }).eq("id", id);
+  await revertSwopifyIfNoShipment(db, id).catch(() => {}); // Swopify: zamówienie wraca do "Opłacone", gdy nie ma innej aktywnej przesyłki
   return NextResponse.json({ ok: true });
 }
