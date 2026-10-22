@@ -1035,7 +1035,7 @@ export default function Home() {
           {view === "reminders" && role === "Admin" && <RemindersView session={session} />}
           {view === "rcp" && <RcpView session={session} role={role} members={members} />}
 
-          {view === "returns" && <ReturnsView />}
+          {view === "returns" && <ReturnsView session={session} members={members} isAdmin={role === "Admin"} />}
 
           {view === "shop_products" && <ShopProductsView session={session} members={members} isAdmin={role === "Admin"} />}
 

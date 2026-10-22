@@ -37,7 +37,7 @@ export async function searchEverywhere(db: Db, raw: string, marketplaceLabel: (k
   const eq = escapeLike(q);
   const hits: SearchHit[] = [];
 
-  const [orders, itemsSerial, itemsPad, boOrder, intakeOrder, shipments, invoices, reqs, goods, repairs, parts, tests, intakeSerial, queue, stock, product] = await Promise.all([
+  const [orders, itemsSerial, itemsPad, boOrder, intakeOrder, shipments, invoices, reqs, goods, repairs, parts, tests, intakeSerial, queue, stock, product, returnsLog] = await Promise.all([
     safe(db.from("sales_orders").select("marketplace, external_id, status, order_date, sku").ilike("external_id", eq).limit(6)),
     safe(db.from("sales_order_items").select("marketplace, external_id, sku, serial_number").or(orFilter("serial_number", sv)).limit(6)),
     safe(db.from("sales_order_items").select("marketplace, external_id, sku, pad_serials").or(`pad_serials.cs.{${quote(q)}},pad_serials.cs.{${quote(q.toUpperCase())}}`).limit(6)),
@@ -54,6 +54,7 @@ export async function searchEverywhere(db: Db, raw: string, marketplaceLabel: (k
     safe(db.from("listing_queue").select("id", { count: "exact" }).or(orFilter("serial_number", sv)).limit(1)),
     safe(db.from("fakturownia_stock_cache").select("id", { count: "exact" }).or(orFilter("name", sv)).limit(1)),
     Promise.resolve(null),
+    safe(db.from("returns_log").select("id", { count: "exact" }).or(`${orFilter("serial_number", sv)},order_id.ilike.${quote(eq)}`).limit(1)),
   ]);
   void product;
 
@@ -83,6 +84,7 @@ export async function searchEverywhere(db: Db, raw: string, marketplaceLabel: (k
   nav("repairs", "service", "Serwis — naprawy", repairs.count, { prefillKey: "service-repairs", sub: { storage: "service-sub", value: "repairs" } });
   nav("parts", "service", "Serwis — części przypisane do urządzenia", parts.count, { prefillKey: "service-parts", sub: { storage: "service-sub", value: "parts" } });
   nav("tests", "tests", "Testy", tests.count, { prefillKey: "tests" });
+  nav("returns", "returns", "Zwroty", returnsLog.count, { prefillKey: "returns" });
   nav("intake-serial", "orders", "Trade-in — obsługa paczek (numer seryjny)", intakeSerial.count, { prefillKey: "tradein-intake", sub: { storage: "tradein-sub", value: "intake" } });
   nav("queue", "toList", "Do wystawienia", queue.count, { prefillKey: "tolist" });
   nav("stock", "inventory", "Magazyn (Fakturownia) — Raw data", stock.count, { prefillKey: "inventory-raw", sub: { storage: "inv-sub", value: "raw" } });
