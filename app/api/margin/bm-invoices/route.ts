@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { requireRole } from "@/lib/serverAuth";
+import { requireRoleOrView } from "@/lib/serverAuth";
 
 // Lista zaimportowanych faktur Back Market (zakładka Marża -> "Faktury BM", 08.10.2026): jedna faktura = jeden plik CSV wgrany przez /api/margin/bm-invoice.
 // Agregujemy bm_invoice_lines po invoice_ref (liczba wierszy i zamówień, okres, sumy wg rodzaju opłaty, kto i kiedy wgrał). Admin i Manager.
@@ -13,7 +13,7 @@ type Line = { invoice_ref: string; invoice_key: string; order_id: string | null;
 
 export async function GET(request: Request) {
   const db = admin();
-  if (!(await requireRole(request, db, ["Admin", "Manager", "Księgowa"]))) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
+  if (!(await requireRoleOrView(request, db, ["Admin", "Manager", "Księgowa"], "margin"))) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
 
   const lines: Line[] = [];
   for (let from = 0; from < 200_000; from += 1000) {

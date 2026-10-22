@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { requireRole } from "@/lib/serverAuth";
+import { requireRoleOrView } from "@/lib/serverAuth";
 import { inPeriod, periodRange, MARGIN_MARKETPLACES, type MarginPeriod } from "@/lib/margin";
 import { aggregateMargin, loadMarginResults, type MarginAgg } from "@/lib/marginServer";
 
@@ -16,7 +16,7 @@ const PERIODS: MarginPeriod[] = ["all", "current", "previous"];
 
 export async function GET(request: Request) {
   const db = admin();
-  if (!(await requireRole(request, db, ["Admin", "Manager", "Księgowa"]))) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
+  if (!(await requireRoleOrView(request, db, ["Admin", "Manager", "Księgowa"], "margin"))) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
   try {
     const { results } = await loadMarginResults(db);
     const periods: Record<string, { total: MarginAgg; byMarketplace: Record<string, MarginAgg> }> = {};
