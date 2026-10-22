@@ -14,7 +14,18 @@ export const RETURN_FINAL_STATUSES = [
   { key: "naprawione_odeslane", label: "Naprawione, odesłane" },
   { key: "wymiana", label: "Wymiana" },
   { key: "odeslane", label: "Odesłane" },
+  { key: "wstrzymane", label: "Wstrzymane" },
 ] as const;
+
+// Pigułki filtra listy (22.10.2026): grupy wg statusu końcowego
+export const RETURN_GROUPS = [
+  { key: "all", label: "Wszystkie", statuses: null },
+  { key: "odstapienie", label: "Przetworzone odstąpienie", statuses: ["zwrot_srodkow"] },
+  { key: "reklamacje", label: "Przetworzone reklamacje", statuses: ["naprawione_odeslane", "odeslane", "wymiana"] },
+  { key: "wstrzymane", label: "Wstrzymane", statuses: ["wstrzymane"] },
+  { key: "bez_statusu", label: "Bez statusu", statuses: [] },
+] as const;
+export type ReturnGroupKey = (typeof RETURN_GROUPS)[number]["key"];
 
 // PROWIZJA (lista rozwijana jak w arkuszu, 22.10.2026) — zgłaszanie prowizji od zwrotu marketplace'owi
 export const RETURN_COMMISSION = [
@@ -40,6 +51,7 @@ export const RETURN_FINAL_COLORS: Record<string, { bg: string; fg: string }> = {
   naprawione_odeslane: { bg: "#d9f2df", fg: "#1a7a3a" },
   wymiana: { bg: "#e3ecf9", fg: "#2a6bb5" },
   odeslane: { bg: "#e9ecef", fg: "#4b5563" },
+  wstrzymane: { bg: "#fff1c9", fg: "#8a5a00" },
 };
 export const RETURN_PLATFORM_COLORS: Record<string, { bg: string; fg: string }> = {
   backmarket: { bg: "#e3ecf9", fg: "#2a6bb5" },

@@ -7,7 +7,7 @@ import { escapeLike } from "@/lib/search";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { takePrefill, usePrefillListener } from "@/lib/searchPrefill";
 import {
-  RETURN_KINDS, RETURN_FINAL_STATUSES, RETURN_FINAL_COLORS, RETURN_COMMISSION, RETURN_COMMISSION_COLORS, RETURN_PLATFORMS, RETURN_PLATFORM_COLORS, RETURN_PRODUCTS, platformLabel, type ReturnLookup,
+  RETURN_KINDS, RETURN_FINAL_STATUSES, RETURN_FINAL_COLORS, RETURN_COMMISSION, RETURN_COMMISSION_COLORS, RETURN_GROUPS, type ReturnGroupKey, RETURN_PLATFORMS, RETURN_PLATFORM_COLORS, RETURN_PRODUCTS, platformLabel, type ReturnLookup,
 } from "@/lib/returns";
 import InlineEditCell from "./InlineEditCell";
 import ProductCardDrawer from "./ProductCardDrawer";
@@ -53,6 +53,8 @@ export default function ReturnsView({ session, members, isAdmin }: { session: Se
   const [searchInput, setSearchInput] = useState(() => takePrefill("returns")); // wyszukiwarka globalna
   usePrefillListener("returns", setSearchInput);
   const [search, setSearch] = useState("");
+  const [group, setGroup] = useState<ReturnGroupKey>("all");
+  const [counts, setCounts] = useState<Record<string, number>>({});
   const [openSerial, setOpenSerial] = useState<string | null>(null);
 
   // formularz
@@ -76,7 +78,7 @@ export default function ReturnsView({ session, members, isAdmin }: { session: Se
     const channel = supabase.channel("returns-log-changes").on("postgres_changes", { event: "*", schema: "public", table: "returns_log" }, () => load()).subscribe();
     return () => { supabase.removeChannel(channel); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, page, pageSize]);
+  }, [search, page, pageSize, group]);
 
   async function load() {
     setLoading(true);
@@ -87,10 +89,23 @@ export default function ReturnsView({ session, members, isAdmin }: { session: Se
         const pat = `"%${escapeLike(search).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}%"`;
         q = q.or(["serial_number", "order_id", "customer_name", "sku", "correction_number", "replaced_imei"].map((c) => `${c}.ilike.${pat}`).join(","));
       }
+      const g = RETURN_GROUPS.find((x) => x.key === group)!;
+      if (g.statuses && g.statuses.length) q = q.in("final_status", [...g.statuses]);
+      else if (g.statuses) q = q.is("final_status", null);
       const { data, error: err, count } = await q.order("received_at", { ascending: false }).order("id", { ascending: false }).range(page * pageSize, page * pageSize + pageSize - 1);
       if (err) throw err;
       setRows((data as Row[]) || []);
       setTotal(count ?? 0);
+      // liczniki pigułek (bez filtra wyszukiwania — zawsze cały rejestr)
+      const cs = await Promise.all(
+        RETURN_GROUPS.map(async (x) => {
+          let cq = supabase.from("returns_log").select("id", { count: "exact", head: true });
+          if (x.statuses && x.statuses.length) cq = cq.in("final_status", [...x.statuses]);
+          else if (x.statuses) cq = cq.is("final_status", null);
+          return [x.key, (await cq).count ?? 0] as const;
+        }),
+      );
+      setCounts(Object.fromEntries(cs));
     } catch (e: any) {
       setError(/returns_log/.test(e?.message || "") ? "Brak tabeli zwrotów — uruchom supabase/returns.sql w Supabase." : `Nie udało się wczytać zwrotów: ${e.message || e}`);
     } finally {
@@ -289,6 +304,17 @@ export default function ReturnsView({ session, members, isAdmin }: { session: Se
 
       {error && <p className="text-rust text-xs mb-3">{error}</p>}
 
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        {RETURN_GROUPS.map((g) => (
+          <button
+            key={g.key}
+            onClick={() => { setGroup(g.key); setPage(0); }}
+            className={`px-3 py-1 rounded-full text-xs font-semibold border ${group === g.key ? "bg-ink text-paper border-ink" : "bg-white border-line"}`}
+          >
+            {g.label} <span className="font-normal opacity-70">{(counts[g.key] ?? 0).toLocaleString("pl-PL")}</span>
+          </button>
+        ))}
+      </div>
       <div className="flex flex-wrap items-center gap-3 mb-2">
         <h2 className="text-xs font-semibold text-inksoft">ZWROTY ({total.toLocaleString("pl-PL")})</h2>
         <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="Szukaj: numer seryjny, zamówienie, imię i nazwisko, SKU, korekta…" className="border border-line bg-white px-3 py-1.5 rounded text-sm w-96 font-normal" />
