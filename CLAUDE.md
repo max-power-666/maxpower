@@ -350,7 +350,7 @@ dostaje `members` z `page.tsx` (do skróconych imion).
   to `.eq("status", "SENT")` (surowy status BuyBack API, `buyback_orders.status`; wartości potwierdzone na żywych
   danych: `TO_SEND`/`SENT`/`RECEIVED`/`PAID`/`MONEY_TRANSFERED`/`VALIDATED`/`CANCELED`/`SUSPENDED`/
   `COUNTER_PROPOSAL` — na razie bez własnego mappera etykiet, status pokazuje się na liście surowy). **Trzecia pigułka "Dzisiejsze" (10.10.2026, na prośbę właściciela)** — zamówienia utworzone dziś (`creation_date` od północy czasu przeglądarki, ta sama doba co kafelek "Zamówienia dzisiaj"); **domyślnie 100 zamówień na stronie** (do wyboru 10/20/50/100). Zmiana filtra
-  resetuje stronę na 1, jak zmiana rozmiaru strony. Kolumny **Utworzono** i **Data modyfikacji** (`buyback_orders.
+  resetuje stronę na 1, jak zmiana rozmiaru strony. **Pierwsza kolumna "Lp." (22.10.2026, na prośbę właściciela)** to numer porządkowy w bieżącym widoku (filtr + sortowanie), liczony dalej przez kolejne strony ((strona − 1) × rozmiar strony + pozycja) — nie zapisany nigdzie identyfikator. Kolumny **Utworzono** i **Data modyfikacji** (`buyback_orders.
   modification_date`, dodana 30.09.2026) są klikalne nagłówki sortujące (strzałka ▲/▼ przy aktywnej kolumnie,
   sortowanie po stronie serwera przez `.order()`, nie w przeglądarce) — klik na nieaktywną kolumnę ustawia ją
   malejąco (najnowsze pierwsze), klik na już aktywną odwraca kierunek; zmiana też resetuje stronę na 1.

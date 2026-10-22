@@ -317,6 +317,7 @@ export default function TradeInOrdersView({ session, onOpenOrder }: { session: S
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-inksoft border-b border-line">
+              <th className="p-3">Lp.</th>
               <th className="p-3">Zamówienie</th>
               {sortTh("creation_date", "Utworzono")}
               {sortTh("modification_date", "Data modyfikacji")}
@@ -333,10 +334,11 @@ export default function TradeInOrdersView({ session, onOpenOrder }: { session: S
           </thead>
           <tbody>
             {!loading && orders.length === 0 && (
-              <tr><td colSpan={12} className="p-6 text-center text-inksoft text-sm">Brak zsynchronizowanych zamówień.</td></tr>
+              <tr><td colSpan={13} className="p-6 text-center text-inksoft text-sm">Brak zsynchronizowanych zamówień.</td></tr>
             )}
-            {orders.map((o) => (
+            {orders.map((o, i) => (
               <tr key={o.order_public_id} className="border-b border-line last:border-b-0 hover:bg-paper">
+                <td className="p-3 text-xs text-inksoft tabular-nums">{(page - 1) * limit + i + 1}</td>
                 <td className="p-3 font-mono font-semibold whitespace-nowrap">
                   {onOpenOrder ? (
                     <button onClick={() => onOpenOrder(o.order_public_id)} className="text-teal hover:underline">{o.order_public_id}</button>
