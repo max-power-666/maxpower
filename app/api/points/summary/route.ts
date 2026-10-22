@@ -78,7 +78,15 @@ async function fetchHours(db: ReturnType<typeof admin>, from: string, to: string
 
 export async function GET(request: Request) {
   const db = admin();
-  if (!(await requireRole(request, db, ["Admin", "Manager", "Księgowa"]))) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
+  // Admin, Manager i Księgowa widzą wszystkich; Kierownik serwisu (22.10.2026, na prośbę właściciela) tylko serwisantów (rola Serwis) i siebie.
+  let allowedEmails: Set<string> | null = null;
+  if (!(await requireRole(request, db, ["Admin", "Manager", "Księgowa"]))) {
+    const leadId = await requireRole(request, db, ["Kierownik serwisu"]);
+    if (!leadId) return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
+    const { data: ms, error: mErr } = await db.from("members").select("email, role, user_id");
+    if (mErr) return NextResponse.json({ error: mErr.message }, { status: 500 });
+    allowedEmails = new Set((ms || []).filter((m: any) => m.email && (m.role === "Serwis" || m.user_id === leadId)).map((m: any) => String(m.email).toLowerCase()));
+  }
   // Dowolny zakres dat (16.10.2026): ?from=YYYY-MM-DD&to=YYYY-MM-DD (dni włącznie, czas polski, max 366 dni) — wynik pod jednym kluczem "range" zamiast 6 miesięcy.
   const url = new URL(request.url);
   const qFrom = url.searchParams.get("from");
@@ -105,7 +113,7 @@ export async function GET(request: Request) {
       addAreaRows(acc, s.area, res.rows || [], months, custom ? () => "range" : undefined);
     }
     const hours = await fetchHours(db, from, to, custom ? (d) => (d >= dayFrom && d <= dayTo ? "range" : null) : undefined);
-    const employees = Array.from(acc.entries()).map(([email, byMonth]) => ({ email, months: byMonth, hours: hours?.[email] ?? {} }));
+    const employees = Array.from(acc.entries()).filter(([email]) => !allowedEmails || allowedEmails.has(String(email).toLowerCase())).map(([email, byMonth]) => ({ email, months: byMonth, hours: hours?.[email] ?? {} }));
     return NextResponse.json({ ok: true, months, employees, fallbackDate: usedFallback, hasHours: hours !== null, ...(custom ? { custom: { from: dayFrom, to: dayTo } } : {}) });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "Błąd liczenia punktacji." }, { status: 500 });
