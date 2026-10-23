@@ -11,7 +11,7 @@ import DefectsCell from "./DefectsCell";
 import { displayNameForEmail, type MemberLite } from "@/lib/displayName";
 import { computeTradeInCosts, TRADEIN_CATEGORY_LABELS, TRADEIN_COMMISSION_RATE, PCC_RATE, PCC_THRESHOLD_PLN } from "@/lib/buybackCosts";
 import { rateBeforeDate, warsawDate, type NbpRate } from "@/lib/nbp";
-import { INTAKE_CHANNELS, INTAKE_STATUSES, fmtDuration, intakeChannelLabel } from "@/lib/workLog";
+import { INTAKE_CHANNELS, INTAKE_STATUSES, MISSING_PURCHASE_OR, fmtDuration, intakeChannelLabel } from "@/lib/workLog";
 import { fetchAllPaged, inPeriod, orInPeriod, periodKey, type Period } from "@/lib/period";
 import PeriodPicker from "./PeriodPicker";
 import { escapeLike } from "@/lib/search";
@@ -105,7 +105,6 @@ const isBuyback = (row: { channel?: string | null }) => (row.channel ?? "buyback
 // Paczka spoza Buyback bez ceny zakupu albo numeru faktury — do uzupełnienia JAK NAJSZYBCIEJ (zwrócone paczki pomijamy); pola nie są obowiązkowe
 const missingPurchase = (row: { channel?: string | null; status: string; purchase_price?: number | null; invoice_no?: string | null }) =>
   !isBuyback(row) && row.status !== "zwrocona" && (row.purchase_price == null || !(row.invoice_no || "").trim());
-const MISSING_PURCHASE_OR = "purchase_price.is.null,invoice_no.is.null,invoice_no.eq.";
 
 // Dane zamówień Back Market dla wpisów Buyback (kolumny tylko do odczytu w liście).
 async function attachBmOrders(rows: IntakeEntry[]): Promise<IntakeEntry[]> {
@@ -256,7 +255,30 @@ function IntakeView({
   const [hasChannel, setHasChannel] = useState(channelColumnAvailable);
   const [hasPurchase, setHasPurchase] = useState(purchaseColumnsAvailable);
   const [missingCount, setMissingCount] = useState(0);
-  const [missingOnly, setMissingOnly] = useState(false);
+  // baner na górze strony (23.10.2026) otwiera Trade-in od razu z filtrem "tylko do uzupełnienia" przez sessionStorage "tradein-missing"
+  const takeMissingFlag = () => {
+    try {
+      if (sessionStorage.getItem("tradein-missing") === "1") {
+        sessionStorage.removeItem("tradein-missing");
+        return true;
+      }
+    } catch {
+      /* brak sessionStorage */
+    }
+    return false;
+  };
+  const [missingOnly, setMissingOnly] = useState(() => takeMissingFlag());
+  useEffect(() => {
+    const onNav = () => {
+      if (takeMissingFlag()) {
+        setMissingOnly(true);
+        setPage(1);
+      }
+    };
+    window.addEventListener("nav-sub-changed", onNav);
+    return () => window.removeEventListener("nav-sub-changed", onNav);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [channelFilter, setChannelFilter] = useState(""); // filtr listy po kanale skupu (23.10.2026); "" = wszystkie
   const [purchasePrice, setPurchasePrice] = useState("");
   const [invoiceNo, setInvoiceNo] = useState("");
@@ -345,6 +367,7 @@ function IntakeView({
       if (purchaseColumnsAvailable && channelColumnAvailable) {
         const { count: mc } = await supabase.from("buyback_order_intake").select("id", { count: "exact", head: true }).neq("channel", "buyback").neq("status", "zwrocona").or(MISSING_PURCHASE_OR);
         setMissingCount(mc ?? 0);
+        window.dispatchEvent(new Event("reminders-changed")); // baner na górze strony przelicza braki od razu
       }
       setRangeRows(rangeData || []);
       setEntries(await attachBmOrders((listData as unknown as IntakeEntry[]) || []));

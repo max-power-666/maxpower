@@ -153,3 +153,6 @@ export const TEST_RESULT_COLORS: Record<string, { bg: string; fg: string }> = {
   outlet: { bg: "#dcf1fb", fg: "#0b6a8f" },
   na_czesci: { bg: "#e9dccb", fg: "#6b4423" },
 };
+
+// Filtr PostgREST: paczka bez ceny zakupu albo numeru faktury (22.10.2026) — wspólny dla listy Trade-in i banera na górze strony
+export const MISSING_PURCHASE_OR = "purchase_price.is.null,invoice_no.is.null,invoice_no.eq.";

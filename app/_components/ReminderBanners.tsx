@@ -4,19 +4,21 @@ import { useCallback, useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { warsawYmd } from "@/lib/warsawDate";
+import { MISSING_PURCHASE_OR } from "@/lib/workLog";
 import { daysOverdue, fmtDate, isVisibleReminder, nextDueDate, RECURRENCE_LABEL, type Recurrence } from "@/lib/reminders";
 
 // Komunikaty na górze strony (09.10.2026, na razie tylko Admin): (1) aktywne przypomnienia z zakładki Przypomnienia — aż do "Zrobione", (2) automatyczne: wnioski urlopowe do rozpatrzenia,
 // zadania Backlogu przypisane do zalogowanej osoby (do zrobienia / w toku / do sprawdzenia) i nowe zapotrzebowania dla serwisu. Automatyczne znikają same po załatwieniu sprawy.
 
 type Active = { id: number; message: string; due_date: string; recurrence: Recurrence; anchor_day: number | null; done_count: number; lead_days?: number };
-type Auto = { key: string; icon: string; text: string; view: string; sub?: { storage: string; value: string } };
+type Auto = { key: string; icon: string; text: string; view: string; sub?: { storage: string; value: string }[]; urgent?: boolean };
 
 export default function ReminderBanners({ session, role, onOpen }: { session: Session; role: string; onOpen: (view: string) => void }) {
   const isAdmin = role === "Admin";
   const isManager = role === "Manager" || role === "Księgowa"; // Manager widzi tylko wnioski urlopowe do rozpatrzenia (12.10.2026) — przypomnienia i Backlog zostają dla Admina
   const canDecideLeave = isAdmin || isManager || role === "Kierownik serwisu"; // Kierownik serwisu: wnioski serwisantów (13.10.2026; RLS ogranicza widoczne wnioski do jego zespołu)
   const isService = role === "Serwis" || role === "Kierownik serwisu"; // nowe zapotrzebowania widzi tylko serwis (10.10.2026)
+  const isTradeIn = isAdmin || isManager || role === "Trade-in" || role === "Kierownik trade-in"; // brakująca cena zakupu / faktura w Trade-in (23.10.2026)
   const [active, setActive] = useState<Active[]>([]);
   const [auto, setAuto] = useState<Auto[]>([]);
   const today = warsawYmd(Date.now());
@@ -26,7 +28,7 @@ export default function ReminderBanners({ session, role, onOpen }: { session: Se
     const day = warsawYmd(Date.now());
     const horizon = new Date(Date.now() + 61 * 86_400_000); // najdalszy możliwy termin z wyprzedzeniem (max 60 dni)
     const none = { data: [], count: 0, error: null };
-    const [rem, leave, backlog, reqs] = await Promise.all([
+    const [rem, leave, backlog, reqs, missing] = await Promise.all([
       !isAdmin ? Promise.resolve(none) : supabase.from("reminders").select("id, message, due_date, recurrence, anchor_day, done_count, lead_days").is("done_at", null).lte("due_date", warsawYmd(horizon.getTime())).order("due_date").limit(200),
       !canDecideLeave ? Promise.resolve(none) : (() => {
         let q = supabase.from("rcp_absences").select("id", { count: "exact", head: true }).eq("status", "oczekuje");
@@ -35,6 +37,7 @@ export default function ReminderBanners({ session, role, onOpen }: { session: Se
       })(),
       !isAdmin ? Promise.resolve(none) : supabase.from("backlog_items").select("id", { count: "exact", head: true }).neq("status", "done"),
       !isService ? Promise.resolve(none) : supabase.from("service_requests").select("id", { count: "exact", head: true }).eq("status", "nowe").is("deleted_at", null),
+      !isTradeIn ? Promise.resolve(none) : supabase.from("buyback_order_intake").select("id", { count: "exact", head: true }).neq("channel", "buyback").neq("status", "zwrocona").or(MISSING_PURCHASE_OR),
     ]);
     if (isService && reqs.error) {
       // brak kolumny deleted_at (nie uruchomiono service-requests.sql z 15.10.2026) — liczymy jak dotąd, bez usuniętych
@@ -50,13 +53,15 @@ export default function ReminderBanners({ session, role, onOpen }: { session: Se
     setActive(remRows.filter((r) => isVisibleReminder(r.due_date, r.lead_days ?? 0, day)));
     const list: Auto[] = [];
     const leaveN = leave.error ? 0 : leave.count ?? 0;
-    if (leaveN > 0) list.push({ key: "leave", icon: "🏖", text: `Wnioski urlopowe do rozpatrzenia: ${leaveN}`, view: "rcp", sub: { storage: "rcp-sub", value: "requests" } });
+    if (leaveN > 0) list.push({ key: "leave", icon: "🏖", text: `Wnioski urlopowe do rozpatrzenia: ${leaveN}`, view: "rcp", sub: [{ storage: "rcp-sub", value: "requests" }] });
     const blN = backlog.error ? 0 : backlog.count ?? 0; // Backlog to teraz lista wiadomości (10.10.2026) — liczymy wszystkie niezrobione
     if (blN > 0) list.push({ key: "backlog", icon: "📋", text: `Wiadomości w Backlogu do zrobienia: ${blN}`, view: "backlog" });
     const reqN = reqs.error ? 0 : reqs.count ?? 0;
-    if (reqN > 0) list.push({ key: "requests", icon: "🔧", text: `Nowe zapotrzebowania dla serwisu: ${reqN}`, view: "service", sub: { storage: "service-sub", value: "requests" } });
+    if (reqN > 0) list.push({ key: "requests", icon: "🔧", text: `Nowe zapotrzebowania dla serwisu: ${reqN}`, view: "service", sub: [{ storage: "service-sub", value: "requests" }] });
+    const missN = missing.error ? 0 : missing.count ?? 0; // brak kolumn (nie uruchomiono trade-in-purchase.sql) = błąd = bez komunikatu
+    if (missN > 0) list.unshift({ key: "tradein-missing", icon: "⚠", urgent: true, text: `Trade-in: ${missN} ${missN === 1 ? "paczka" : "paczek"} bez ceny zakupu lub numeru faktury — uzupełnij jak najszybciej`, view: "orders", sub: [{ storage: "tradein-sub", value: "intake" }, { storage: "tradein-missing", value: "1" }] });
     setAuto(list);
-  }, [isAdmin, canDecideLeave, isService, session.user.id]);
+  }, [isAdmin, canDecideLeave, isService, isTradeIn, session.user.id]);
 
   useEffect(() => {
     load();
@@ -84,7 +89,7 @@ export default function ReminderBanners({ session, role, onOpen }: { session: Se
 
   function open(a: Auto) {
     try {
-      if (a.sub) sessionStorage.setItem(a.sub.storage, a.sub.value);
+      for (const x of a.sub ?? []) sessionStorage.setItem(x.storage, x.value);
       window.dispatchEvent(new Event("nav-sub-changed")); // widok, który już jest otwarty, sam przełączy podstronę
     } catch {
       /* sessionStorage może być niedostępne — otworzymy zakładkę bez podstrony */
@@ -109,10 +114,10 @@ export default function ReminderBanners({ session, role, onOpen }: { session: Se
         );
       })}
       {auto.map((a) => (
-        <div key={a.key} className="flex items-center gap-3 border border-line bg-white px-4 py-2.5 rounded">
+        <div key={a.key} className={a.urgent ? "flex items-center gap-3 border-2 border-rust bg-rustsoft text-rust px-4 py-2.5 rounded" : "flex items-center gap-3 border border-line bg-white px-4 py-2.5 rounded"}>
           <span className="text-lg leading-none">{a.icon}</span>
           <div className="flex-1 text-sm font-semibold">{a.text}</div>
-          <button onClick={() => open(a)} className="shrink-0 text-xs font-semibold text-teal hover:underline">Otwórz →</button>
+          <button onClick={() => open(a)} className={`shrink-0 text-xs font-semibold hover:underline ${a.urgent ? "text-rust" : "text-teal"}`}>Otwórz →</button>
         </div>
       ))}
     </div>
