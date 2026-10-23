@@ -349,3 +349,108 @@ export async function octopiaSetPrices(cfg: OctopiaConfig, changes: { offerId: s
   }
   return { packageId, packageState: state, results: changes.map((c) => results.get(c.offerId)!) };
 }
+
+// ---- Zmiana ilości ofert (23.10.2026, Magazyn -> Listingi -> Cdiscount) ----
+// Ten sam mechanizm paczki Update co przy cenach (patrz wyżej), ale żądanie niesie tylko `sellerExternalReference` + `quantity` (pole `quantity` w OfferRequestUpdate — "amount of stock unit available";
+// bez podatków i bez listy dostaw, więc nic poza ilością się nie zmienia). Stan jest wspólny dla kanałów sprzedaży oferty. NIE testowane na żywym API — kształt wg specyfikacji z 23.10.2026.
+export type OctopiaQuantityResult = { offerId: string; ok: boolean; message: string; sellerExternalReference?: string; verifiedQuantity?: number | null };
+export type OctopiaQuantityBatch = { packageId: string | null; packageState: string | null; results: OctopiaQuantityResult[] };
+
+const offerQuantity = (o: any): number | null => {
+  const d: any[] = Array.isArray(o?.deliveryOffers) ? o.deliveryOffers : [];
+  if (d.length === 0) return null;
+  const n = d.reduce((s, x) => s + (Number.isFinite(Number(x?.quantity)) ? Number(x.quantity) : 0), 0);
+  return Number.isFinite(n) ? n : null;
+};
+
+export async function octopiaSetQuantities(cfg: OctopiaConfig, changes: { offerId: string; quantity: number }[], opts: { salesChannelId?: string; pollMs?: number; sleep?: (ms: number) => Promise<void> } = {}): Promise<OctopiaQuantityBatch> {
+  const channel = opts.salesChannelId ?? "CDISFR";
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  if (changes.length === 0) return { packageId: null, packageState: null, results: [] };
+  if (changes.length > 100) throw new OctopiaError("Za dużo ofert w jednej paczce (max 100).");
+  const token = await getToken(cfg);
+  const fetchOffers = async () => {
+    const params = new URLSearchParams({ salesChannelId: channel, limit: "100", offerIds: changes.map((c) => c.offerId).join(",") });
+    const r = await octopiaRequest(cfg, token, "GET", `/offers?${params.toString()}`);
+    const map = new Map<string, any>();
+    for (const o of (r.json?.items as any[]) || []) map.set(String(o.offerId), o);
+    return map;
+  };
+  const before = await fetchOffers();
+  const results = new Map<string, OctopiaQuantityResult>();
+  const requests: { sellerExternalReference: string; quantity: number }[] = [];
+  const refToOffer = new Map<string, string>();
+  for (const c of changes) {
+    const o = before.get(c.offerId);
+    const ref = String(o?.sellerExternalReference || "");
+    if (!o) results.set(c.offerId, { offerId: c.offerId, ok: false, message: "Cdiscount nie zwrócił tej oferty — odśwież Listingi." });
+    else if (!ref) results.set(c.offerId, { offerId: c.offerId, ok: false, message: "Oferta nie ma referencji sprzedawcy (sellerExternalReference)." });
+    else if (refToOffer.has(ref)) results.set(c.offerId, { offerId: c.offerId, ok: false, message: `Referencja ${ref} występuje w kilku ofertach — Cdiscount odrzuciłby duplikat.` });
+    else {
+      refToOffer.set(ref, c.offerId);
+      requests.push({ sellerExternalReference: ref, quantity: Math.trunc(c.quantity) });
+      results.set(c.offerId, { offerId: c.offerId, ok: false, message: "Wysłano do Cdiscount — czekam na przetworzenie.", sellerExternalReference: ref });
+    }
+  }
+  if (requests.length === 0) return { packageId: null, packageState: null, results: changes.map((c) => results.get(c.offerId)!) };
+
+  const created = await octopiaRequest(cfg, token, "POST", "/offer-packages", { body: { packageType: "Update" }, headers: { SalesChannelId: channel } });
+  const loc = created.headers.get("content-location") || created.headers.get("location") || "";
+  const packageId = (loc.split("/").filter(Boolean).pop() || created.json?.packageId || "").toString();
+  if (!packageId) throw new OctopiaError("Cdiscount utworzyło paczkę, ale nie zwróciło jej identyfikatora (Content-Location).");
+  await octopiaRequestRetry(cfg, token, sleep, "POST", `/offer-packages/${encodeURIComponent(packageId)}/offer-requests`, { body: requests });
+  try {
+    await octopiaRequestRetry(cfg, token, sleep, "PATCH", `/offer-packages/${encodeURIComponent(packageId)}`, { body: { state: "Ready" } });
+  } catch (e) {
+    const st = await octopiaRequest(cfg, token, "GET", `/offer-packages/${encodeURIComponent(packageId)}`).then((r) => r.json?.state as string | undefined).catch(() => undefined);
+    if (!st || st === "WaitingForCompletion") throw e;
+  }
+
+  let state: string | null = "Ready";
+  let message = "";
+  const deadline = Date.now() + (opts.pollMs ?? 25_000);
+  while (Date.now() < deadline) {
+    await sleep(2000);
+    let p: Awaited<ReturnType<typeof octopiaRequest>>;
+    try {
+      p = await octopiaRequest(cfg, token, "GET", `/offer-packages/${encodeURIComponent(packageId)}`);
+    } catch {
+      continue;
+    }
+    state = p.json?.state ?? null;
+    message = p.json?.result?.message ?? "";
+    if (state === "Integrated" || state === "Rejected") break;
+  }
+  const offerOf = (ref: string) => refToOffer.get(ref)!;
+  if (state === "Rejected") {
+    for (const r of requests) results.set(offerOf(r.sellerExternalReference), { offerId: offerOf(r.sellerExternalReference), ok: false, sellerExternalReference: r.sellerExternalReference, message: `Paczka odrzucona przez Cdiscount${message ? `: ${message}` : ""}` });
+  } else if (state === "Integrated") {
+    const rr = await octopiaRequest(cfg, token, "GET", `/offer-packages/${encodeURIComponent(packageId)}/offer-requests-results?limit=100`);
+    const byRef = new Map<string, any>();
+    for (const it of (rr.json?.items as any[]) || []) byRef.set(String(it.sellerExternalReference), it);
+    let after: Map<string, any> | null = null;
+    try {
+      after = await fetchOffers();
+    } catch {
+      after = null;
+    }
+    for (const r of requests) {
+      const offerId = offerOf(r.sellerExternalReference);
+      const it = byRef.get(r.sellerExternalReference);
+      const okStatus = it?.integrationStatus === "Integrated";
+      const msg = (it?.results || []).map((x: any) => x?.message).filter(Boolean).join("; ");
+      const verifiedQuantity = after ? offerQuantity(after.get(offerId)) : null;
+      const mismatch = okStatus && verifiedQuantity !== null && verifiedQuantity !== r.quantity;
+      results.set(offerId, {
+        offerId,
+        ok: okStatus,
+        sellerExternalReference: r.sellerExternalReference,
+        verifiedQuantity,
+        message: okStatus ? (mismatch ? `Cdiscount przyjęło zmianę, ale ilość w ofercie to jeszcze ${verifiedQuantity} (przetwarzanie może potrwać — sprawdź za chwilę)` : msg || "Ilość zmieniona") : `Odrzucone przez Cdiscount${it?.integrationStatus ? ` (${it.integrationStatus})` : ""}${msg ? `: ${msg}` : ""}`,
+      });
+    }
+  } else {
+    for (const r of requests) results.set(offerOf(r.sellerExternalReference), { offerId: offerOf(r.sellerExternalReference), ok: true, sellerExternalReference: r.sellerExternalReference, message: `Paczka ${packageId} wysłana (stan: ${state ?? "nieznany"}) — Cdiscount jeszcze ją przetwarza.` });
+  }
+  return { packageId, packageState: state, results: changes.map((c) => results.get(c.offerId)!) };
+}

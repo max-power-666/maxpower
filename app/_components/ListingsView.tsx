@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { fmtWarsawDateTime } from "@/lib/warsawDate";
@@ -302,6 +302,37 @@ export default function ListingsView({ session }: { session: Session }) {
     }
   }
 
+  // Zmiana ilości oferty Cdiscount (23.10.2026): pole w kolumnie Ilość -> potwierdzenie (stara -> nowa) -> paczka Update w Octopii
+  async function applyQuantity(listing: Listing, next: number) {
+    const old = listing.quantity ?? 0;
+    if (next === old) return;
+    const msg = `Zmienić ilość oferty Cdiscount?\n\n${listing.sku || listing.external_id}: ${old} → ${next}\n\nTo zmienia prawdziwy stan na żywym marketplace’ie (paczka ofert Cdiscount — przetwarzanie może potrwać kilkanaście sekund).`;
+    if (!window.confirm(msg)) return;
+    setBidBusy(true);
+    setError("");
+    setNote("");
+    try {
+      const res = await fetch("/api/listings/octopia-quantity", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ confirm: true, changes: [{ externalId: listing.external_id, quantity: next }] }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok && !data.results) {
+        setError(data.error || "Nie udało się zmienić ilości.");
+        return;
+      }
+      const r = (data.results || [])[0];
+      if (r?.ok) {
+        setNote(`Cdiscount: ilość ${listing.sku || listing.external_id} zmieniona na ${r.applied ?? next}${data.packageId ? ` (paczka ${data.packageId}, stan: ${data.packageState ?? "?"})` : ""}.`);
+        setRows((rs) => rs.map((x) => (x.external_id === listing.external_id && data.packageState === "Integrated" ? { ...x, quantity: r.applied ?? next } : x)));
+      } else setError(r?.message || "Cdiscount nie przyjęło zmiany ilości.");
+      await load("octopia");
+    } finally {
+      setBidBusy(false);
+    }
+  }
+
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const curPage = Math.min(page, totalPages);
   const visible = filtered.slice((curPage - 1) * pageSize, curPage * pageSize);
@@ -450,7 +481,9 @@ export default function ListingsView({ session }: { session: Session }) {
                     <tr className="border-b border-line last:border-b-0 hover:bg-paper align-top">
                       <td className="p-3 font-mono text-xs font-semibold whitespace-nowrap">{r.sku || <span className="text-inksoft font-normal">brak SKU</span>}</td>
                       <td className="p-3 text-xs max-w-md">{r.title || "—"}</td>
-                      <td className={`p-3 text-right font-mono text-xs whitespace-nowrap ${(r.quantity ?? 0) <= 0 ? "text-inksoft" : "font-semibold"}`}>{r.quantity ?? "—"}</td>
+                      <td className={`p-3 text-right font-mono text-xs whitespace-nowrap ${(r.quantity ?? 0) <= 0 ? "text-inksoft" : "font-semibold"}`}>
+                        {mp === "octopia" && canBid ? <QuantityEdit value={r.quantity} busy={bidBusy} onSave={(n) => applyQuantity(r, n)} /> : (r.quantity ?? "—")}
+                      </td>
                       <td className="p-3 text-right font-mono text-xs whitespace-nowrap">{fmtMoney(r.price, r.currency)}</td>
                       <td className="p-3 text-right font-mono text-[11px] text-inksoft whitespace-nowrap">
                         {r.min_price !== null || r.max_price !== null ? `${r.min_price !== null ? fmtMoney(r.min_price, null) : "—"} / ${r.max_price !== null ? fmtMoney(r.max_price, null) : "—"}` : "—"}
@@ -667,5 +700,46 @@ function Details({ l }: { l: Listing }) {
         {ships.length === 0 && markets.length === 0 && <div className="text-inksoft">Brak dodatkowych danych o wysyłce i cenach na rynkach.</div>}
       </div>
     </div>
+  );
+}
+
+
+// Pole ilości oferty (Listingi -> Cdiscount): Enter albo wyjście z pola proponuje zmianę (potwierdzenie robi rodzic), Esc porzuca
+function QuantityEdit({ value, busy, onSave }: { value: number | null; busy: boolean; onSave: (n: number) => void }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const cancelled = useRef(false);
+  const current = value === null || value === undefined ? "" : String(value);
+  function commit() {
+    const d = draft;
+    const skip = cancelled.current;
+    cancelled.current = false;
+    setDraft(null);
+    if (skip) return;
+    if (d === null || d.trim() === current) return;
+    const n = Number(d.trim());
+    if (!Number.isInteger(n) || n < 0 || n > 9999) {
+      window.alert("Ilość musi być liczbą całkowitą od 0 do 9999.");
+      return;
+    }
+    onSave(n);
+  }
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      disabled={busy}
+      title="Zmień ilość oferty na Cdiscount (Enter zapisuje, Esc anuluje)"
+      className="w-16 rounded border border-line bg-white px-1.5 py-0.5 text-right font-mono text-xs disabled:opacity-50"
+      value={draft ?? current}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+        if (e.key === "Escape") {
+          cancelled.current = true;
+          (e.target as HTMLInputElement).blur();
+        }
+      }}
+    />
   );
 }
