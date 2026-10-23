@@ -257,6 +257,7 @@ function IntakeView({
   const [hasPurchase, setHasPurchase] = useState(purchaseColumnsAvailable);
   const [missingCount, setMissingCount] = useState(0);
   const [missingOnly, setMissingOnly] = useState(false);
+  const [channelFilter, setChannelFilter] = useState(""); // filtr listy po kanale skupu (23.10.2026); "" = wszystkie
   const [purchasePrice, setPurchasePrice] = useState("");
   const [invoiceNo, setInvoiceNo] = useState("");
   const [channel, setChannel] = useState<string>("buyback");
@@ -292,7 +293,7 @@ function IntakeView({
       supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [periodKey(period), search, page, pageSize, missingOnly]);
+  }, [periodKey(period), search, page, pageSize, missingOnly, channelFilter]);
 
   async function load() {
     setLoading(true);
@@ -306,6 +307,7 @@ function IntakeView({
         // zakończenia). Wyszukiwanie po numerze szuka w całej historii, więc okresu wtedy nie stosujemy.
         listQuery = listQuery.or(orInPeriod("entered_at", "finished_at", period));
       }
+      if (channelFilter && channelColumnAvailable) listQuery = channelFilter === "buyback" ? listQuery.or("channel.eq.buyback,channel.is.null") : listQuery.eq("channel", channelFilter);
       const from = (page - 1) * pageSize;
       listQuery = listQuery.range(from, from + pageSize - 1);
       // Punkty liczymy po points_awarded_at (pierwsze zaliczenie paczki, ustawiane triggerem w bazie) — zmiana statusu między statusami
@@ -718,6 +720,22 @@ function IntakeView({
           className="w-80 border border-line bg-white px-3 py-1.5 rounded text-sm font-mono"
         />
         <div className="flex items-center gap-3">
+          {hasChannel && (
+            <>
+              <label className="text-xs text-inksoft">Kanał skupu</label>
+              <select
+                value={channelFilter}
+                onChange={(e) => {
+                  setChannelFilter(e.target.value);
+                  setPage(1);
+                }}
+                className="border border-line bg-white px-2 py-1.5 rounded text-sm font-semibold"
+              >
+                <option value="">Wszystkie</option>
+                {INTAKE_CHANNELS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+              </select>
+            </>
+          )}
           <label className="text-xs text-inksoft">Pokaż</label>
           <select
             value={pageSize}
